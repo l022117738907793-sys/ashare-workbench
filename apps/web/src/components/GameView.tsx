@@ -172,6 +172,21 @@ export function GameView(props: GameViewProps) {
       <Card
         title="账户总览"
         subtitle={`净值点 ${equity.length} 个 · 跑赢 ${benchmarkName} 才算有效成绩`}
+        right={
+          <button
+            type="button"
+            className="btn btn-ghost btn-tiny"
+            onClick={() => {
+              if (confirm("结束本局并回到开局界面？当前持仓与成交记录将清空，不可恢复。")) {
+                onReset();
+                setLastSeason(null);
+                setFeedback(null);
+              }
+            }}
+          >
+            重新开局
+          </button>
+        }
       >
         <div className="metric-grid">
           <Metric k="总资产" v={fmtNum(totalAssets)} />
@@ -187,6 +202,16 @@ export function GameView(props: GameViewProps) {
           <Metric k="持仓只数" v={`${account.holdings.length} 只`} />
         </div>
       </Card>
+
+      <NewsPanel
+        items={news.items}
+        source={news.source}
+        degradedReason={news.degradedReason}
+        updatedAt={news.updatedAt}
+        loading={news.loading}
+        onRefresh={news.refresh}
+        holdings={account.holdings.map((h) => ({ code: h.code, name: h.name }))}
+      />
 
       <Card
         title="模拟下单"
@@ -434,16 +459,6 @@ export function GameView(props: GameViewProps) {
           </ul>
         )}
       </Card>
-
-      <NewsPanel
-        items={news.items}
-        source={news.source}
-        degradedReason={news.degradedReason}
-        updatedAt={news.updatedAt}
-        loading={news.loading}
-        onRefresh={news.refresh}
-        holdings={account.holdings.map((h) => ({ code: h.code, name: h.name }))}
-      />
     </div>
   );
 }
