@@ -43,6 +43,7 @@ import {
   type Side,
 } from "@aw/game";
 import { AnalysisView } from "./components/AnalysisView";
+import { GameRulesView } from "./components/GameRulesView";
 import { GameView } from "./components/GameView";
 import { HistoryView } from "./components/HistoryView";
 import { SettingsView } from "./components/SettingsView";
@@ -84,7 +85,8 @@ import {
 } from "./lib/helpers";
 import { useLiveQuotes } from "./lib/useLiveQuotes";
 
-type Tab = "workbench" | "analysis" | "game" | "history" | "settings";
+// "rules" 不是底部 tab，而是从模拟盘进入的子页面
+type Tab = "workbench" | "analysis" | "game" | "rules" | "history" | "settings";
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "workbench", label: "筛选" },
@@ -649,6 +651,7 @@ export default function App() {
             onOrder={handleOrder}
             onReset={handleResetGame}
             onSettle={handleSettle}
+            onOpenRules={() => setTab("rules")}
             sessionText={sessionText}
             isTradingNow={isTradingNow}
             benchmarkName={benchmarkName}
@@ -657,6 +660,8 @@ export default function App() {
             holdingsValue={gameHoldingsValue}
           />
         )}
+
+        {tab === "rules" && <GameRulesView onBack={() => setTab("game")} />}
 
         {tab === "history" && (
           <HistoryView

@@ -29,6 +29,8 @@ export interface GameViewProps {
   onOrder: (code: string, side: Side, shares: number) => { ok: boolean; reason?: string };
   onReset: () => void;
   onSettle: () => SeasonResult | null;
+  /** 打开撮合规则讲解页 */
+  onOpenRules: () => void;
   sessionText: string;
   isTradingNow: boolean;
   benchmarkName: string;
@@ -49,7 +51,7 @@ function Metric({ k, v, tone }: { k: string; v: string; tone?: "good" | "bad" | 
 export function GameView(props: GameViewProps) {
   const {
     state, prices, quotesByCode, stocks, resultsByCode,
-    onOrder, onReset, onSettle, sessionText, isTradingNow,
+    onOrder, onReset, onSettle, onOpenRules, sessionText, isTradingNow,
     benchmarkName, benchmarkReturnPct, totalAssets, holdingsValue,
   } = props;
 
@@ -120,7 +122,15 @@ export function GameView(props: GameViewProps) {
         </div>
       </Card>
 
-      <Card title="模拟下单" subtitle={`一手 ${LOT_SIZE} 股 · T+1：当日买入次日才可卖`}>
+      <Card
+        title="模拟下单"
+        subtitle={`一手 ${LOT_SIZE} 股 · T+1：当日买入次日才可卖`}
+        right={
+          <button type="button" className="btn btn-ghost btn-tiny" onClick={onOpenRules}>
+            规则说明
+          </button>
+        }
+      >
         <div className="chips">
           <button
             type="button"

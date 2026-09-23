@@ -26,6 +26,7 @@ import {
   type StockData,
 } from "@aw/core";
 import { AnalysisView } from "./components/AnalysisView";
+import { GameRulesView } from "./components/GameRulesView";
 import { GameView } from "./components/GameView";
 import { HistoryView } from "./components/HistoryView";
 import { SettingsView } from "./components/SettingsView";
@@ -342,6 +343,7 @@ describe("模拟盘页渲染", () => {
         onOrder: () => ({ ok: true }),
         onReset: () => {},
         onSettle: () => null,
+        onOpenRules: () => {},
         sessionText: "已收盘",
         isTradingNow: false,
         benchmarkName: "沪深300",
@@ -465,3 +467,31 @@ function makeStockLike(): StockData {
     volume: close.map(() => 1000),
   };
 }
+
+// ── 规则讲解页渲染 ───────────────────────────────────────────
+
+describe("规则讲解页渲染", () => {
+  const html = renderToStaticMarkup(createElement(GameRulesView, { onBack: () => {} }));
+
+  it("覆盖全部关键规则", () => {
+    for (const topic of ["T+1", "涨跌停", "佣金", "印花税", "过户费", "滑点", "一手", "沪深300", "风险报酬比"]) {
+      expect(html.includes(topic), `规则页缺少「${topic}」`).toBe(true);
+    }
+  });
+
+  it("费率数字来自 @aw/game 常量，不是硬编码", () => {
+    // 10 万元来回费用：买入 25+1=26、卖出 25+100+1=126，合计 152
+    expect(html).toContain("152");
+    // 占比 0.152%
+    expect(html).toContain("0.152");
+  });
+
+  it("明确说明参考价位是技术测算而非承诺", () => {
+    expect(html).toContain("技术测算而非承诺");
+  });
+
+  it("说明非交易时段为何按最新价而非排队开盘价", () => {
+    expect(html).toContain("排队");
+    expect(html).toContain("开盘价");
+  });
+});

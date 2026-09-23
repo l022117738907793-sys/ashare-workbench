@@ -997,3 +997,116 @@ code {
   cursor: default;
   background: var(--surface-2);
 }
+
+/* 规则讲解页正文：比普通段落略宽松，便于阅读长文 */
+.rule-body {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-2);
+}
+.rule-body:last-child {
+  margin-bottom: 0;
+}
+.rule-body strong {
+  color: var(--text);
+}
+
+/* ── 视觉打磨 ─────────────────────────────────────────────────
+   原则：克制。这是一个看数据的工具，动效只用来表达状态变化与
+   可点击性，不做装饰性动画，且必须尊重 prefers-reduced-motion。 */
+
+/* 视图切换的轻微入场，掩盖重排带来的闪烁 */
+.view {
+  animation: view-in 0.18s ease-out;
+}
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 触摸/点击反馈：移动端没有 hover，必须有 :active */
+.btn:active:not(:disabled),
+.tab:active,
+.chip:active,
+.row-tap:active {
+  transform: scale(0.97);
+  transition: transform 0.06s ease-out;
+}
+.btn,
+.tab,
+.chip,
+.row-tap {
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.06s ease-out;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 桌面端的 hover 提示（移动端无副作用） */
+@media (hover: hover) {
+  .btn:hover:not(:disabled) {
+    background: var(--surface-2);
+  }
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+  .row-tap:hover,
+  .stock-row:hover,
+  .sector-row:hover {
+    background: var(--surface-2);
+  }
+}
+
+/* 键盘可达性：只在键盘导航时显示焦点环，鼠标点击不显示 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* 信号徽章在行内与文字基线对齐（否则会顶高整行） */
+.signal-badge {
+  vertical-align: middle;
+  line-height: 1.4;
+}
+.row-title .signal-badge {
+  margin-left: 2px;
+}
+
+/* 长列表的移动端惯性滚动 */
+.stock-list,
+.reasons-list,
+.kv-list {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 数字类内容用等宽字体，便于竖向对比 */
+.metric-v,
+.quote-price,
+.signal-strength,
+.row-metrics {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 尊重系统的"减少动态效果"设置 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
