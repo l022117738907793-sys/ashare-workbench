@@ -29,11 +29,33 @@ import {
   type Quote,
   type SnapshotBundle,
 } from "@aw/data";
+import {
+  executeOrder,
+  holdingsValue as calcHoldingsValue,
+  periodReturnPct,
+  rolloverTradingDay,
+  settleSeason,
+  totalAssets as calcTotalAssets,
+  type EquityPoint,
+  type SeasonResult,
+  type Side,
+} from "@aw/game";
 import { AnalysisView } from "./components/AnalysisView";
+import { GameView } from "./components/GameView";
 import { HistoryView } from "./components/HistoryView";
 import { SettingsView } from "./components/SettingsView";
 import { WorkbenchView } from "./components/WorkbenchView";
 import { Notice } from "./components/common";
+import {
+  benchmarkCurve,
+  defaultGameState,
+  lastBuyDates,
+  LS_GAME,
+  parseGameState,
+  pushEquity,
+  serializeGameState,
+  type GameState,
+} from "./lib/game";
 import {
   beijingClock,
   filterStockResults,
@@ -60,11 +82,12 @@ import {
 } from "./lib/helpers";
 import { useLiveQuotes } from "./lib/useLiveQuotes";
 
-type Tab = "workbench" | "analysis" | "history" | "settings";
+type Tab = "workbench" | "analysis" | "game" | "history" | "settings";
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "workbench", label: "筛选" },
   { key: "analysis", label: "个股分析" },
+  { key: "game", label: "模拟盘" },
   { key: "history", label: "历史" },
   { key: "settings", label: "设置" },
 ];
@@ -72,6 +95,9 @@ const TABS: Array<{ key: Tab; label: string }> = [
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
+
+/** 模拟盘的业绩基准 */
+const BENCHMARK_CODE = "000300.SH";
 
 function lastClose(close: Maybe[]): number | null {
   for (let i = close.length - 1; i >= 0; i -= 1) {
@@ -88,6 +114,10 @@ export default function App() {
 
   useEffect(() => writeLS(LS_SETTINGS, serializeSettings(settings)), [settings]);
   useEffect(() => writeLS(LS_STORE, serializeStore(store)), [store]);
+
+  // ── 模拟盘账户（纯本地，无后端）──────────────────────────────
+  const [game, setGame] = useState<GameState>(() => parseGameState(readLS(LS_GAME)));
+  useEffect(() => writeLS(LS_GAME, serializeGameState(game)), [game]);
 
   const rules = useMemo(() => mergeRules(settings.ruleOverrides), [settings.ruleOverrides]);
 
@@ -201,8 +231,17 @@ export default function App() {
         codeByName,
       });
     }
+    if (tab === "game") {
+      // 模拟盘要盯的是自己的持仓；没有持仓就不请求行情
+      return selectPollCodes({
+        selectedStock: null,
+        sectorMemberNames: [],
+        funnelTop: game.account.holdings.map((h) => h.code),
+        codeByName,
+      });
+    }
     return []; // 历史 / 设置页没有行情要看，就不请求
-  }, [snapshot, tab, selectedCode, analysisSectorBase, selectedSectorBase, baseGroups, codeByName]);
+  }, [snapshot, tab, selectedCode, analysisSectorBase, selectedSectorBase, baseGroups, codeByName, game.account.holdings]);
 
   const live = useLiveQuotes(visibleCodes, {
     intervalMs: settings.refreshMs,
@@ -367,6 +406,117 @@ export default function App() {
   const degraded = live.result?.degradedReason ?? null;
   const updatedText = live.updatedAt === null ? "—（暂无实时数据）" : beijingClock(live.updatedAt);
   const quoteSourceText = live.result ? sourceLabel(live.result.source) : "—（未取到实时行情）";
+  // ── 模拟盘 ──────────────────────────────────────────────────
+  const isTradingNow = session === "open";
+
+  /** 价格表：先用快照收盘价铺底，再用实时价覆盖。取不到的保持 null（不猜） */
+  const gamePricesObj = useMemo(() => {
+    const o: Record<string, number | null> = {};
+    for (const s of (liveSnapshot ?? snapshot)?.stocks ?? []) o[s.code] = lastClose(s.close);
+    for (const [code, q] of quotesByCode) if (q.price !== null) o[code] = q.price;
+    return o;
+  }, [liveSnapshot, snapshot, quotesByCode]);
+
+  const gamePrices = useMemo(() => new Map(Object.entries(gamePricesObj)), [gamePricesObj]);
+
+  const gameHoldingsValue = useMemo(
+    () => calcHoldingsValue(game.account, gamePricesObj),
+    [game.account, gamePricesObj],
+  );
+  const gameTotalAssets = useMemo(
+    () => calcTotalAssets(game.account, gamePricesObj),
+    [game.account, gamePricesObj],
+  );
+
+  /** 每只股票最近一次建仓日，用于 T+1 解锁 */
+  const gameLastBuy = useMemo(() => lastBuyDates(game.account.trades), [game.account.trades]);
+
+  /** 每天记录一个净值点。同一天只记一次，避免每次报价变动都写 localStorage */
+  useEffect(() => {
+    if (!snapshot || !live.today) return;
+    setGame((g) => {
+      const last = g.equity[g.equity.length - 1];
+      if (last && last.date === live.today) return g;
+      return { ...g, equity: pushEquity(g.equity, live.today, calcTotalAssets(g.account, gamePricesObj)) };
+    });
+  }, [snapshot, live.today, gamePricesObj]);
+
+  /** 基准：沪深300 在「开始玩到现在」这一段区间的涨跌幅 */
+  const benchmarkName = "沪深300";
+  const benchmarkReturnPct = useMemo(() => {
+    const idx = snapshot?.indices.find((i) => i.code === BENCHMARK_CODE);
+    if (!idx || !calendar || calendar.length === 0) return null;
+    const first = game.equity[0]?.date ?? calendar[0];
+    const last = calendar[calendar.length - 1];
+    if (first >= last) return null;
+    const curve = benchmarkCurve([first, last], calendar, idx.close);
+    return curve.length >= 2 ? periodReturnPct(curve) : null;
+  }, [snapshot, calendar, game.equity]);
+
+  const gameResults = useMemo(() => {
+    const m = new Map<string, StockResult>();
+    for (const r of liveStocks) m.set(r.code, r);
+    return m;
+  }, [liveStocks]);
+
+  const handleOrder = useCallback(
+    (code: string, side: Side, shares: number): { ok: boolean; reason?: string } => {
+      const stock = stockByCode.get(code);
+      if (!stock) return { ok: false, reason: `快照股票池里没有 ${code}，无法模拟交易` };
+
+      const price = gamePricesObj[code] ?? null;
+      let outcome: { ok: boolean; reason?: string } = { ok: true };
+
+      setGame((g) => {
+        // 进入新的交易日时先解锁此前建仓的股份（T+1）
+        const account = rolloverTradingDay(g.account, live.today, lastBuyDates(g.account.trades));
+        const res = executeOrder(account, {
+          code,
+          name: stock.name,
+          side,
+          shares,
+          // 昨收取快照最后一根收盘价，用于涨跌停判断
+          quote: { code, name: stock.name, price, prevClose: lastClose(stock.close) },
+          date: live.today,
+          at: Date.now(),
+          isTradingNow,
+          isST: stock.isST,
+          // 创业板 300xxx / 科创板 688xxx 涨跌停 20%
+          isGrowthBoard: code.startsWith("300") || code.startsWith("688"),
+          typeAtTrade: gameResults.get(code)?.type,
+        });
+        if (!res.ok) {
+          outcome = { ok: false, reason: res.reason };
+          return account === g.account ? g : { ...g, account };
+        }
+        return { ...g, account: res.account };
+      });
+
+      return outcome;
+    },
+    [stockByCode, gamePricesObj, live.today, isTradingNow, gameResults],
+  );
+
+  const handleResetGame = useCallback(() => setGame(defaultGameState()), []);
+
+  const handleSettle = useCallback((): SeasonResult | null => {
+    if (!snapshot || game.equity.length < 2) return null;
+    const bench = benchmarkCurve(
+      game.equity.map((p) => p.date),
+      calendar ?? [],
+      snapshot.indices.find((i) => i.code === BENCHMARK_CODE)?.close ?? [],
+    );
+    const result = settleSeason({
+      account: game.account,
+      equityCurve: game.equity as EquityPoint[],
+      benchmarkCurve: bench,
+      season: live.today.slice(0, 7), // YYYY-MM
+      finalPrices: gamePricesObj,
+    });
+    setGame((g) => ({ ...g, account: { ...g.account, seasons: [...g.account.seasons, result] } }));
+    return result;
+  }, [snapshot, calendar, game.equity, game.account, live.today, gamePricesObj]);
+
   const missingCount = live.result?.missing.length ?? 0;
   const stockName =
     stockByCode.get(selectedCode ?? "")?.name ?? analysis.stock?.name ?? selectedCode ?? "—";
@@ -470,6 +620,25 @@ export default function App() {
               </button>
             </Notice>
           </div>
+        )}
+
+        {!loading && tab === "game" && (
+          <GameView
+            state={game}
+            prices={gamePrices}
+            quotesByCode={quotesByCode}
+            stocks={snapshot?.stocks ?? []}
+            resultsByCode={gameResults}
+            onOrder={handleOrder}
+            onReset={handleResetGame}
+            onSettle={handleSettle}
+            sessionText={sessionText}
+            isTradingNow={isTradingNow}
+            benchmarkName={benchmarkName}
+            benchmarkReturnPct={benchmarkReturnPct}
+            totalAssets={gameTotalAssets}
+            holdingsValue={gameHoldingsValue}
+          />
         )}
 
         {tab === "history" && (

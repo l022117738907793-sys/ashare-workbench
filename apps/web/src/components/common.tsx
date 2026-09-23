@@ -72,11 +72,13 @@ export function ReasonList({
       <ul className="reasons-list">
         {reasons.map((r) => {
           const status = reasonStatus(r);
+          // 「是/否」类判定的 threshold 与 value 是同一个意思（值本身已渲染成 是/否），不重复显示
+          const showThreshold = r.threshold !== "" && r.threshold !== "是" && r.threshold !== "否";
           return (
             <li key={r.key} className={`reason reason-${status}`}>
               <span className="reason-label">{r.label}</span>
               <span className="reason-value">{reasonValueText(r)}</span>
-              {r.threshold !== "" && <span className="reason-threshold">{r.threshold}</span>}
+              {showThreshold && <span className="reason-threshold">{r.threshold}</span>}
               <span className={`reason-status status-${status}`}>{reasonStatusText(r)}</span>
               {r.note !== "" && <span className="reason-note">{r.note}</span>}
             </li>

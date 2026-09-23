@@ -24,9 +24,11 @@ import {
   type StockData,
 } from "@aw/core";
 import { AnalysisView } from "./components/AnalysisView";
+import { GameView } from "./components/GameView";
 import { HistoryView } from "./components/HistoryView";
 import { SettingsView } from "./components/SettingsView";
 import { WorkbenchView } from "./components/WorkbenchView";
+import { defaultGameState, GAME_DISCLAIMER, type GameState } from "./lib/game";
 import {
   EMPTY_STORE,
   filterStockResults,
@@ -281,5 +283,122 @@ describe("历史页与设置页渲染", () => {
     expect(html).toContain("个股分类阈值");
     expect(html).toContain("./data");
     expect(findRedLineWords(html)).toEqual([]);
+  });
+});
+
+// ── 模拟盘渲染 ───────────────────────────────────────────────
+
+describe("模拟盘页渲染", () => {
+  /**
+   * 注意：模拟盘**允许**出现「买入/卖出」——那是用户的操作标签，不是程序的建议。
+   * 所以这里不断言 `findRedLineWords(html) === []`，改为断言：
+   *   1. 常驻免责声明确实渲染出来了；
+   *   2. 不出现任何引导性/建议性文案；
+   *   3. 取不到行情时显示"无行情"而不是编造盈亏。
+   */
+  function renderGame(over: Partial<Parameters<typeof GameView>[0]> = {}): string {
+    const base = defaultGameState();
+    const state: GameState = {
+      ...base,
+      equity: [
+        { date: "2026-09-22", total: 1_000_000 },
+        { date: "2026-09-23", total: 1_012_000 },
+      ],
+      account: {
+        ...base.account,
+        cash: 900_000,
+        holdings: [
+          { code: "600519.SH", name: "贵州茅台", shares: 200, sellable: 100, avgCost: 100 },
+          { code: "999999.SH", name: "无行情股", shares: 100, sellable: 100, avgCost: 50 },
+        ],
+        trades: [
+          {
+            id: "t1",
+            at: 0,
+            date: "2026-09-23",
+            code: "600519.SH",
+            name: "贵州茅台",
+            side: "buy",
+            price: 100,
+            shares: 200,
+            amount: 20_000,
+            fee: 5,
+            typeAtTrade: "趋势观察",
+            note: "非交易时段下单，按最近收盘价成交（非实时价）",
+          },
+        ],
+      },
+    };
+    return renderToStaticMarkup(
+      createElement(GameView, {
+        state,
+        prices: new Map<string, number | null>([
+          ["600519.SH", 110],
+          ["999999.SH", null],
+        ]),
+        quotesByCode: new Map(),
+        stocks: [],
+        resultsByCode: new Map(),
+        onOrder: () => ({ ok: true }),
+        onReset: () => {},
+        onSettle: () => null,
+        sessionText: "已收盘",
+        isTradingNow: false,
+        benchmarkName: "沪深300",
+        benchmarkReturnPct: 1.5,
+        totalAssets: 1_012_000,
+        holdingsValue: 122_000,
+        ...over,
+      }),
+    );
+  }
+
+  it("常驻免责声明", () => {
+    const html = renderGame();
+    expect(html).toContain(GAME_DISCLAIMER);
+    expect(html).toContain("不构成投资建议");
+  });
+
+  it("不出现任何引导性/建议性文案", () => {
+    const html = renderGame();
+    for (const w of ["建议买入", "建议卖出", "推荐", "看涨", "看跌", "抄底", "稳赚", "必赚", "目标价"]) {
+      expect(html.includes(w), `模拟盘出现引导性文案「${w}」`).toBe(false);
+    }
+  });
+
+  it("账户总览与超额收益都渲染", () => {
+    const html = renderGame();
+    expect(html).toContain("总资产");
+    expect(html).toContain("超额收益");
+    expect(html).toContain("沪深300");
+    // 1,012,000 相对本金 1,000,000 → +1.20%
+    expect(html).toContain("1.2");
+  });
+
+  it("持仓渲染，且无行情时不编造盈亏", () => {
+    const html = renderGame();
+    expect(html).toContain("贵州茅台");
+    expect(html).toContain("可卖 100");
+    // 取不到行情的持仓必须明说，不能显示 0 或猜测
+    expect(html).toContain("无行情，不估算盈亏");
+  });
+
+  it("成交记录带非交易时段标注与当时分类", () => {
+    const html = renderGame();
+    expect(html).toContain("非交易时段下单");
+    expect(html).toContain("趋势观察");
+  });
+
+  it("非交易时段给出明确提示", () => {
+    const html = renderGame();
+    expect(html).toContain("已收盘");
+    expect(html).toContain("按最近收盘价成交");
+  });
+
+  it("无持仓无成交时不崩，给引导文案", () => {
+    const empty = defaultGameState();
+    const html = renderGame({ state: empty, totalAssets: empty.account.cash, holdingsValue: 0 });
+    expect(html).toContain("暂无持仓");
+    expect(html).toContain("暂无成交记录");
   });
 });

@@ -58,6 +58,8 @@ export interface QuoteInput {
   price: number | null;
   /** 昨收，用于涨跌停判断。取不到时不做涨跌停限制 */
   prevClose?: number | null;
+  /** 是否停牌。停牌时拒绝下单 */
+  suspended?: boolean;
 }
 
 export interface OrderRequest {

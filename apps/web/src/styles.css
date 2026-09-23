@@ -906,3 +906,18 @@ code {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+
+/* ── 模拟盘 ──────────────────────────────────────────────────
+   免责声明是产品红线的一部分（必须常驻且显著），因此单独给它样式，
+   而不是随手用 .muted —— 它需要被看见。 */
+.game-disclaimer {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  border-radius: var(--radius);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
