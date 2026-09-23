@@ -21,6 +21,11 @@ import {
 
 const MAX_TIMEOUT = 2_147_483_000;
 const MIN_PROBE_MS = 30_000;
+/** 兜底探测上限：快照日历以"最后一个交易日"结尾，收盘后 `msUntilNextOpen()` 找不到
+ *  下一个交易日时会返回 24 小时兜底值。这里把等待切成 ≤30 分钟一段，
+ *  保证隔夜挂着的页面在开盘后 30 分钟内也能自动恢复轮询。
+ *  非交易时段的每次探测都**只做时段判断、不发任何行情请求**，所以没有额外流量。 */
+const MAX_PROBE_MS = 30 * 60_000;
 const ERROR_BACKOFF_MS = 15_000;
 
 export interface LiveQuotesState {
@@ -94,7 +99,7 @@ export function useLiveQuotes(codes: string[], options: UseLiveQuotesOptions): L
     function scheduleProbe() {
       const now = new Date();
       const wait = msUntilNextOpen(now, calendarRef.current);
-      const delay = Math.min(MAX_TIMEOUT, Math.max(MIN_PROBE_MS, wait));
+      const delay = Math.min(MAX_TIMEOUT, Math.max(MIN_PROBE_MS, Math.min(wait, MAX_PROBE_MS)));
       setState((s) => ({
         ...s,
         polling: false,

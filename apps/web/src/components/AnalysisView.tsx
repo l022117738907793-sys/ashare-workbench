@@ -160,7 +160,7 @@ export function AnalysisView(props: AnalysisProps) {
         {quote ? (
           <div className="quote-head">
             <span className="quote-price">{fmtNum(quote.price)}</span>
-            <span className={`quote-change ${changeTone(quote.changePct)}`}>{fmtPct(quote.changePct)}</span>
+            <span className={`quote-change tone-${changeTone(quote.changePct)}`}>{fmtPct(quote.changePct)}</span>
             <div className="quote-meta">
               <span>来源：{sourceLabel(quote.source)}</span>
               <span>报价时间：{quote.asOf === null ? "—" : beijingClock(quote.asOf)}</span>

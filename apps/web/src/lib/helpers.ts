@@ -108,14 +108,40 @@ export function reasonStatus(r: ReasonItem): ReasonStatus {
 }
 
 /**
+ * 引擎里用 `1/0` 编码"是/否"的判定项（label 本身就是一个是非命题）。
+ * 不能靠"value 是不是 0/1"来猜：`main.ret20` 这类百分比真的可能等于 0.00，
+ * 那样会被误显示成"否"。
+ */
+const BOOLEAN_REASON_KEYS = new Set([
+  "main.aboveMA20",
+  "main.ma20Up",
+  "sector.aboveMA20",
+  "stock.aboveMA20",
+  "stock.ma20Up",
+  "trend.above20",
+  "trend.above60",
+  "trend.ma20Up",
+  "trend.ma60Up",
+  "pos.trendBroken",
+]);
+
+/** 少数几个 1/0 不是是非题的项，换成可读文案 */
+const REASON_VALUE_OVERRIDES: Record<string, Record<number, string>> = {
+  "pos.volumeHeavy": { 1: "放量", 0: "缩量/中性" },
+};
+
+/**
  * 判断依据右侧的取值文案。
  * 取不到数据时返回 `数据不足`，而不是 0 或空串。
  */
 export function reasonValueText(r: ReasonItem): string {
-  if (r.threshold === "是" || r.threshold === "否") return r.value === 1 ? "是" : r.value === 0 ? "否" : "数据不足";
+  const override = r.value === null ? undefined : REASON_VALUE_OVERRIDES[r.key]?.[r.value];
+  if (override !== undefined) return override;
+  if (r.threshold === "是" || r.threshold === "否" || BOOLEAN_REASON_KEYS.has(r.key)) {
+    return r.value === 1 ? "是" : r.value === 0 ? "否" : "数据不足";
+  }
   if (r.value === null) {
     if (r.threshold === "命中" || r.threshold === "未命中") return r.pass ? "命中" : "未命中";
-    if (r.threshold === "存在") return "数据不足";
     return "数据不足";
   }
   return fmtNum(r.value);
@@ -320,7 +346,8 @@ export function parseRulesOverride(raw: string | null | undefined): RulesOverrid
 }
 
 export function mergeRules(override?: RulesOverride | null): Rules {
-  if (!override) return defaultRules;
+  // 没有任何覆盖时直接返回默认对象本身：引用稳定，上游 useMemo 不会白算漏斗
+  if (!override || overrideCount(override) === 0) return defaultRules;
   const section = <T extends object>(base: T, patch: Record<string, number> | undefined): T => {
     if (!patch) return base;
     const merged: Record<string, unknown> = { ...(base as unknown as Record<string, unknown>) };

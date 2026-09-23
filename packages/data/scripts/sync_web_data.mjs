@@ -59,12 +59,19 @@ writeFileSync(join(TARGET, "latest.json"), JSON.stringify({ snapshot: latest }))
 // 控制部署产物体积：运行期只通过 latest.json 读取**一份**快照，
 // 历史快照打进 dist 只会白白占用 Pages 带宽，所以默认只保留最新的一份。
 // 需要回滚到旧数据时再调大。
+//
+// 两个必须遵守的约束（都踩过坑）：
+//   1. 只认 `snapshot_<8位日期>`，否则 `snapshot_dev` 这类目录会被当成"更新的快照"
+//      （字母序里 `snapshot_dev` > `snapshot_20260923`），把真实数据挤掉；
+//   2. 刚刚同步的那一份永远不能删——否则 latest.json 会指向不存在的目录，
+//      站点直接加载失败。
 const keep = argValue("--keep", 1);
 if (keep > 0) {
+  const RE = /^snapshot_\d{8}$/;
   const published = readdirSync(TARGET)
-    .filter((d) => d.startsWith("snapshot_") && statSync(join(TARGET, d)).isDirectory())
+    .filter((d) => RE.test(d) && d !== latest && statSync(join(TARGET, d)).isDirectory())
     .sort();
-  for (const old of published.slice(0, Math.max(0, published.length - keep))) {
+  for (const old of published.slice(0, Math.max(0, published.length - keep + 1))) {
     rmSync(join(TARGET, old), { recursive: true, force: true });
     console.log(`  清理旧快照 ${old}`);
   }

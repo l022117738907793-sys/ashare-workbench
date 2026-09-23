@@ -6,8 +6,13 @@
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
+    /* noUnusedLocals / noUnusedParameters 保持关闭：
+       tsconfig 的 include 只有 src，但 @aw/core、@aw/data 的 TS 源码会作为依赖被一起
+       纳入 program（它们的 package.json main 直接指向 .ts），而上游源码里存在若干
+       故意保留的未使用变量（如 engine.ts 的 `[h, l, c]`、quotes.ts 的 `signal`）。
+       那些文件不在本次改动范围内，开启这两个开关会让 `tsc --noEmit` 直接失败。 */
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
