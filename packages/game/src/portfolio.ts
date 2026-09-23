@@ -11,6 +11,13 @@
  *   - 一手 100 股
  */
 import type { Account, Holding, OrderRequest, OrderResult, QuoteInput, Trade } from "./types";
+import {
+  boardOf,
+  feeRulesAt,
+  isValidBuyQuantity,
+  limitPctAt,
+  lotRulesAt,
+} from "./rules";
 
 export const COMMISSION_RATE = 0.00025;
 export const COMMISSION_MIN = 5;
@@ -28,11 +35,17 @@ export interface FeeBreakdown {
   total: number;
 }
 
-/** 计算单笔费用 */
-export function calcFee(side: "buy" | "sell", amount: number): FeeBreakdown {
-  const commission = Math.max(amount * COMMISSION_RATE, COMMISSION_MIN);
-  const stampDuty = side === "sell" ? amount * STAMP_DUTY_RATE : 0;
-  const transferFee = amount * TRANSFER_FEE_RATE;
+/**
+ * 计算单笔费用。
+ *
+ * `date` 是成交交易日，必须传 —— 税率在 2023-08-28 变过（印花税减半）。
+ * 不传时退化为常量（仅供旧调用点与测试使用，新代码不要这样调）。
+ */
+export function calcFee(side: "buy" | "sell", amount: number, date?: string): FeeBreakdown {
+  const r = date ? feeRulesAt(date) : { commissionRate: COMMISSION_RATE, commissionMin: COMMISSION_MIN, stampDutyRate: STAMP_DUTY_RATE, transferFeeRate: TRANSFER_FEE_RATE };
+  const commission = Math.max(amount * r.commissionRate, r.commissionMin);
+  const stampDuty = side === "sell" ? amount * r.stampDutyRate : 0;
+  const transferFee = amount * r.transferFeeRate;
   return {
     commission: round2(commission),
     stampDuty: round2(stampDuty),
@@ -50,7 +63,12 @@ export function round4(n: number): number {
   return Math.round(n * 10000) / 10000;
 }
 
-/** 涨跌停幅度：ST 5%，创业板/科创板 20%，其余 10% */
+/**
+ * 涨跌停幅度（简化常量版）。
+ *
+ * ⚠️ **不区分日期与板块历史变更**，仅供旧调用点与测试使用。
+ * 撮合请用 `limitPctAt(date, board, isST)` —— 创业板 20% 是 2020-08-24 才有的。
+ */
 export function priceLimitPct(isST = false, isGrowthBoard = false): number {
   if (isST) return 0.05;
   if (isGrowthBoard) return 0.2;
@@ -106,13 +124,20 @@ export function validateOrder(account: Account, req: OrderRequest): string | nul
 
   const holding = findHolding(account, req.code);
 
+  const board = boardOf(req.code);
+  const lot = lotRulesAt(board);
+
   if (side === "buy") {
-    if (shares % LOT_SIZE !== 0) return `买入必须是 ${LOT_SIZE} 股的整数倍`;
+    if (!isValidBuyQuantity(board, shares)) {
+      return lot.increment === 1
+        ? `买入至少 ${lot.minShares} 股（${board === "star" ? "科创板" : "该板块"}）`
+        : `买入必须是 ${lot.minShares} 股的整数倍`;
+    }
   } else {
     if (!holding || holding.shares <= 0) return "没有该股持仓";
     // 卖出允许不足一手，但必须是全部剩余（A 股零股规则）
-    if (shares % LOT_SIZE !== 0 && shares !== holding.shares) {
-      return `卖出需为 ${LOT_SIZE} 股整数倍，或一次性卖出全部持仓`;
+    if (!isValidBuyQuantity(board, shares) && shares !== holding.shares) {
+      return `卖出需符合 ${lot.minShares} 股起、${lot.increment} 股递增，或一次性卖出全部持仓`;
     }
     if (shares > holding.sellable) {
       const locked = holding.shares - holding.sellable;
@@ -125,7 +150,8 @@ export function validateOrder(account: Account, req: OrderRequest): string | nul
   // 涨跌停
   const prev = quote.prevClose;
   if (prev !== null && prev !== undefined && prev > 0) {
-    const limit = priceLimitPct(req.isST, req.isGrowthBoard);
+    // 按成交日与板块取涨跌幅：创业板 20% 是 2020-08-24 起才生效
+    const limit = limitPctAt(req.date, board, req.isST ?? false);
     const upper = round2(prev * (1 + limit));
     const lower = round2(prev * (1 - limit));
     if (side === "buy" && quote.price >= upper) return `已涨停（${upper}），无法买入`;
@@ -136,7 +162,7 @@ export function validateOrder(account: Account, req: OrderRequest): string | nul
   if (side === "buy") {
     const execPrice = round2(quote.price * (1 + DEFAULT_SLIPPAGE));
     const amount = round2(execPrice * shares);
-    const need = round2(amount + calcFee("buy", amount).total);
+    const need = round2(amount + calcFee("buy", amount, req.date).total);
     if (need > account.cash) {
       return `可用资金不足：需要 ${need.toFixed(2)} 元，仅有 ${account.cash.toFixed(2)} 元`;
     }
@@ -163,7 +189,7 @@ export function executeOrder(account: Account, req: OrderRequest): OrderResult {
   const slip = DEFAULT_SLIPPAGE;
   const execPrice = round2(req.side === "buy" ? rawPrice * (1 + slip) : rawPrice * (1 - slip));
   const amount = round2(execPrice * req.shares);
-  const fee = calcFee(req.side, amount);
+  const fee = calcFee(req.side, amount, req.date);
 
   const note = req.isTradingNow
     ? undefined

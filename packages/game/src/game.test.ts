@@ -57,6 +57,12 @@ describe("费用计算", () => {
     expect(calcFee("sell", 100000).stampDuty).toBe(100);
   });
 
+  it("印花税按成交日生效：2023-08-28 起减半", () => {
+    expect(calcFee("sell", 100000, "2023-08-25").stampDuty).toBe(100); // 千1
+    expect(calcFee("sell", 100000, "2023-08-28").stampDuty).toBe(50); // 千0.5
+    expect(calcFee("sell", 100000, "2026-09-23").stampDuty).toBe(50);
+  });
+
   it("过户费双向收取", () => {
     expect(calcFee("buy", 100000).transferFee).toBe(1);
     expect(calcFee("sell", 100000).transferFee).toBe(1);
@@ -128,9 +134,53 @@ describe("下单校验", () => {
     expect(validateOrder(acc, REQ({ quote: QUOTE({ price: 10.4, prevClose: 10 }), isST: true }))).toBeNull();
   });
 
-  it("创业板 / 科创板涨跌停为 20%", () => {
-    expect(validateOrder(acc, REQ({ quote: QUOTE({ price: 11, prevClose: 10 }), isGrowthBoard: true }))).toBeNull();
-    expect(validateOrder(acc, REQ({ quote: QUOTE({ price: 12, prevClose: 10 }), isGrowthBoard: true }))).toMatch(/涨停/);
+  it("创业板 / 科创板涨跌停为 20%（板块由代码推断，不靠手动标记）", () => {
+    // 注意股数：科创板最低 200 股，用默认 100 股会先被股数规则拦下
+    for (const [code, shares] of [["300750.SZ", 100], ["688981.SH", 200]] as const) {
+      expect(
+        validateOrder(acc, REQ({ code, shares, quote: QUOTE({ price: 11, prevClose: 10 }) })),
+        `${code} 在 11 元不应涨停`,
+      ).toBeNull();
+      expect(
+        validateOrder(acc, REQ({ code, shares, quote: QUOTE({ price: 12, prevClose: 10 }) })),
+        `${code} 在 12 元应涨停`,
+      ).toMatch(/涨停/);
+    }
+  });
+
+  it("创业板 20% 是 2020-08-24 起才生效（之前是 10%）", () => {
+    // 2020-08-21（注册制前）11 元应判涨停
+    expect(
+      validateOrder(acc, REQ({
+        code: "300750.SZ", shares: 100, date: "2020-08-21",
+        quote: QUOTE({ price: 11, prevClose: 10 }),
+      })),
+    ).toMatch(/涨停/);
+    // 2020-08-24 起 11 元不再涨停
+    expect(
+      validateOrder(acc, REQ({
+        code: "300750.SZ", shares: 100, date: "2020-08-24",
+        quote: QUOTE({ price: 11, prevClose: 10 }),
+      })),
+    ).toBeNull();
+  });
+
+  it("科创板最低买入 200 股，且可 1 股递增", () => {
+    // 100 股不够
+    expect(validateOrder(acc, REQ({ code: "688981.SH", shares: 100 }))).toMatch(/至少 200 股/);
+    expect(validateOrder(acc, REQ({ code: "688981.SH", shares: 200 }))).toBeNull();
+    expect(validateOrder(acc, REQ({ code: "688981.SH", shares: 201 }))).toBeNull(); // 1 股递增
+  });
+
+  it("创业板/科创板 ST 仍是 20%，不适用主板的 5%", () => {
+    // 创业板 ST：11 元不该涨停（20% 限制）
+    expect(
+      validateOrder(acc, REQ({ code: "300750.SZ", shares: 100, isST: true, quote: QUOTE({ price: 11, prevClose: 10 }) })),
+    ).toBeNull();
+    // 主板 ST：10.5 元即涨停（5% 限制）
+    expect(
+      validateOrder(acc, REQ({ isST: true, quote: QUOTE({ price: 10.5, prevClose: 10 }) })),
+    ).toMatch(/涨停/);
   });
 
   it("没有昨收时不做涨跌停限制", () => {
@@ -198,9 +248,9 @@ describe("成交与记账", () => {
     // 12.00 * (1 - 0.001) = 11.988 → 11.99
     expect(res.trade.price).toBe(11.99);
     expect(res.trade.amount).toBe(1199);
-    // 佣金 5 + 印花税 1.2 + 过户费 0.01
-    expect(res.trade.fee).toBe(6.21);
-    expect(res.account.cash).toBe(round2(cashBefore + 1199 - 6.21));
+    // 佣金 5 + 印花税 1199*0.0005=0.60（2023-08-28 起减半）+ 过户费 0.01
+    expect(res.trade.fee).toBe(round2(5 + 1199 * 0.0005 + 1199 * 0.00001));
+    expect(res.account.cash).toBe(round2(cashBefore + 1199 - res.trade.fee));
     expect(findHolding(res.account, "600519.SH")).toBeUndefined();
   });
 
