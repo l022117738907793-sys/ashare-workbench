@@ -14,6 +14,7 @@
 import argparse
 import json
 import os
+import random
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -70,9 +71,16 @@ def fetch_tencent(symbol, datalen=DAYS, qfq=True):
         f"?param={symbol},day,,,{datalen},{kind}"
     )
     last_err = None
-    for attempt in range(4):
+    for attempt in range(5):
         try:
             r = requests.get(url, headers=HEADERS, timeout=15)
+            # 501 / 429 是腾讯的限流信号（实测并发拉 600+ 标的时必现）。
+            # 必须用指数退避 + 随机抖动等待，否则重试只是把限流撞得更狠。
+            if r.status_code in (429, 501, 502, 503):
+                wait = min(60, 2 ** attempt) + random.uniform(0, 1.5)
+                time.sleep(wait)
+                last_err = RuntimeError(f"HTTP {r.status_code}（限流，已等待 {wait:.1f}s）")
+                continue
             r.raise_for_status()
             data = r.json().get("data", {}).get(symbol, {})
             rows = data.get("qfqday") or data.get("day")
@@ -93,7 +101,7 @@ def fetch_tencent(symbol, datalen=DAYS, qfq=True):
             return out
         except Exception as e:  # noqa: BLE001
             last_err = e
-            time.sleep(0.6 * (attempt + 1))
+            time.sleep(min(30, 1.5 ** attempt) + random.uniform(0, 1.0))
     raise RuntimeError(f"{symbol}: {last_err}")
 
 
@@ -325,7 +333,7 @@ def main():
 
     results = {}
     failures = []
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    with ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
         futs = {
             ex.submit(fetch_tencent_cached, sym, qfq, args.fresh, args.days): sym
             for sym, _, qfq in tasks
@@ -342,6 +350,17 @@ def main():
                 print(f"    {done}/{len(tasks)}")
     if failures:
         warn(f"{len(failures)} 个标的失败: {failures[:5]}")
+    # 失败率过高时必须让任务失败，而不是产出一份"看起来成功"的残缺快照。
+    # 之前就是这样静默产出了 9 个空板块、缺 2 个指数的坏数据。
+    fail_rate = len(failures) / max(1, len(tasks))
+    if fail_rate > 0.05:
+        raise SystemExit(
+            f"取数失败率 {fail_rate:.1%}（{len(failures)}/{len(tasks)}）过高，拒绝产出残缺快照。\n"
+            f"  多半是被行情接口限流（HTTP 501）。建议：\n"
+            f"    1) 等 10-30 分钟再重试；\n"
+            f"    2) 降低并发：--workers 2；\n"
+            f"    3) 已有 {len(results)} 个标的命中缓存，重跑不会重复取。"
+        )
 
     print("5/5 对齐、裁剪并写出快照...")
     indices = []
