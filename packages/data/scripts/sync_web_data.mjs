@@ -6,11 +6,18 @@
  * GitHub Pages 只发布构建产物（`apps/web/dist`），仓库根目录的 `data/`
  * 不会被发布。所以必须把快照复制进 `apps/web/public/`，由 Vite 一起打包。
  *
+ * 为什么需要裁剪：长历史快照（--days 650）对回测有用，但引擎的指标窗口最大只有
+ * 60 日（MA60/ret60），把 640 天全量发给浏览器纯属浪费——实测 640 天版本
+ * gzip 后 980KB，而 120 天只有约 100KB。所以 `data/` 保留完整深度供回测，
+ * 发布到网页端时按 --trim-days 裁剪。
+ *
  * 用法：
- *   node packages/data/scripts/sync_web_data.mjs            # 同步最新快照，只留 1 份
- *   node packages/data/scripts/sync_web_data.mjs --keep 5   # 保留最近 5 份
+ *   node packages/data/scripts/sync_web_data.mjs              # 同步并裁到 120 天
+ *   node packages/data/scripts/sync_web_data.mjs --trim-days 250
+ *   node packages/data/scripts/sync_web_data.mjs --no-trim    # 不裁剪（调试用）
+ *   node packages/data/scripts/sync_web_data.mjs --keep 5     # 保留最近 5 份
  */
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,8 +37,11 @@ if (!existsSync(DATA_DIR)) {
   process.exit(1);
 }
 
+// 只认 `snapshot_<8位日期>`。与下面的清理逻辑用同一个正则——
+// 两边不一致会导致"选出来的最新快照"和"允许保留的快照"不是同一批
+const SNAPSHOT_RE = /^snapshot_\d{8}$/;
 const snapshots = readdirSync(DATA_DIR)
-  .filter((d) => d.startsWith("snapshot_") && statSync(join(DATA_DIR, d)).isDirectory())
+  .filter((d) => SNAPSHOT_RE.test(d) && statSync(join(DATA_DIR, d)).isDirectory())
   .sort();
 
 if (snapshots.length === 0) {
@@ -54,6 +64,47 @@ if (missing.length > 0) {
 mkdirSync(TARGET, { recursive: true });
 rmSync(dest, { recursive: true, force: true });
 cpSync(src, dest, { recursive: true });
+
+// ── 裁剪到引擎实际需要的深度 ─────────────────────────────────
+// 只裁发布副本，`data/` 源快照保持完整，回测仍可用长历史。
+const noTrim = process.argv.includes("--no-trim");
+const trimDays = argValue("--trim-days", 120);
+
+if (!noTrim && trimDays > 0) {
+  const calPath = join(dest, "calendar.json");
+  const calendar = JSON.parse(readFileSync(calPath, "utf-8"));
+  if (calendar.length > trimDays) {
+    const keepFrom = calendar.length - trimDays;
+    const kept = calendar.slice(keepFrom);
+    writeFileSync(calPath, JSON.stringify(kept));
+
+    const cutSeries = (arr) =>
+      arr.map((s) => ({
+        ...s,
+        close: s.close.slice(keepFrom),
+        high: s.high.slice(keepFrom),
+        low: s.low.slice(keepFrom),
+        volume: s.volume.slice(keepFrom),
+      }));
+
+    for (const name of ["indices", "sectors", "stocks", "etfs"]) {
+      const f = join(dest, `${name}.json`);
+      if (!existsSync(f)) continue;
+      writeFileSync(f, JSON.stringify(cutSeries(JSON.parse(readFileSync(f, "utf-8")))));
+    }
+
+    // meta.days 必须跟着改，否则界面显示的天数与实际不符
+    const metaPath = join(dest, "meta.json");
+    if (existsSync(metaPath)) {
+      const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+      meta.days = kept.length;
+      meta.webTrimmedFrom = calendar.length;
+      writeFileSync(metaPath, JSON.stringify(meta));
+    }
+    console.log(`  裁剪发布副本：${calendar.length} 天 -> ${kept.length} 天（源快照保持完整）`);
+  }
+}
+
 writeFileSync(join(TARGET, "latest.json"), JSON.stringify({ snapshot: latest }));
 
 // 控制部署产物体积：运行期只通过 latest.json 读取**一份**快照，
@@ -67,9 +118,8 @@ writeFileSync(join(TARGET, "latest.json"), JSON.stringify({ snapshot: latest }))
 //      站点直接加载失败。
 const keep = argValue("--keep", 1);
 if (keep > 0) {
-  const RE = /^snapshot_\d{8}$/;
   const published = readdirSync(TARGET)
-    .filter((d) => RE.test(d) && d !== latest && statSync(join(TARGET, d)).isDirectory())
+    .filter((d) => SNAPSHOT_RE.test(d) && d !== latest && statSync(join(TARGET, d)).isDirectory())
     .sort();
   for (const old of published.slice(0, Math.max(0, published.length - keep + 1))) {
     rmSync(join(TARGET, old), { recursive: true, force: true });

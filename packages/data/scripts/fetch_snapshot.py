@@ -30,7 +30,8 @@ if not os.path.exists(os.path.join(ROOT, "package.json")):
     raise RuntimeError(f"ROOT 计算错误：{ROOT} 下没有 package.json，脚本位置被移动过？")
 CACHE_DIR = os.path.join(ROOT, "data", "cache")
 HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://gu.qq.com/"}
-DAYS = 130  # 多取 10 天以便对齐后裁剪到 120
+DAYS = 130  # 默认多取 10 天以便对齐后裁剪到 120；可用 --days 覆盖
+MAX_DAYS = 650  # 腾讯日线接口实测上限 641 根，留一点余量
 
 # 东方财富行情列表：沪深A股全市场（沪主板+科创板 / 深主板+创业板）
 EASTMONEY_CLIST_URL = "https://push2.eastmoney.com/api/qt/clist/get"
@@ -168,16 +169,16 @@ def fetch_marketcap_eastmoney():
     return mv
 
 
-def cache_path(symbol, qfq):
-    return os.path.join(CACHE_DIR, f"{symbol}_{'qfq' if qfq else 'raw'}.json")
+def cache_path(symbol, qfq, days=DAYS):
+    return os.path.join(CACHE_DIR, f"{symbol}_{'qfq' if qfq else 'raw'}_{days}.json")
 
 
-def fetch_tencent_cached(symbol, qfq=True, fresh=False):
-    path = cache_path(symbol, qfq)
+def fetch_tencent_cached(symbol, qfq=True, fresh=False, days=DAYS):
+    path = cache_path(symbol, qfq, days)
     if not fresh and os.path.exists(path):
         with open(path, encoding="utf-8") as f:
             return json.load(f)
-    data = fetch_tencent(symbol, qfq=qfq)
+    data = fetch_tencent(symbol, qfq=qfq, datalen=days)
     os.makedirs(CACHE_DIR, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
@@ -216,6 +217,13 @@ def align(rows, calendar):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=TOP_N, help="每行业代表股数量")
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=DAYS,
+        help=f"取多少个交易日的历史（默认 {DAYS}，实测上限约 {MAX_DAYS}）。"
+        "拉长历史主要用于回测（scripts/backtest.ts），代价是快照体积成比例增长",
+    )
     parser.add_argument("--fresh", action="store_true", help="忽略缓存重新拉取")
     parser.add_argument(
         "--no-marketcap",
@@ -240,11 +248,14 @@ def main():
     import akshare as ak
 
     print("1/5 拉取沪深300 获取公共交易日历...")
-    hs300 = fetch_tencent_cached("sh000300", qfq=False, fresh=args.fresh)
+    hs300 = fetch_tencent_cached("sh000300", qfq=False, fresh=args.fresh, days=args.days)
     calendar = [r["date"] for r in hs300]
     as_of = calendar[-1]
-    calendar = calendar[-120:]
-    print(f"    asOf={as_of} days={len(calendar)}")
+    # 保留 10 天余量用于对齐后裁剪（原设计：取 130 天、输出 120 天）。
+    # 注意这里必须跟随 --days，否则拉长历史不会生效——之前就踩过这个坑。
+    target_days = max(60, args.days - 10)
+    calendar = calendar[-target_days:]
+    print(f"    asOf={as_of} days={len(calendar)}（取数 {args.days} 天，裁剪余量 10 天）")
 
     print("2/5 拉取申万一级行业与成分股...")
     first_info = ak.sw_index_first_info()
@@ -316,7 +327,7 @@ def main():
     failures = []
     with ThreadPoolExecutor(max_workers=8) as ex:
         futs = {
-            ex.submit(fetch_tencent_cached, sym, qfq, args.fresh): sym
+            ex.submit(fetch_tencent_cached, sym, qfq, args.fresh, args.days): sym
             for sym, _, qfq in tasks
         }
         done = 0

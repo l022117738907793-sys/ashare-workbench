@@ -32,6 +32,7 @@ import { HistoryView } from "./components/HistoryView";
 import { SettingsView } from "./components/SettingsView";
 import { WorkbenchView } from "./components/WorkbenchView";
 import { defaultGameState, GAME_DISCLAIMER, type GameState } from "./lib/game";
+import { SIGNAL_BACKTEST_CAVEAT } from "./lib/helpers";
 import { SignalBadge, SignalCard, SignalSummary } from "./components/SignalCard";
 import {
   EMPTY_STORE,
@@ -423,10 +424,12 @@ describe("交易信号渲染", () => {
     expect(html).toContain("20 日压力位");
   });
 
-  it("如实披露信号尚未通过历史验证", () => {
+  it("如实披露信号无有效区分度", () => {
     const html = renderToStaticMarkup(createElement(SignalCard, { signal }));
-    expect(html).toContain("尚未通过历史验证");
-    expect(html).toContain("请作为参考而非依据");
+    // 文案随回测结论更新，这里断言的是"必须如实披露"这件事本身
+    expect(html).toContain(SIGNAL_BACKTEST_CAVEAT);
+    expect(html).toContain("无证据支持有效");
+    expect(html).toContain("与噪声无法区分");
   });
 
   it("明确标注参考价位是技术测算而非承诺", () => {

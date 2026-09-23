@@ -43,7 +43,7 @@ jobs:
       - name: Sync snapshot into web assets
         # 只保留最新一份：运行期只读 latest.json 指向的快照，
         # 历史快照打进 dist 只会浪费 Pages 带宽
-        run: node packages/data/scripts/sync_web_data.mjs --keep 1
+        run: node packages/data/scripts/sync_web_data.mjs --keep 1 --trim-days 120
 
       - name: Build web app
         run: npm run build --workspace @aw/web

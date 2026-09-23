@@ -168,6 +168,25 @@ const elapsed = Date.now() - started;
 // ── 报告 ──────────────────────────────────────────────────────
 console.log(`回放完成：${perDay.length} 个交易日，耗时 ${elapsed} ms\n`);
 
+// 防退化警告：CI 每日生成的快照是 120 天，会让回放悄悄退回小样本。
+// 这种"结论因数据变少而改变"的情况必须显式提示，否则没人会注意到。
+if (perDay.length < 100) {
+  console.log(
+    `⚠️  可回放天数仅 ${perDay.length} 天（建议 ≥500）。20 日前瞻的独立窗口只有 ` +
+      `${Math.floor(perDay.length / 20)} 个，统计上不足以判断信号质量。\n` +
+      "   当前快照可能是 CI 默认深度（120 天）。请先生成长历史快照：\n" +
+      "     python3 packages/data/scripts/fetch_snapshot.py --days 650\n",
+  );
+}
+
+// 样本深度足够时，明确说清楚结论的可信度前提
+if (perDay.length >= 500) {
+  console.log(
+    `样本深度充足（${perDay.length} 天，独立窗口约 ${Math.floor(perDay.length / 20)} 个），` +
+      "下述统计量具备参考价值。\n",
+  );
+}
+
 console.log("【1】引擎健壮性");
 const crash = errors === 0;
 console.log(`  ${crash ? "✓" : "✗"} 异常数: ${errors}${crash ? "（无崩溃）" : ""}`);
@@ -537,8 +556,9 @@ console.log("\n【7】有效样本量（为什么 5520 这个数字有误导性�
 }
 
 console.log(
-  "\n⚠ 以上为行为压测，非策略有效性证明：样本仅 92 只、约 60 个交易日，" +
-    "\n  且同一区间内个股高度相关（同涨同跌），统计意义有限。\n",
+  `\n⚠ 以上为行为压测，非策略有效性证明：样本 ${full.stocks.length} 只、${perDay.length} 个可回放交易日，` +
+    "\n  且个股同属一个市场、高度相关；区间单一，不能外推到其他市场环境。" +
+    "\n  另需注意：股票池按当前市值选出，存在前视/生存偏差（详见 README）。\n",
 );
 
 if (errors > 0) process.exitCode = 1;
