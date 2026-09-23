@@ -412,8 +412,9 @@ for (const k of HORIZONS) {
   const t = se > 0 ? mean / se : 0;
   const pct = ((bearWins / n) * 100).toFixed(0);
   // 重叠校正：h 日前瞻收益按日采样时，相邻观测共享 h-1/h 的窗口，
-  // 均值的方差约被放大 h 倍（随机游走近似），故 t_有效 ≈ t / √h。
-  // 不做这一步就会把显著性高估约 √h 倍（20 日窗口约 4.5 倍）。
+  // 均值的方差约被放大 h 倍（**仅在随机游走、等间隔、无自相关假设下成立**），
+  // 故此处给出 t/√h 作为**粗略的下界参考**，而不是有效方差估计。
+  // 更严格的做法是 HAC/Newey-West 或按日期聚类，或直接用非重叠窗口（见【8】）。
   const tAdj = t / Math.sqrt(k);
   const verdict = Math.abs(tAdj) >= 1.96 ? "显著" : "不显著";
   console.log(
@@ -426,6 +427,105 @@ for (const k of HORIZONS) {
 console.log("\n  读法：「看空占优比例」高于 50% 说明该区间内信号方向与市场相反。");
 console.log("        但必须看**校正后**的 t：20 日窗口的重叠会把 t 高估约 4.5 倍，");
 console.log("        未校正的 t=-5 看似极显著，校正后往往就落在临界值附近。");
+
+// ── 数据质量：null / 停牌导致的删样 ────────────────────────────
+//
+// forwardReturn 遇到任一端为 null 就丢弃样本。如果停牌与走势相关
+// （例如暴跌后停牌），这就是**非随机删样**，会系统性扭曲统计量。
+// 因此必须把删样率报出来，而不是假装样本完整。
+console.log("\n【8】数据质量：两种「样本减少」必须区分开\n");
+console.log("  易混淆点：样本从 5520 降到 3680 并不等于「停牌删样」。两者性质完全不同：");
+console.log("    (a) 边界截断——起点靠近序列末尾时 d+k 越界，属于**数据不足**，不是偏差；");
+console.log("    (b) 缺失删样——序列中段存在 null（停牌）而被丢弃，**这才是潜在的非随机删样**。\n");
+
+for (const k of HORIZONS) {
+  let total = 0;
+  let boundary = 0;
+  let missing = 0;
+  for (let d = MIN_DAYS; d < calendar.length; d += 1) {
+    for (const s of full.stocks) {
+      total += 1;
+      const to = d + k;
+      const a = s.close[d];
+      const b = to < s.close.length ? s.close[to] : undefined;
+      if (to >= s.close.length) boundary += 1;
+      else if (a === null || b === null) missing += 1;
+    }
+  }
+  console.log(
+    `  +${String(k).padStart(2)}日  总样本 ${total}` +
+      `  边界截断 ${String(boundary).padStart(4)}（${((boundary / total) * 100).toFixed(1)}%，非偏差）` +
+      `  缺失删样 ${String(missing).padStart(3)}（${((missing / total) * 100).toFixed(3)}%）`,
+  );
+}
+
+{
+  let nullCells = 0;
+  let cells = 0;
+  let stocksWithNull = 0;
+  for (const s of full.stocks) {
+    let has = false;
+    for (const v of s.close) {
+      cells += 1;
+      if (v === null) {
+        nullCells += 1;
+        has = true;
+      }
+    }
+    if (has) stocksWithNull += 1;
+  }
+  const rate = (nullCells / cells) * 100;
+  console.log(
+    `\n  收盘价序列 null 占比: ${rate.toFixed(4)}%（${nullCells} / ${cells}），涉及 ${stocksWithNull} / ${full.stocks.length} 只个股`,
+  );
+  console.log(
+    rate < 0.1
+      ? "  → 缺失率极低，「非随机删样」在本数据集上**不构成实质威胁**（这一点与理论担忧相反，已实测确认）"
+      : "  → 缺失率不可忽略，需做完整样本 vs 可交易样本的敏感性分析",
+  );
+}
+
+// ── 稀疏（非重叠）检验：彻底回避重叠问题 ──────────────────────
+//
+// 起点每隔 h 个交易日取一次，使前瞻窗口互不重叠。
+// 代价是样本骤减（20 日窗口在 60 天里只剩 3 个起点），
+// 因此它的作用是**交叉验证方向**，而不是提供精确估计。
+console.log("\n【9】稀疏非重叠检验（每隔 h 日取一个起点）\n");
+for (const k of HORIZONS) {
+  const spreads: number[] = [];
+  for (let d = MIN_DAYS; d + k < calendar.length; d += k) {
+    const bull: number[] = [];
+    const bear: number[] = [];
+    for (const s of full.stocks) {
+      const v = forwardReturn(s.close, d, k);
+      if (v === null) continue;
+      let action: SignalAction;
+      try {
+        action = deriveSignal(cut(s, d), rules as never).action;
+      } catch {
+        continue;
+      }
+      if (action === "买入" || action === "增持") bull.push(v);
+      else if (action === "卖出" || action === "减持") bear.push(v);
+    }
+    if (bull.length === 0 || bear.length === 0) continue;
+    spreads.push(
+      bull.reduce((a, x) => a + x, 0) / bull.length - bear.reduce((a, x) => a + x, 0) / bear.length,
+    );
+  }
+  if (spreads.length === 0) {
+    console.log(`  +${k}日: 起点不足`);
+    continue;
+  }
+  const mean = spreads.reduce((a, b) => a + b, 0) / spreads.length;
+  const neg = spreads.filter((x) => x < 0).length;
+  console.log(
+    `  +${String(k).padStart(2)}日  独立起点 ${spreads.length} 个` +
+      `  价差均值 ${(mean >= 0 ? "+" : "") + mean.toFixed(2)}pp` +
+      `  为负的起点 ${neg}/${spreads.length}` +
+      `  ${spreads.length < 5 ? "（起点太少，仅作方向参考）" : ""}`,
+  );
+}
 
 console.log("\n【7】有效样本量（为什么 5520 这个数字有误导性）");
 {
