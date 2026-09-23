@@ -44,6 +44,7 @@ import {
 } from "@aw/game";
 import { AnalysisView } from "./components/AnalysisView";
 import { GameRulesView } from "./components/GameRulesView";
+import { GuideView } from "./components/GuideView";
 import { GameView } from "./components/GameView";
 import { HistoryView } from "./components/HistoryView";
 import { SettingsView } from "./components/SettingsView";
@@ -85,8 +86,9 @@ import {
 } from "./lib/helpers";
 import { useLiveQuotes } from "./lib/useLiveQuotes";
 
-// "rules" 不是底部 tab，而是从模拟盘进入的子页面
-type Tab = "workbench" | "analysis" | "game" | "rules" | "history" | "settings";
+// "rules" 与 "guide" 不是底部 tab，而是子页面：
+// "rules" 从模拟盘进入，"guide" 从页头进入（放在最显眼处，同学才会看到）
+type Tab = "workbench" | "analysis" | "game" | "rules" | "guide" | "history" | "settings";
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "workbench", label: "筛选" },
@@ -543,9 +545,14 @@ export default function App() {
       <header className="app-head">
         <div className="app-head-row">
           <h1 className="app-title">A 股趋势筛选工作台</h1>
-          <button type="button" className="btn btn-ghost btn-tiny" onClick={() => setReloadNonce((n) => n + 1)}>
-            重新加载
-          </button>
+          <span className="app-head-actions">
+            <button type="button" className="btn btn-ghost btn-tiny" onClick={() => setTab("guide")}>
+              使用说明
+            </button>
+            <button type="button" className="btn btn-ghost btn-tiny" onClick={() => setReloadNonce((n) => n + 1)}>
+              重新加载
+            </button>
+          </span>
         </div>
         <div className="app-head-meta">
           <span className={`session session-${session}`}>{sessionText}</span>
@@ -662,6 +669,8 @@ export default function App() {
         )}
 
         {tab === "rules" && <GameRulesView onBack={() => setTab("game")} />}
+
+        {tab === "guide" && <GuideView onBack={() => setTab("workbench")} />}
 
         {tab === "history" && (
           <HistoryView

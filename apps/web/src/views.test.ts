@@ -27,6 +27,7 @@ import {
 } from "@aw/core";
 import { AnalysisView } from "./components/AnalysisView";
 import { GameRulesView } from "./components/GameRulesView";
+import { GuideView } from "./components/GuideView";
 import { GameView } from "./components/GameView";
 import { HistoryView } from "./components/HistoryView";
 import { SettingsView } from "./components/SettingsView";
@@ -502,5 +503,43 @@ describe("规则讲解页渲染", () => {
   it("说明非交易时段为何按最新价而非排队开盘价", () => {
     expect(html).toContain("排队");
     expect(html).toContain("开盘价");
+  });
+});
+
+// ── 使用说明页渲染 ───────────────────────────────────────────
+
+describe("使用说明页渲染", () => {
+  const html = renderToStaticMarkup(createElement(GuideView, { onBack: () => {} }));
+
+  it("覆盖五个页面与六种分类", () => {
+    for (const kw of ["筛选", "个股分析", "模拟盘", "历史", "设置"]) {
+      expect(html.includes(kw), `缺少页面说明「${kw}」`).toBe(true);
+    }
+    for (const kw of ["启动观察", "趋势观察", "回调观察", "高位观察", "排除", "数据不足"]) {
+      expect(html.includes(kw), `缺少分类说明「${kw}」`).toBe(true);
+    }
+  });
+
+  it("教用户怎么读判断依据", () => {
+    expect(html).toContain("怎么读");
+    expect(html).toContain("未通过");
+  });
+
+  it("说明【数据不足，不许编造】不是故障", () => {
+    expect(html).toContain(NOT_ENOUGH_BANNER);
+    expect(html).toContain("它不会猜");
+  });
+
+  it("如实告知交易信号无效——这是最重要的一条", () => {
+    expect(html).toContain("没有证据支持它有效");
+    expect(html).toContain("和随机无法区分");
+    expect(html).toContain("当交易依据不行");
+  });
+
+  it("讲清模拟盘规则与免责", () => {
+    for (const kw of ["T+1", "涨跌停", "佣金", "印花税", "滑点", "超额收益"]) {
+      expect(html.includes(kw), `缺少规则说明「${kw}」`).toBe(true);
+    }
+    expect(html).toContain("不构成投资建议");
   });
 });

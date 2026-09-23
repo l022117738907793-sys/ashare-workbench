@@ -1110,3 +1110,23 @@ code {
     scroll-behavior: auto !important;
   }
 }
+
+/* 页头右侧的操作按钮组 */
+.app-head-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* 说明页里引用判断依据的示例行 */
+.mono-sample {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  white-space: nowrap;
+  color: var(--text-2);
+}
