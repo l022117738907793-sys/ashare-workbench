@@ -513,6 +513,8 @@ export const STORE_MAX = 60;
 export const EMPTY_STORE: LocalStore = { version: STORE_VERSION, analysed: [], learning: [] };
 
 export const LS_SETTINGS = "aw.settings.v1";
+/** 是否已看过使用说明（用于首次访问提示，看过就不再打扰） */
+export const LS_GUIDE_SEEN = "aw.guideSeen.v1";
 export const LS_STORE = "aw.store.v1";
 
 function asArray(v: unknown): unknown[] {

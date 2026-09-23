@@ -64,6 +64,7 @@ import {
   beijingClock,
   filterStockResults,
   groupStockResults,
+  LS_GUIDE_SEEN,
   LS_SETTINGS,
   LS_STORE,
   mergeRules,
@@ -117,6 +118,13 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("workbench");
   const [settings, setSettings] = useState<AppSettings>(() => parseSettings(readLS(LS_SETTINGS)));
   const [store, setStore] = useState<LocalStore>(() => parseStore(readLS(LS_STORE)));
+  // 首次访问提示：只在没看过说明时出现，点过就永久收起
+  const [guideSeen, setGuideSeen] = useState<boolean>(() => readLS(LS_GUIDE_SEEN) === "1");
+  const openGuide = useCallback(() => {
+    setTab("guide");
+    setGuideSeen(true);
+    writeLS(LS_GUIDE_SEEN, "1");
+  }, []);
 
   useEffect(() => writeLS(LS_SETTINGS, serializeSettings(settings)), [settings]);
   useEffect(() => writeLS(LS_STORE, serializeStore(store)), [store]);
@@ -546,7 +554,7 @@ export default function App() {
         <div className="app-head-row">
           <h1 className="app-title">A 股趋势筛选工作台</h1>
           <span className="app-head-actions">
-            <button type="button" className="btn btn-ghost btn-tiny" onClick={() => setTab("guide")}>
+            <button type="button" className="btn btn-primary btn-tiny" onClick={openGuide}>
               使用说明
             </button>
             <button type="button" className="btn btn-ghost btn-tiny" onClick={() => setReloadNonce((n) => n + 1)}>
@@ -595,6 +603,29 @@ export default function App() {
         )}
 
         {!loading && !loadError && !snapshot && <Notice tone="info">没有可用快照。</Notice>}
+
+        {tab === "workbench" && !guideSeen && (
+          <div className="guide-banner">
+            <span>
+              <strong>第一次用？</strong> 这里有一份使用说明，讲清楚每个结论是怎么来的。
+            </span>
+            <span className="guide-banner-actions">
+              <button type="button" className="btn btn-primary btn-tiny" onClick={openGuide}>
+                看看说明
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-tiny"
+                onClick={() => {
+                  setGuideSeen(true);
+                  writeLS(LS_GUIDE_SEEN, "1");
+                }}
+              >
+                不用了
+              </button>
+            </span>
+          </div>
+        )}
 
         {snapshot && liveMarket && !loading && tab === "workbench" && (
           <WorkbenchView

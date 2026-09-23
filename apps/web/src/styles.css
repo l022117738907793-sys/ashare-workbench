@@ -1130,3 +1130,25 @@ code {
   white-space: nowrap;
   color: var(--text-2);
 }
+
+/* 首次访问的使用说明提示。不遮挡内容、可随时收起；
+   看过一次后写 localStorage，不再出现。 */
+.guide-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.guide-banner-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
