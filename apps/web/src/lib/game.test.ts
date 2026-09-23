@@ -279,3 +279,12 @@ describe("委托股数上限提示", () => {
     expect(suggestedMaxShares("buy", 0, 100000, 0)).toBe(0);
   });
 });
+
+describe("新闻轮的节奏常量（放在这里是因为跨模块引用方便）", () => {
+  it("自动刷新间隔是 10 分钟，不是更短", async () => {
+    const { DEFAULT_NEWS_INTERVAL_MS } = await import("./useLiveNews");
+    // 界面有手动刷新按钮，自动刷新只需保持大致最新。
+    // 若有人想改短，请先想清楚"用户被新闻刷屏"的代价。
+    expect(DEFAULT_NEWS_INTERVAL_MS).toBe(10 * 60 * 1000);
+  });
+});

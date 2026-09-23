@@ -78,8 +78,8 @@ export function NewsPanel(props: NewsPanelProps) {
           title={`持仓相关新闻（${related.length}）`}
           subtitle="按公司名或代码匹配到的新闻，可能相关，不构成任何判断"
         >
-          <ul className="news-list">
-            {related.slice(0, 8).map((n) => (
+          <ul className="news-list news-list-scroll">
+            {related.slice(0, 4).map((n) => (
               <NewsRow key={`r-${n.id}`} item={n} related />
             ))}
           </ul>
@@ -90,7 +90,7 @@ export function NewsPanel(props: NewsPanelProps) {
         title="市场快讯"
         subtitle={
           updatedAt
-            ? `来源 ${source ?? "—"} · 更新于 ${beijingDateTime(updatedAt)} · 每 3 分钟自动刷新`
+            ? `来源 ${source ?? "—"} · 更新于 ${beijingDateTime(updatedAt)} · 每 10 分钟自动刷新`
             : `来源 ${source ?? "—"}`
         }
         right={
@@ -106,8 +106,8 @@ export function NewsPanel(props: NewsPanelProps) {
             {loading ? "正在获取新闻…" : "暂时没有取到新闻（数据源不可用时不会编造内容）。"}
           </EmptyHint>
         ) : (
-          <ul className="news-list">
-            {items.slice(0, 30).map((n) => (
+          <ul className="news-list news-list-scroll">
+            {items.slice(0, 15).map((n) => (
               <NewsRow key={n.id} item={n} related={relatedIds.has(n.id)} />
             ))}
           </ul>

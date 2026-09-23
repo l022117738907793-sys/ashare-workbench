@@ -1225,3 +1225,28 @@ code {
   line-height: 1.65;
   color: var(--text-2);
 }
+
+/* ── 新闻列表限高 ────────────────────────────────────────────
+   新闻是长列表，不限高会把页面撑得很长、把交易区挤到屏幕外。
+   限高 + 内部滚动：既能看到足够多，又不侵占交易空间。 */
+.news-list-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* 顶部/底部渐隐，暗示"还有更多" */
+  mask-image: linear-gradient(to bottom, transparent 0, #000 6px, #000 calc(100% - 6px), transparent 100%);
+}
+/* 桌面端可以高一点 */
+@media (min-width: 720px) {
+  .news-list-scroll {
+    max-height: 420px;
+  }
+}
+/* 细滚动条，移动端几乎不可见 */
+.news-list-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.news-list-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}

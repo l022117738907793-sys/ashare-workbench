@@ -27,16 +27,21 @@ export interface LiveNewsState {
 export interface UseLiveNewsOptions {
   /** 是否启用（未开局或不在模拟盘页时关掉） */
   enabled: boolean;
-  /** 刷新间隔，默认 3 分钟。新闻不需要秒级 */
+  /**
+   * 刷新间隔，默认 10 分钟。
+   *
+   * 为什么不是更短：界面有手动刷新按钮，想立刻看到时可以自己点。
+   * 自动刷新只需保持大致最新，刷太勤既费流量也让人分心。
+   */
   intervalMs?: number;
-  /** 拉取条数，默认 40 */
+  /** 拉取条数，默认 20 */
   limit?: number;
 }
 
-export const DEFAULT_NEWS_INTERVAL_MS = 3 * 60 * 1000;
+export const DEFAULT_NEWS_INTERVAL_MS = 10 * 60 * 1000;
 
 export function useLiveNews(options: UseLiveNewsOptions): LiveNewsState {
-  const { enabled, intervalMs = DEFAULT_NEWS_INTERVAL_MS, limit = 40 } = options;
+  const { enabled, intervalMs = DEFAULT_NEWS_INTERVAL_MS, limit = 20 } = options;
 
   const [items, setItems] = useState<NewsItem[]>([]);
   const [source, setSource] = useState<string | null>(null);
