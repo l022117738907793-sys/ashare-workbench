@@ -287,6 +287,155 @@ for (const k of HORIZONS) {
   );
 }
 
+// ── 统计显著性：分块自助法 ────────────────────────────────────
+//
+// 为什么必须做这一步：样本按"交易日 × 个股"统计有 5520 个，但
+//   (1) 相邻交易日的信号几乎相同（20 日前瞻窗口高度重叠）；
+//   (2) 92 只个股同涨同跌（同属一个市场，相关性极高）。
+// 直接对这些样本做 t 检验会把有效样本量高估一到两个数量级。
+// 分块自助法按"连续日期块"重采样，保留了块内的自相关结构，
+// 得到的区间更接近真实不确定性（仍然乐观，因为它没处理个股间相关）。
+function blockBootstrapSpread(
+  byDate: Array<{ date: string; bull: number[]; bear: number[] }>,
+  blockLen: number,
+  iterations: number,
+): { lo: number; hi: number; mid: number } | null {
+  const days = byDate.filter((d) => d.bull.length > 0 || d.bear.length > 0);
+  if (days.length < blockLen * 2) return null;
+
+  const nBlocks = Math.floor(days.length / blockLen);
+  const spreads: number[] = [];
+
+  for (let it = 0; it < iterations; it += 1) {
+    const bull: number[] = [];
+    const bear: number[] = [];
+    for (let b = 0; b < nBlocks; b += 1) {
+      // 随机取一个连续块（起点对齐到 blockLen 的倍数，保证块完整）
+      const start = Math.floor(Math.random() * (days.length - blockLen + 1));
+      for (let i = start; i < start + blockLen; i += 1) {
+        bull.push(...days[i].bull);
+        bear.push(...days[i].bear);
+      }
+    }
+    if (bull.length === 0 || bear.length === 0) continue;
+    const bm = bull.reduce((a, x) => a + x, 0) / bull.length;
+    const sm = bear.reduce((a, x) => a + x, 0) / bear.length;
+    spreads.push(bm - sm);
+  }
+
+  if (spreads.length < 50) return null;
+  spreads.sort((a, b) => a - b);
+  const q = (p: number) => spreads[Math.min(spreads.length - 1, Math.floor(p * spreads.length))];
+  return { lo: q(0.025), hi: q(0.975), mid: spreads[Math.floor(spreads.length / 2)] };
+}
+
+console.log("\n【6】统计显著性检验（分块自助法，块长 10 日 × 2000 次重采样）");
+console.log("  H0：看多与看空的前瞻收益无差异。若区间跨越 0，则不能拒绝 H0。\n");
+
+for (const k of HORIZONS) {
+  const byDate: Array<{ date: string; bull: number[]; bear: number[] }> = [];
+  for (let d = MIN_DAYS; d < calendar.length; d += 1) {
+    const day = calendar[d];
+    const bull: number[] = [];
+    const bear: number[] = [];
+    for (const s of full.stocks) {
+      const v = forwardReturn(s.close, d, k);
+      if (v === null) continue;
+      const snapStock = cut(s, d);
+      let action: SignalAction;
+      try {
+        action = deriveSignal(snapStock, rules as never).action;
+      } catch {
+        continue;
+      }
+      if (action === "买入" || action === "增持") bull.push(v);
+      else if (action === "卖出" || action === "减持") bear.push(v);
+    }
+    byDate.push({ date: day, bull, bear });
+  }
+
+  const ci = blockBootstrapSpread(byDate, 10, 2000);
+  if (ci === null) {
+    console.log(`  +${k}日: 样本不足以做分块自助（需要至少 ${10 * 2} 个交易日）`);
+    continue;
+  }
+  const crossesZero = ci.lo <= 0 && ci.hi >= 0;
+  console.log(
+    `  +${String(k).padStart(2)}日  价差中位数 ${(ci.mid >= 0 ? "+" : "") + ci.mid.toFixed(2)}pp` +
+      `  95% 区间 [${(ci.lo >= 0 ? "+" : "") + ci.lo.toFixed(2)}, ${(ci.hi >= 0 ? "+" : "") + ci.hi.toFixed(2)}]pp` +
+      `  ${crossesZero ? "→ 跨 0，不能拒绝 H0" : "→ 不跨 0，差异显著"}`,
+  );
+}
+
+// ── 逐日方向检验：最直观也最不依赖分布假设 ────────────────────
+//
+// 把每个交易日当作一个独立观测（n = 回放天数），比较当天的
+// 看多组均值与看空组均值。这同时规避了"个股相关性"与"样本重叠"
+// 带来的虚假精度——虽然 20 日窗口仍有重叠，但每个日期只贡献一个数。
+console.log("\n【6.5】逐日方向检验（把每天当作一个观测）\n");
+for (const k of HORIZONS) {
+  let bullWins = 0;
+  let bearWins = 0;
+  let ties = 0;
+  const diffs: number[] = [];
+  for (let d = MIN_DAYS; d < calendar.length; d += 1) {
+    const bull: number[] = [];
+    const bear: number[] = [];
+    for (const s of full.stocks) {
+      const v = forwardReturn(s.close, d, k);
+      if (v === null) continue;
+      let action: SignalAction;
+      try {
+        action = deriveSignal(cut(s, d), rules as never).action;
+      } catch {
+        continue;
+      }
+      if (action === "买入" || action === "增持") bull.push(v);
+      else if (action === "卖出" || action === "减持") bear.push(v);
+    }
+    if (bull.length === 0 || bear.length === 0) continue;
+    const diff =
+      bull.reduce((a, x) => a + x, 0) / bull.length - bear.reduce((a, x) => a + x, 0) / bear.length;
+    diffs.push(diff);
+    if (diff > 0.05) bullWins += 1;
+    else if (diff < -0.05) bearWins += 1;
+    else ties += 1;
+  }
+  const n = diffs.length;
+  if (n === 0) {
+    console.log(`  +${k}日: 无有效观测`);
+    continue;
+  }
+  const mean = diffs.reduce((a, b) => a + b, 0) / n;
+  const sd = Math.sqrt(diffs.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, n - 1));
+  const se = sd / Math.sqrt(n);
+  const t = se > 0 ? mean / se : 0;
+  const pct = ((bearWins / n) * 100).toFixed(0);
+  // 重叠校正：h 日前瞻收益按日采样时，相邻观测共享 h-1/h 的窗口，
+  // 均值的方差约被放大 h 倍（随机游走近似），故 t_有效 ≈ t / √h。
+  // 不做这一步就会把显著性高估约 √h 倍（20 日窗口约 4.5 倍）。
+  const tAdj = t / Math.sqrt(k);
+  const verdict = Math.abs(tAdj) >= 1.96 ? "显著" : "不显著";
+  console.log(
+    `  +${String(k).padStart(2)}日  有效天数 ${String(n).padStart(2)}` +
+      `  看多占优 ${String(bullWins).padStart(2)} 天 / 看空占优 ${String(bearWins).padStart(2)} 天` +
+      `  看空占优 ${pct}%  均值差 ${(mean >= 0 ? "+" : "") + mean.toFixed(2)}pp` +
+      `  t=${t.toFixed(2)} → 重叠校正后 t≈${tAdj.toFixed(2)}（${verdict}）`,
+  );
+}
+console.log("\n  读法：「看空占优比例」高于 50% 说明该区间内信号方向与市场相反。");
+console.log("        但必须看**校正后**的 t：20 日窗口的重叠会把 t 高估约 4.5 倍，");
+console.log("        未校正的 t=-5 看似极显著，校正后往往就落在临界值附近。");
+
+console.log("\n【7】有效样本量（为什么 5520 这个数字有误导性）");
+{
+  const nDays = calendar.length - MIN_DAYS;
+  console.log(`  回放交易日: ${nDays} 天`);
+  console.log(`  20 日前瞻的独立窗口数: 约 ${Math.floor(nDays / 20)} 个（重叠样本会重复计数）`);
+  console.log(`  个股数: ${full.stocks.length} 只，但同属一个市场，相关性极高`);
+  console.log(`  → 名义样本 5520，有效样本量远低于此，量级更接近"独立窗口数 × 有效板块数"`);
+}
+
 console.log(
   "\n⚠ 以上为行为压测，非策略有效性证明：样本仅 92 只、约 60 个交易日，" +
     "\n  且同一区间内个股高度相关（同涨同跌），统计意义有限。\n",
