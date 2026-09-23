@@ -921,3 +921,79 @@ code {
   font-weight: 600;
   text-align: center;
 }
+
+/* ── 交易信号 ────────────────────────────────────────────────
+   配色沿用 A 股习惯：红=看多（--good），绿=看空（--bad），灰=不表态。
+   注意这里的 good/bad 语义是"信号方向"，与涨跌色一致，不要按西方习惯反过来。 */
+.signal-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.signal-badge.signal-sm {
+  padding: 1px 6px;
+  font-size: 11px;
+}
+.signal-badge .signal-strength {
+  font-weight: 500;
+  opacity: 0.75;
+}
+.signal-good {
+  background: var(--good-soft);
+  color: var(--good);
+}
+.signal-bad {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.signal-muted {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.signal-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+}
+.signal-hero .signal-action {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  line-height: 1.1;
+}
+.signal-hero .signal-headline {
+  font-size: 13px;
+  line-height: 1.5;
+  opacity: 0.9;
+}
+
+.signal-meter {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.signal-meter-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+.signal-meter-fill.signal-good { background: var(--good); }
+.signal-meter-fill.signal-bad { background: var(--bad); }
+.signal-meter-fill.signal-muted { background: var(--muted); }
+
+/* 信号总览里的统计 chip（纯展示，不可点击） */
+.chip-static {
+  cursor: default;
+  background: var(--surface-2);
+}

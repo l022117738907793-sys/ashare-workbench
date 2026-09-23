@@ -9,6 +9,7 @@ import {
   type ReasonItem,
   type StockMetrics,
   type ThesisReview,
+  type TradeSignal,
 } from "@aw/core";
 import { sourceLabel, type Quote } from "@aw/data";
 import {
@@ -19,6 +20,7 @@ import {
   type Tone,
 } from "../lib/helpers";
 import { Card, Notice, ReasonList, StateBadge } from "./common";
+import { SignalCard } from "./SignalCard";
 
 const THESIS_TYPES = ["技术形态", "消息催化", "基本面", "资金流向", "情绪博弈"];
 const HORIZONS: Array<{ key: string; label: string }> = [
@@ -41,6 +43,8 @@ export interface AnalysisProps {
   snapshotAsOf: string | null;
   /** 分类判定（classifyStock）的逐条依据 */
   classificationReasons: ReasonItem[];
+  /** 交易信号（deriveSignal）；个股不在池中时为 null */
+  signal: TradeSignal | null;
   onBack: () => void;
   onOpenSettings: () => void;
   onSaveLearning: (question: string, answer: string) => void;
@@ -59,6 +63,7 @@ export function AnalysisView(props: AnalysisProps) {
     snapshotPrice,
     snapshotAsOf,
     classificationReasons,
+    signal,
     onBack,
     onOpenSettings,
     onSaveLearning,
@@ -155,6 +160,8 @@ export function AnalysisView(props: AnalysisProps) {
   return (
     <div className="view">
       <BackBar name={name} code={code} onBack={onBack} />
+
+      {signal && <SignalCard signal={signal} />}
 
       <Card title="实时价格" subtitle="行情来自下方标注的数据源；取不到就显示快照价，不猜。">
         {quote ? (

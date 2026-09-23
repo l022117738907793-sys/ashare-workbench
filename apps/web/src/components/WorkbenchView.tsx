@@ -1,5 +1,5 @@
 /** 第一层～第三层：大盘环境 → 板块强弱 → 个股分类（漏斗）。 */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { MarketResult, SectorResult, StockMetrics } from "@aw/core";
 import { sourceLabel, type Quote } from "@aw/data";
 import {
@@ -10,7 +10,9 @@ import {
   NOT_ENOUGH_BANNER,
   type StockGroup,
 } from "../lib/helpers";
+import type { TradeSignal } from "@aw/core";
 import { Card, EmptyHint, Notice, ReasonList, StateBadge } from "./common";
+import { SignalBadge, SignalSummary } from "./SignalCard";
 
 export interface WorkbenchProps {
   market: MarketResult;
@@ -27,6 +29,8 @@ export interface WorkbenchProps {
   totalStocks: number;
   filteredStocks: number;
   mainIndexText: string | null;
+  /** 全池交易信号，按强度降序 */
+  signals: TradeSignal[];
 }
 
 export function WorkbenchView(props: WorkbenchProps) {
@@ -45,6 +49,7 @@ export function WorkbenchView(props: WorkbenchProps) {
     totalStocks,
     filteredStocks,
     mainIndexText,
+    signals,
   } = props;
 
   const firstNonEmpty = groups.findIndex((g) => g.items.length > 0);
@@ -55,9 +60,12 @@ export function WorkbenchView(props: WorkbenchProps) {
     setClosed((s) => ({ ...s, [type]: isOpen(type, idx) }));
 
   const selectedSector = sectors.find((s) => s.code === sectorCode) ?? null;
+  const signalByCode = useMemo(() => new Map(signals.map((s) => [s.code, s])), [signals]);
 
   return (
     <div className="view">
+      <SignalSummary signals={signals} />
+
       <Card
         title="① 大盘环境"
         subtitle="沪深300 + 股票池赚钱效应"
@@ -200,6 +208,7 @@ export function WorkbenchView(props: WorkbenchProps) {
                             <span className="name">{r.name}</span>
                             <span className="code">{r.code}</span>
                             <StateBadge state={r.type} size="sm" />
+                            {signalByCode.get(r.code) && <SignalBadge signal={signalByCode.get(r.code)!} size="sm" />}
                             {r.subtype && <span className="tag">{r.subtype}</span>}
                           </span>
                           <span className="row-metrics">

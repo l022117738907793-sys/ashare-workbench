@@ -13,6 +13,8 @@ import {
   buildReport,
   classifyStock,
   computeStockMetrics,
+  deriveSignal,
+  deriveSignals,
   type AnalysisReport,
   type Maybe,
   type SectorResult,
@@ -282,6 +284,19 @@ export default function App() {
     () => (liveSnapshot ? liveSnapshot.stocks.map((s) => classifyStock(s, rules)) : []),
     [liveSnapshot, rules],
   );
+
+  /** 全池交易信号，按强度降序 */
+  const liveSignals = useMemo(
+    () => (liveSnapshot ? deriveSignals(liveSnapshot.stocks, rules) : []),
+    [liveSnapshot, rules],
+  );
+
+  /** 当前选中个股的信号（不在池中则为 null） */
+  const selectedSignal = useMemo(() => {
+    if (!liveSnapshot || !selectedCode) return null;
+    const stock = liveSnapshot.stocks.find((s) => s.code === selectedCode);
+    return stock ? deriveSignal(stock, rules) : null;
+  }, [liveSnapshot, selectedCode, rules]);
 
   const liveMetrics = useMemo(() => {
     const m = new Map<string, StockMetrics>();
@@ -588,6 +603,7 @@ export default function App() {
             totalStocks={snapshot.stocks.length}
             filteredStocks={filteredStocks.length}
             mainIndexText={mainIndexText}
+            signals={liveSignals}
           />
         )}
 
@@ -605,6 +621,7 @@ export default function App() {
             snapshotPrice={snapshotPrice}
             snapshotAsOf={metaAsOf}
             classificationReasons={analysis.reasons}
+            signal={selectedSignal}
             onBack={() => setTab("workbench")}
             onOpenSettings={() => setTab("settings")}
             onSaveLearning={saveLearning}

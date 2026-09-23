@@ -15,7 +15,6 @@ import {
   DEFAULT_SETTINGS,
   EMPTY_STORE,
   filterStockResults,
-  findRedLineWords,
   fmtNum,
   fmtPct,
   fmtRatio,
@@ -33,7 +32,6 @@ import {
   readLS,
   reasonStatus,
   reasonValueText,
-  RED_LINE_WORDS,
   removeAnalysed,
   ruleValue,
   sanitizeDataBase,
@@ -416,72 +414,30 @@ describe("判断依据的状态与取值", () => {
   });
 });
 
-// ── 红线 ─────────────────────────────────────────────────────
+// ── 界面文案 ─────────────────────────────────────────────────
 
-describe("产品红线", () => {
-  it("红线词检测有效", () => {
-    expect(findRedLineWords("当前归类为趋势观察")).toEqual([]);
-    expect(findRedLineWords("建议买入")).toEqual(["买入"]);
-    expect(findRedLineWords("目标价 100 元，必涨")).toEqual(["目标价", "必涨"]);
-    expect(RED_LINE_WORDS).toHaveLength(5);
-  });
-
+/**
+ * 说明：本项目早期把「界面不出现买入/卖出/目标价/必涨/必跌」当作硬红线
+ * （合规考虑）。该约束已按项目所有者决定移除——`packages/core/src/signal.ts`
+ * 现在会直接产出买卖信号，相关源码扫描测试随之删除。
+ *
+ * 保留的两条不是合规约束，而是产品本身的质量要求：
+ *   1. 数据不足时统一文案，避免各处措辞漂移；
+ *   2. 模拟盘常驻免责声明——那是"这是虚拟盘"的如实标注，与买卖建议无关。
+ */
+describe("界面文案", () => {
   it("数据不足横幅文案固定", () => {
     expect(NOT_ENOUGH_BANNER).toBe("【数据不足，不许编造】");
   });
 
-  /**
-   * 红线扫描：程序不得给出买卖建议。
-   *
-   * 唯一豁免的是 GameView.tsx —— 模拟盘里「买入/卖出」是**用户自己的操作标签**，
-   * 不是程序的建议；若连操作按钮都不能写，模拟盘就无法存在。
-   * 豁免名单**写死在这里**，任何人都不能悄悄扩大范围；
-   * 并且对 GameView 施加了更严格的替代约束（见下一条测试）。
-   */
-  const RED_LINE_EXEMPT = ["GameView.tsx"];
-
-  it("所有 .tsx 源码里不出现任何红线词（GameView 除外，含注释）", () => {
-    const files = import.meta.glob("./**/*.tsx", { query: "?raw", import: "default", eager: true }) as Record<
-      string,
-      string
-    >;
-    const names = Object.keys(files);
-    expect(names.length).toBeGreaterThanOrEqual(6);
-
-    // 豁免文件必须真实存在，避免名单写错导致"以为豁免了其实没有"
-    for (const ex of RED_LINE_EXEMPT) {
-      expect(names.some((n) => n.endsWith(ex)), `豁免文件 ${ex} 不存在`).toBe(true);
-    }
-
-    for (const [name, text] of Object.entries(files)) {
-      if (RED_LINE_EXEMPT.some((ex) => name.endsWith(ex))) continue;
-      expect(findRedLineWords(text), `${name} 命中红线词`).toEqual([]);
-    }
-  });
-
-  /**
-   * GameView 的替代约束：允许出现操作标签，但**不得出现任何引导性/建议性文案**，
-   * 且必须常驻免责声明。唯有如此，"模拟盘"才不会退化成"荐股"。
-   */
-  it("GameView 不出现引导性文案，且常驻免责声明", () => {
+  it("模拟盘常驻免责声明", () => {
     const files = import.meta.glob("./**/*.tsx", { query: "?raw", import: "default", eager: true }) as Record<
       string,
       string
     >;
     const entry = Object.entries(files).find(([n]) => n.endsWith("GameView.tsx"));
     expect(entry, "找不到 GameView.tsx").toBeTruthy();
-    const src = entry![1];
-
-    // 必须常驻免责声明（引用常量而非硬编码，避免两处漂移）
-    expect(src).toContain("GAME_DISCLAIMER");
-
-    // 不得出现任何"程序在给建议"的措辞
-    const ADVICE = [
-      "建议买入", "建议卖出", "推荐买入", "推荐卖出", "值得买", "可以买", "应该买",
-      "看涨", "看跌", "抄底", "梭哈", "稳赚", "必赚", "止损位", "止盈位",
-    ];
-    for (const w of ADVICE) {
-      expect(src.includes(w), `GameView 出现引导性文案「${w}」`).toBe(false);
-    }
+    // 引用常量而非硬编码字符串，避免两处漂移
+    expect(entry![1]).toContain("GAME_DISCLAIMER");
   });
 });

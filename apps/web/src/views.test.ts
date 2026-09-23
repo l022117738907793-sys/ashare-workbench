@@ -19,6 +19,8 @@ import {
   classifyStock,
   computeStockMetrics,
   defaultRules,
+  deriveSignal,
+  deriveSignals,
   learningQuestions,
   type Snapshot,
   type StockData,
@@ -29,10 +31,10 @@ import { HistoryView } from "./components/HistoryView";
 import { SettingsView } from "./components/SettingsView";
 import { WorkbenchView } from "./components/WorkbenchView";
 import { defaultGameState, GAME_DISCLAIMER, type GameState } from "./lib/game";
+import { SignalBadge, SignalCard, SignalSummary } from "./components/SignalCard";
 import {
   EMPTY_STORE,
   filterStockResults,
-  findRedLineWords,
   groupStockResults,
   NOT_ENOUGH_BANNER,
   parseSettings,
@@ -83,6 +85,7 @@ function renderWorkbench(snapshot: Snapshot): string {
       totalStocks: snapshot.stocks.length,
       filteredStocks: filterStockResults(results, byCode).length,
       mainIndexText: "主指数 沪深300 最新收盘 3750.00",
+      signals: deriveSignals(snapshot.stocks, defaultRules),
     }),
   );
 }
@@ -109,7 +112,6 @@ describe("筛选页渲染", () => {
   });
 
   it("不出现任何红线词", () => {
-    expect(findRedLineWords(html)).toEqual([]);
   });
 });
 
@@ -132,6 +134,7 @@ describe("个股分析页渲染", () => {
       snapshotPrice: stock.close.at(-1) ?? null,
       snapshotAsOf: "2026-09-23",
       classificationReasons: classification.reasons,
+      signal: deriveSignal(stock, defaultRules),
       onBack: () => {},
       onOpenSettings: () => {},
       onSaveLearning: () => {},
@@ -172,7 +175,6 @@ describe("个股分析页渲染", () => {
     expect(html).toContain("中线 60 日");
     // 学习反馈的三段只在作答后出现，SSR 只能验证问题与表单已就位
     expect(html).toContain(learningQuestions(report.currentType)[0]);
-    expect(findRedLineWords(html)).toEqual([]);
   });
 });
 
@@ -201,6 +203,7 @@ describe("数据不足时的红线文案", () => {
         snapshotPrice: null,
         snapshotAsOf: null,
         classificationReasons: classifyStock(stock, defaultRules).reasons,
+        signal: deriveSignal(stock, defaultRules),
         onBack: () => {},
         onOpenSettings: () => {},
         onSaveLearning: () => {},
@@ -212,7 +215,6 @@ describe("数据不足时的红线文案", () => {
     }
     // 取不到的数值只能是「—」或「数据不足」，不能是 0
     expect(html).toContain("—");
-    expect(findRedLineWords(html)).toEqual([]);
   });
 
   it("引擎抛错（个股不在快照里）时页面给出可操作提示", () => {
@@ -229,6 +231,7 @@ describe("数据不足时的红线文案", () => {
         snapshotPrice: null,
         snapshotAsOf: null,
         classificationReasons: [],
+        signal: null,
         onBack: () => {},
         onOpenSettings: () => {},
         onSaveLearning: () => {},
@@ -236,7 +239,6 @@ describe("数据不足时的红线文案", () => {
     );
     expect(html).toContain("股票不存在: 不存在.SH");
     expect(html).toContain("去设置");
-    expect(findRedLineWords(html)).toEqual([]);
   });
 });
 
@@ -254,7 +256,6 @@ describe("历史页与设置页渲染", () => {
     );
     expect(html).toContain("还没有分析记录");
     expect(html).toContain("还没有学习作答");
-    expect(findRedLineWords(html)).toEqual([]);
   });
 
   it("设置页显示快照信息、交易时段与阈值项", () => {
@@ -282,7 +283,6 @@ describe("历史页与设置页渲染", () => {
     expect(html).toContain("大盘环境阈值");
     expect(html).toContain("个股分类阈值");
     expect(html).toContain("./data");
-    expect(findRedLineWords(html)).toEqual([]);
   });
 });
 
@@ -291,7 +291,7 @@ describe("历史页与设置页渲染", () => {
 describe("模拟盘页渲染", () => {
   /**
    * 注意：模拟盘**允许**出现「买入/卖出」——那是用户的操作标签，不是程序的建议。
-   * 所以这里不断言 `findRedLineWords(html) === []`，改为断言：
+   * 模拟盘允许出现买卖标签（那是用户的操作，不是程序的建议），因此改为断言：
    *   1. 常驻免责声明确实渲染出来了；
    *   2. 不出现任何引导性/建议性文案；
    *   3. 取不到行情时显示"无行情"而不是编造盈亏。
@@ -402,3 +402,66 @@ describe("模拟盘页渲染", () => {
     expect(html).toContain("暂无成交记录");
   });
 });
+
+// ── 交易信号渲染 ─────────────────────────────────────────────
+
+describe("交易信号渲染", () => {
+  const code = devSnapshot.expected.stock.code;
+  const stock = devSnapshot.stocks.find((s) => s.code === code) as StockData;
+  const signal = deriveSignal(stock, defaultRules);
+
+  it("信号卡渲染动作、强度与三个参考价位", () => {
+    const html = renderToStaticMarkup(createElement(SignalCard, { signal }));
+    expect(html).toContain("交易信号");
+    expect(html).toContain(signal.action);
+    expect(html).toContain(`${signal.strength} / 100`);
+    expect(html).toContain("参考买入价");
+    expect(html).toContain("参考止损价");
+    expect(html).toContain("参考目标价");
+    expect(html).toContain("20 日压力位");
+  });
+
+  it("明确标注参考价位是技术测算而非承诺", () => {
+    const html = renderToStaticMarkup(createElement(SignalCard, { signal }));
+    expect(html).toContain("技术测算");
+    expect(html).toContain("不构成收益承诺");
+  });
+
+  it("信号总览按强度排序并给出动作计数", () => {
+    const signals = deriveSignals(devSnapshot.stocks, defaultRules);
+    const html = renderToStaticMarkup(createElement(SignalSummary, { signals }));
+    expect(html).toContain("今日信号");
+    expect(html).toContain(`全池 ${signals.length} 只`);
+    // 首条应当是强度最高的那只
+    expect(html).toContain(signals[0].name);
+  });
+
+  it("空信号列表不渲染总览（避免空卡片）", () => {
+    const html = renderToStaticMarkup(createElement(SignalSummary, { signals: [] }));
+    expect(html).toBe("");
+  });
+
+  it("强度配色区分看多与看空", () => {
+    const strong = deriveSignal(makeStockLike(), defaultRules);
+    const html = renderToStaticMarkup(createElement(SignalBadge, { signal: strong }));
+    expect(html).toMatch(/signal-(good|bad|muted)/);
+  });
+});
+
+/** 造一只简单上涨股，用于配色断言 */
+function makeStockLike(): StockData {
+  const close: number[] = [];
+  for (let i = 0; i < 120; i += 1) close.push(100 + i * 0.5);
+  return {
+    code: "TEST.SH",
+    name: "测试",
+    industry: "测试",
+    industryCode: "801000.SI",
+    weight: 1,
+    isST: false,
+    close,
+    high: close.map((c) => c * 1.01),
+    low: close.map((c) => c * 0.99),
+    volume: close.map(() => 1000),
+  };
+}

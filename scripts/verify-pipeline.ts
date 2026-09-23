@@ -21,6 +21,7 @@ import {
   type SectorData,
   type StockData,
 } from "../packages/core/src/engine";
+import { deriveSignals, signalCounts, SIGNAL_ORDER } from "../packages/core/src/signal";
 import rules from "../packages/core/rules.json";
 
 const ROOT = process.cwd();
@@ -137,6 +138,42 @@ const thesis = reviewThesis(
 console.log(`  复盘对照表 ${thesis.rows.length} 行:`);
 for (const r of thesis.rows) console.log(`    · ${r.reasonType.padEnd(5)} → ${r.conclusion}`);
 check(thesis.rows.length >= 3, "复盘表行数 ≥3");
+
+// ── 交易信号（叠加层）──────────────────────────────────────────
+console.log("\n[交易信号] deriveSignals 叠加层");
+const signals = deriveSignals(snapshot.stocks, rules as never);
+const sc = signalCounts(signals);
+console.log(`  分布: ${SIGNAL_ORDER.filter((a) => sc[a]).map((a) => `${a} ${sc[a]}`).join(" / ")}`);
+check(signals.length === snapshot.stocks.length, `每只股票都有信号 (${signals.length})`);
+check(
+  signals.every((x) => SIGNAL_ORDER.includes(x.action)),
+  "信号动作取值全部合法",
+);
+check(
+  signals.every((x) => x.strength >= 0 && x.strength <= 100 && Number.isInteger(x.strength)),
+  "信号强度均在 0-100 且为整数",
+);
+check(
+  signals.every((x, i) => i === 0 || signals[i - 1].strength >= x.strength),
+  "按强度降序排列",
+);
+// 强度最高的不应是"数据不足"的股票
+check(signals[0].action !== "观望", `强度第一的是「${signals[0].action}」而非观望`);
+// 价位合理性：止损 < 买入 < ... 且目标 > 现价
+const withLevels = signals.filter((x) => x.levels.stop !== null && x.levels.entry !== null && x.levels.target !== null);
+check(withLevels.length > 0, `${withLevels.length} 只给出了完整参考价位`);
+check(
+  withLevels.every((x) => x.levels.stop! < x.levels.entry!),
+  "所有参考止损均低于参考买入价",
+);
+console.log("  强度前 5:");
+for (const x of signals.slice(0, 5)) {
+  console.log(
+    `    · ${x.name.padEnd(8)} ${x.action.padEnd(4)} 强度=${String(x.strength).padStart(3)}  ` +
+      `买入=${x.levels.entry ?? "—"} 止损=${x.levels.stop ?? "—"} 目标=${x.levels.target ?? "—"}`,
+  );
+}
+console.log(`  样例结论: ${signals[0].headline}`);
 
 console.log(`\n════════ 集成验证：${fail === 0 ? "全部通过" : fail + " 项失败"} ════════`);
 if (fail > 0) process.exitCode = 1;
