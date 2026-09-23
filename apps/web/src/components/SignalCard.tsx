@@ -6,8 +6,8 @@
  * 这是产品当前唯一的诚实性要求：可以给方向，但不假装确定。
  */
 import { SIGNAL_ORDER, type SignalAction, type TradeSignal } from "@aw/core";
-import { fmtNum } from "../lib/helpers";
-import { Card } from "./common";
+import { fmtNum, SIGNAL_BACKTEST_CAVEAT } from "../lib/helpers";
+import { Card, Notice } from "./common";
 
 /** 动作 → 色调。红=看多，绿=看空，灰=不表态 */
 function actionTone(action: SignalAction): "good" | "bad" | "muted" {
@@ -34,6 +34,8 @@ export function SignalCard({ signal }: { signal: TradeSignal }) {
 
   return (
     <Card title="交易信号" subtitle="由引擎分类与动量、量能派生；参考价位为技术测算">
+      <Notice tone="warn">{SIGNAL_BACKTEST_CAVEAT}</Notice>
+
       <div className={`signal-hero signal-${tone}`}>
         <span className="signal-action">{signal.action}</span>
         <span className="signal-headline">{signal.headline}</span>
@@ -121,7 +123,8 @@ export function SignalSummary({ signals }: { signals: TradeSignal[] }) {
         ))}
       </ul>
       <p className="field-hint">
-        参考价位由 ATR 推算，属技术测算，不构成收益承诺；请结合自身判断使用。
+        参考价位由 ATR 推算，属技术测算，不构成收益承诺。
+        信号<strong>尚未通过历史验证</strong>（详见个股分析页的说明），请结合自身判断使用。
       </p>
     </Card>
   );

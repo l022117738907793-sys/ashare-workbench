@@ -423,6 +423,12 @@ describe("交易信号渲染", () => {
     expect(html).toContain("20 日压力位");
   });
 
+  it("如实披露信号尚未通过历史验证", () => {
+    const html = renderToStaticMarkup(createElement(SignalCard, { signal }));
+    expect(html).toContain("尚未通过历史验证");
+    expect(html).toContain("请作为参考而非依据");
+  });
+
   it("明确标注参考价位是技术测算而非承诺", () => {
     const html = renderToStaticMarkup(createElement(SignalCard, { signal }));
     expect(html).toContain("技术测算");
