@@ -418,6 +418,20 @@ describe("模拟盘页渲染", () => {
     expect(html).toContain("按最近收盘价成交");
   });
 
+  it("新闻排在交易之前（信息 → 决策的顺序）", () => {
+    const html = renderGame();
+    const iAccount = html.indexOf("账户总览");
+    const iNews = html.indexOf("市场快讯");
+    const iOrder = html.indexOf("模拟下单");
+    expect(iAccount).toBeGreaterThanOrEqual(0);
+    expect(iNews).toBeGreaterThanOrEqual(0);
+    expect(iOrder).toBeGreaterThanOrEqual(0);
+    // 账户状态 → 新闻 → 下单，顺序不能反：
+    // 新闻是决策依据，放在交易之后会让人先下完单才看到消息
+    expect(iAccount).toBeLessThan(iNews);
+    expect(iNews).toBeLessThan(iOrder);
+  });
+
   it("无持仓无成交时不崩，给引导文案", () => {
     const empty = startGame(200_000, 0);
     const html = renderGame({ state: empty, totalAssets: empty.account.cash, holdingsValue: 0 });
@@ -601,20 +615,6 @@ describe("模拟盘开局界面", () => {
 
   it("开局界面也常驻免责声明", () => {
     expect(renderSetup()).toContain(GAME_DISCLAIMER);
-  });
-
-  it("新闻排在交易之前（信息 → 决策的顺序）", () => {
-    const html = renderGame();
-    const iNews = html.indexOf("市场快讯");
-    const iOrder = html.indexOf("模拟下单");
-    const iAccount = html.indexOf("账户总览");
-    expect(iAccount).toBeGreaterThanOrEqual(0);
-    expect(iNews).toBeGreaterThanOrEqual(0);
-    expect(iOrder).toBeGreaterThanOrEqual(0);
-    // 账户状态 → 新闻 → 下单，这个顺序不能反：
-    // 新闻是决策依据，放在交易之后会让人先下单再看到消息
-    expect(iAccount).toBeLessThan(iNews);
-    expect(iNews).toBeLessThan(iOrder);
   });
 
   it("讲清了资金量对选股的限制", () => {
