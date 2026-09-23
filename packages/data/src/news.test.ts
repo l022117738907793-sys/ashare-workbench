@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchLatestNews, matchNewsToStock, type NewsItem, type NewsProvider } from "./news";
+import {
+  fetchLatestNews,
+  matchNewsToStock,
+  tonghuashunNewsProvider,
+  type NewsItem,
+  type NewsProvider,
+} from "./news";
 
 const item = (over: Partial<NewsItem> = {}): NewsItem => ({
   id: "n1",
@@ -80,5 +86,104 @@ describe("新闻与个股匹配", () => {
 
   it("空列表不抛错", () => {
     expect(matchNewsToStock([], "贵州茅台", "600519.SH")).toEqual([]);
+  });
+});
+
+describe("同花顺快讯 provider（离线，模拟其真实响应格式）", () => {
+  /**
+   * 这个 describe 存在的理由：同花顺的响应格式有两个反直觉之处，
+   * 都在实测中踩过 ——
+   *   1. 成功码是 `"200"`（字符串，仿 HTTP 语义），不是 0
+   *   2. **所有字段都是字符串**：id / ctime / rtime / nature / color
+   */
+  const realShape = {
+    code: "200",
+    msg: "成功",
+    data: {
+      list: [
+        {
+          id: "5236943",
+          title: "美国10年期国债收益率持续走高",
+          digest: "升至5.081%，为2007年7月以来最高",
+          url: "https://news.10jqka.com.cn/20260923/c1.shtml",
+          ctime: "1790178303",
+          rtime: "1790178303",
+          source: "",
+          nature: "0",
+          color: "1",
+        },
+        {
+          id: "5236900",
+          title: "WTI原油涨超2%",
+          digest: "",
+          ctime: "1790177325",
+          rtime: "1790177325",
+        },
+      ],
+    },
+  };
+
+  function withFetch(payload: unknown, fn: () => Promise<void>): Promise<void> {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      ({ ok: true, status: 200, json: async () => payload }) as Response) as typeof fetch;
+    return fn().finally(() => {
+      globalThis.fetch = original;
+    });
+  }
+
+  it("接受字符串形式的成功码 \"200\"", async () => {
+    await withFetch(realShape, async () => {
+      const items = await tonghuashunNewsProvider.fetchLatest(5);
+      expect(items).toHaveLength(2);
+      expect(items[0].title).toBe("美国10年期国债收益率持续走高");
+    });
+  });
+
+  it("字符串时间戳能正确解析为毫秒", async () => {
+    await withFetch(realShape, async () => {
+      const items = await tonghuashunNewsProvider.fetchLatest(5);
+      expect(items[0].timeKnown).toBe(true);
+      expect(items[0].at).toBe(1790178303 * 1000);
+      // 按时间降序
+      expect(items[0].at).toBeGreaterThan(items[1].at);
+    });
+  });
+
+  it("不使用 nature / color 字段（本项目不标利好利空）", async () => {
+    await withFetch(realShape, async () => {
+      const items = await tonghuashunNewsProvider.fetchLatest(5);
+      const keys = Object.keys(items[0]);
+      expect(keys).not.toContain("nature");
+      expect(keys).not.toContain("color");
+    });
+  });
+
+  it("时间缺失时标记 timeKnown=false，不伪装成 1970", async () => {
+    await withFetch(
+      { code: "200", data: { list: [{ id: "1", title: "无时间新闻" }] } },
+      async () => {
+        const items = await tonghuashunNewsProvider.fetchLatest(5);
+        expect(items[0].timeKnown).toBe(false);
+        expect(items[0].at).toBe(0);
+      },
+    );
+  });
+
+  it("真的失败码（如 500）会抛错，不会静默返回空", async () => {
+    await withFetch({ code: "500", msg: "服务异常", data: null }, async () => {
+      await expect(tonghuashunNewsProvider.fetchLatest(5)).rejects.toThrow(/500/);
+    });
+  });
+
+  it("空标题条目被丢弃", async () => {
+    await withFetch(
+      { code: "200", data: { list: [{ id: "1", title: "" }, { id: "2", title: "有标题" }] } },
+      async () => {
+        const items = await tonghuashunNewsProvider.fetchLatest(5);
+        expect(items).toHaveLength(1);
+        expect(items[0].title).toBe("有标题");
+      },
+    );
   });
 });
