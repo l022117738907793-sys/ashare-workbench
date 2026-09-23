@@ -6,6 +6,18 @@
 本项目是 `TushareWorkbench`（Swift + React 双端）的网页版重构：保留全部分析能力，
 把数据源换成实时可用的公开行情接口，并把引擎抽成可复用独立包。
 
+## 文档索引
+
+| 文档 | 内容 |
+|---|---|
+| [docs/user-guide.md](docs/user-guide.md) | 使用指南（面向使用者） |
+| [docs/analysis-rules.md](docs/analysis-rules.md) | 分析规则唯一事实来源 |
+| [docs/data-sources.md](docs/data-sources.md) | **行情**数据源实测（CORS/限频/字段表） |
+| [docs/news-sources.md](docs/news-sources.md) | **新闻**数据源实测（历史覆盖/抓取坑/版权） |
+| [docs/game-design.md](docs/game-design.md) | 模拟盘设计 |
+| [docs/gpt-game-review-2.md](docs/gpt-game-review-2.md) | 游戏模式设计评审（含实测证据） |
+| [docs/chatgpt-game-prompt.md](docs/chatgpt-game-prompt.md) | 给外部评审的提问稿 |
+
 ## 使用指南
 
 面向使用者（同学）的完整说明：**[docs/user-guide.md](docs/user-guide.md)**
