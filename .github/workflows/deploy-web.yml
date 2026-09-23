@@ -1,0 +1,59 @@
+name: Deploy Web to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  # 快照更新完成后自动重新部署（push 事件已覆盖，此处为兜底）
+  workflow_run:
+    workflows: ["Update Daily Snapshot"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时刻只允许一个 Pages 部署；后到的取消先到的
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Sync snapshot into web assets
+        # 只保留最新一份：运行期只读 latest.json 指向的快照，
+        # 历史快照打进 dist 只会浪费 Pages 带宽
+        run: node packages/data/scripts/sync_web_data.mjs --keep 1
+
+      - name: Build web app
+        run: npm run build --workspace @aw/web
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,12 @@
+{
+  "name": "@aw/data",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "数据层：快照加载 + 多源实时行情（东财 / 腾讯，自动降级）",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@aw/core": "*"
+  }
+}

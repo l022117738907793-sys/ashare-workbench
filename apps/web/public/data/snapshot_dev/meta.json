@@ -1,0 +1,13 @@
+{
+  "asOf": "2026-09-23",
+  "generatedAt": "2026-09-23",
+  "days": 90,
+  "source": "packages/core/fixtures（真实快照 fixture，开发用）",
+  "poolNote": "股票池 13 只（fixture 原始池，未扩充）",
+  "calendarNote": "按工作日倒推 90 天生成，仅剔除周末；fixture 不含节假日数据",
+  "devFixture": true,
+  "fixtureId": "market_normal_sector_active_stock_high",
+  "rulesNote": "规则阈值以 @aw/core rules.json 为准；fixture 自带 rules 仅用于一致性测试",
+  "etfsNote": "fixture 不含 etfs 字段，etfs.json 为空数组（不编造）",
+  "realtimeNote": "fixture 股票代码为合成代码（如 P0/TREND），腾讯/东财实时行情无法识别，实时链路会降级为本地快照"
+}

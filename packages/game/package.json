@@ -1,0 +1,9 @@
+{
+  "name": "@aw/game",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "模拟投资游戏：虚拟账户 + A股撮合规则 + 绩效结算（纯函数，零依赖）",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts"
+}

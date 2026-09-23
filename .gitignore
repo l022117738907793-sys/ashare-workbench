@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+coverage/
+.vite/
+__pycache__/
+*.pyc
+
+# 快照生成本地缓存（K线原始响应），不入库；快照本身要提交，CI 构建依赖它
+data/cache/
