@@ -14,9 +14,18 @@ import { useMemo, useState } from "react";
 import { LOT_SIZE, type SeasonResult, type Side } from "@aw/game";
 import type { StockData, StockResult } from "@aw/core";
 import { sourceLabel, type Quote } from "@aw/data";
-import { GAME_DISCLAIMER, positionPnl, suggestedMaxShares, type GameState } from "../lib/game";
+import {
+  CASH_OPTIONS,
+  DEFAULT_INITIAL_CASH,
+  GAME_DISCLAIMER,
+  positionPnl,
+  suggestedMaxShares,
+  type GameState,
+} from "../lib/game";
 import { fmtNum, fmtPct } from "../lib/helpers";
 import { Card, EmptyHint, KV, Notice, StateBadge } from "./common";
+import { NewsPanel } from "./NewsPanel";
+import type { LiveNewsState } from "../lib/useLiveNews";
 
 export interface GameViewProps {
   state: GameState;
@@ -27,10 +36,14 @@ export interface GameViewProps {
   /** 引擎分类，作为客观依据展示（不是操作建议） */
   resultsByCode: Map<string, StockResult>;
   onOrder: (code: string, side: Side, shares: number) => { ok: boolean; reason?: string };
+  /** 开局：按选定资金建立新账户 */
+  onStart: (initialCash: number) => void;
   onReset: () => void;
   onSettle: () => SeasonResult | null;
   /** 打开撮合规则讲解页 */
   onOpenRules: () => void;
+  /** 新闻数据（由 useLiveNews 提供） */
+  news: LiveNewsState;
   sessionText: string;
   isTradingNow: boolean;
   benchmarkName: string;
@@ -51,12 +64,13 @@ function Metric({ k, v, tone }: { k: string; v: string; tone?: "good" | "bad" | 
 export function GameView(props: GameViewProps) {
   const {
     state, prices, quotesByCode, stocks, resultsByCode,
-    onOrder, onReset, onSettle, onOpenRules, sessionText, isTradingNow,
+    onOrder, onStart, onReset, onSettle, onOpenRules, news, sessionText, isTradingNow,
     benchmarkName, benchmarkReturnPct, totalAssets, holdingsValue,
   } = props;
 
   const { account, equity } = state;
   const [side, setSide] = useState<Side>("buy");
+  const [cashChoice, setCashChoice] = useState<number>(DEFAULT_INITIAL_CASH);
   const [code, setCode] = useState("");
   const [sharesText, setSharesText] = useState("100");
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -94,6 +108,58 @@ export function GameView(props: GameViewProps) {
     } else {
       setFeedback({ ok: false, msg: res.reason ?? "下单失败。" });
     }
+  }
+
+  // ── 未开局：先设初始资金 ──────────────────────────────────
+  if (state.status === "idle") {
+    return (
+      <div className="view">
+        <p className="game-disclaimer" role="note">
+          ⚠️ {GAME_DISCLAIMER}
+        </p>
+
+        <Card title="开始一局" subtitle="这是实时模式：从现在开始，按现实规则结算">
+          <p className="rule-body">
+            先选初始资金。金额决定了你能买什么 —— A 股一手 100 股，
+            10 万元买不起一手高价股（比如 2026-09 的茅台一手约 12.5 万）。
+            <strong>这个约束本身就是练习的一部分。</strong>
+          </p>
+
+          <div className="cash-options">
+            {CASH_OPTIONS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                className={`chip${cashChoice === c ? " chip-active" : ""}`}
+                onClick={() => setCashChoice(c)}
+              >
+                {c / 10000} 万
+              </button>
+            ))}
+          </div>
+
+          <div className="kv-list">
+            <KV k="结算方式" v="真实行情，按现实规则（T+1、涨跌停、手续费、滑点）" />
+            <KV k="交易时段" v={`${sessionText} · 非交易时段下单按最近收盘价成交并标注`} />
+            <KV k="成绩基准" v={`跑赢${benchmarkName}才算有效成绩`} />
+            <KV k="数据来源" v="行情：腾讯/东方财富　新闻：东方财富 7x24" />
+          </div>
+
+          <Notice tone="info">
+            开局后账户不可恢复，但可以随时重置重来。所有数据只存在你自己的浏览器里。
+          </Notice>
+
+          <div className="btn-row">
+            <button type="button" className="btn btn-primary" onClick={() => onStart(cashChoice)}>
+              以 {cashChoice / 10000} 万开始
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={onOpenRules}>
+              撮合规则说明
+            </button>
+          </div>
+        </Card>
+      </div>
+    );
   }
 
   return (
@@ -368,6 +434,16 @@ export function GameView(props: GameViewProps) {
           </ul>
         )}
       </Card>
+
+      <NewsPanel
+        items={news.items}
+        source={news.source}
+        degradedReason={news.degradedReason}
+        updatedAt={news.updatedAt}
+        loading={news.loading}
+        onRefresh={news.refresh}
+        holdings={account.holdings.map((h) => ({ code: h.code, name: h.name }))}
+      />
     </div>
   );
 }

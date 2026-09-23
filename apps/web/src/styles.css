@@ -1152,3 +1152,76 @@ code {
   gap: 6px;
   flex-shrink: 0;
 }
+
+/* 开局的资金档位选择 */
+.cash-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 14px;
+}
+.cash-options .chip {
+  min-width: 68px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 新闻面板 ────────────────────────────────────────────────
+   新闻是"原始信息"，样式上刻意做得比分析结论朴素：
+   不用彩色徽章、不做利好利空的视觉暗示。 */
+.news-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.news-row {
+  border-bottom: 1px solid var(--border);
+}
+.news-row:last-child {
+  border-bottom: none;
+}
+.news-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 0;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.news-head:hover {
+  background: var(--surface-2);
+}
+.news-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.news-title {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.news-toggle {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--accent);
+}
+.news-related {
+  flex-shrink: 0;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.news-digest {
+  margin: 0 0 10px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-2);
+}

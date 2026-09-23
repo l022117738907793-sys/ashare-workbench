@@ -53,6 +53,7 @@ import { Notice } from "./components/common";
 import {
   benchmarkCurve,
   defaultGameState,
+  startGame,
   lastBuyDates,
   LS_GAME,
   parseGameState,
@@ -86,6 +87,7 @@ import {
   type LocalStore,
 } from "./lib/helpers";
 import { useLiveQuotes } from "./lib/useLiveQuotes";
+import { useLiveNews } from "./lib/useLiveNews";
 
 // "rules" 与 "guide" 不是底部 tab，而是子页面：
 // "rules" 从模拟盘进入，"guide" 从页头进入（放在最显眼处，同学才会看到）
@@ -262,6 +264,11 @@ export default function App() {
     calendar,
     enabled: !!snapshot,
     nonce: reloadNonce,
+  });
+
+  // 新闻与行情节奏不同：行情 3~5 秒，新闻 3 分钟。只在模拟盘页且已开局时拉取。
+  const news = useLiveNews({
+    enabled: tab === "game" && game.status === "playing",
   });
 
   const session = sessionState(new Date(), calendar);
@@ -524,6 +531,10 @@ export default function App() {
     [stockByCode, gamePricesObj, live.today, isTradingNow, gameResults],
   );
 
+  const handleStartGame = useCallback((initialCash: number) => {
+    setGame(startGame(initialCash, Date.now()));
+  }, []);
+
   const handleResetGame = useCallback(() => setGame(defaultGameState()), []);
 
   const handleSettle = useCallback((): SeasonResult | null => {
@@ -687,9 +698,11 @@ export default function App() {
             stocks={snapshot?.stocks ?? []}
             resultsByCode={gameResults}
             onOrder={handleOrder}
+            onStart={handleStartGame}
             onReset={handleResetGame}
             onSettle={handleSettle}
             onOpenRules={() => setTab("rules")}
+            news={news}
             sessionText={sessionText}
             isTradingNow={isTradingNow}
             benchmarkName={benchmarkName}

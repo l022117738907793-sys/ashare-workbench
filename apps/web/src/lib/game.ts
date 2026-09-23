@@ -13,22 +13,67 @@ import {
 
 export const LS_GAME = "aw.game.v1";
 export const GAME_STORE_VERSION = 1;
-/** 初始虚拟资金 */
-export const DEFAULT_INITIAL_CASH = 1_000_000;
+/**
+ * 可选初始资金（元）。
+ *
+ * 为什么是 10~30 万：按 A 股一手 100 股算，10 万元能买的大多是中低价股，
+ * 买不起高价股的一手（如 2026-09 茅台一手约 12.5 万）。这个约束本身就是教学点 ——
+ * 资金量决定了可选标的范围与集中度。
+ */
+export const CASH_OPTIONS = [100_000, 150_000, 200_000, 250_000, 300_000] as const;
+/** 默认初始资金 */
+export const DEFAULT_INITIAL_CASH = 200_000;
+
+/** 是否为本局的有效资金（防止篡改出一个离谱的数字） */
+export function isValidInitialCash(v: number): boolean {
+  return Number.isFinite(v) && v >= 10_000 && v <= 10_000_000;
+}
 /** 净值曲线最多保留的点数（每交易日一个点，约两年） */
 export const EQUITY_MAX = 500;
 
+/**
+ * 本局状态。
+ * - `idle`：还没开局，界面显示设置初始资金
+ * - `playing`：进行中
+ */
+export type GameStatus = "idle" | "playing";
+
 export interface GameState {
   version: number;
+  status: GameStatus;
+  /** 本局开始时间（毫秒） */
+  startedAt: number | null;
   account: Account;
   /** 净值曲线，用于结算时算收益与最大回撤 */
   equity: EquityPoint[];
 }
 
+/** 空账户：未开局时用它占位，避免到处判空 */
+function emptyAccount(): Account {
+  return createAccount(0);
+}
+
 export function defaultGameState(): GameState {
   return {
     version: GAME_STORE_VERSION,
-    account: createAccount(DEFAULT_INITIAL_CASH),
+    status: "idle",
+    startedAt: null,
+    account: emptyAccount(),
+    equity: [],
+  };
+}
+
+/**
+ * 开局：按选定资金建立新账户。
+ * 已有账户会被**清空** —— 开局是一次性的，不需要二次确认（界面上会确认）。
+ */
+export function startGame(initialCash: number, at: number): GameState {
+  const cash = isValidInitialCash(initialCash) ? initialCash : DEFAULT_INITIAL_CASH;
+  return {
+    version: GAME_STORE_VERSION,
+    status: "playing",
+    startedAt: at,
+    account: createAccount(cash),
     equity: [],
   };
 }
@@ -74,8 +119,15 @@ export function parseGameState(raw: string | null | undefined): GameState {
           .slice(-EQUITY_MAX)
       : [];
 
+    // 向后兼容：旧存档没有 status/startedAt 字段。
+    // 旧存档一律视为「进行中」—— 用户已有持仓，不能因为升级就把账户清了。
+    const status: GameStatus = o.status === "idle" ? "idle" : "playing";
+    const startedAt = typeof o.startedAt === "number" ? o.startedAt : null;
+
     return {
       version: GAME_STORE_VERSION,
+      status,
+      startedAt,
       account: {
         initialCash,
         cash: Number.isFinite(a.cash) ? (a.cash as number) : initialCash,

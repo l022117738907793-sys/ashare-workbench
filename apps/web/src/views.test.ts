@@ -26,13 +26,16 @@ import {
   type StockData,
 } from "@aw/core";
 import { AnalysisView } from "./components/AnalysisView";
+import type { NewsItem } from "@aw/data";
 import { GameRulesView } from "./components/GameRulesView";
+import { NewsPanel } from "./components/NewsPanel";
+import type { LiveNewsState } from "./lib/useLiveNews";
 import { GuideView } from "./components/GuideView";
 import { GameView } from "./components/GameView";
 import { HistoryView } from "./components/HistoryView";
 import { SettingsView } from "./components/SettingsView";
 import { WorkbenchView } from "./components/WorkbenchView";
-import { defaultGameState, GAME_DISCLAIMER, type GameState } from "./lib/game";
+import { CASH_OPTIONS, defaultGameState, GAME_DISCLAIMER, startGame, type GameState } from "./lib/game";
 import { SIGNAL_BACKTEST_CAVEAT } from "./lib/helpers";
 import { SignalBadge, SignalCard, SignalSummary } from "./components/SignalCard";
 import {
@@ -289,6 +292,19 @@ describe("历史页与设置页渲染", () => {
   });
 });
 
+/** 新闻状态的测试替身 */
+function stubNews(over: Partial<LiveNewsState> = {}): LiveNewsState {
+  return {
+    items: [],
+    source: null,
+    degradedReason: null,
+    updatedAt: null,
+    loading: false,
+    refresh: () => {},
+    ...over,
+  };
+}
+
 // ── 模拟盘渲染 ───────────────────────────────────────────────
 
 describe("模拟盘页渲染", () => {
@@ -300,7 +316,8 @@ describe("模拟盘页渲染", () => {
    *   3. 取不到行情时显示"无行情"而不是编造盈亏。
    */
   function renderGame(over: Partial<Parameters<typeof GameView>[0]> = {}): string {
-    const base = defaultGameState();
+    // 渲染测试需要一个「进行中」的状态
+    const base = startGame(1_000_000, 0);
     const state: GameState = {
       ...base,
       equity: [
@@ -343,9 +360,11 @@ describe("模拟盘页渲染", () => {
         stocks: [],
         resultsByCode: new Map(),
         onOrder: () => ({ ok: true }),
+        onStart: () => {},
         onReset: () => {},
         onSettle: () => null,
         onOpenRules: () => {},
+        news: stubNews(),
         sessionText: "已收盘",
         isTradingNow: false,
         benchmarkName: "沪深300",
@@ -400,7 +419,7 @@ describe("模拟盘页渲染", () => {
   });
 
   it("无持仓无成交时不崩，给引导文案", () => {
-    const empty = defaultGameState();
+    const empty = startGame(200_000, 0);
     const html = renderGame({ state: empty, totalAssets: empty.account.cash, holdingsValue: 0 });
     expect(html).toContain("暂无持仓");
     expect(html).toContain("暂无成交记录");
@@ -541,5 +560,119 @@ describe("使用说明页渲染", () => {
       expect(html.includes(kw), `缺少规则说明「${kw}」`).toBe(true);
     }
     expect(html).toContain("不构成投资建议");
+  });
+});
+
+describe("模拟盘开局界面", () => {
+  function renderSetup(): string {
+    return renderToStaticMarkup(
+      createElement(GameView, {
+        state: defaultGameState(), // status = "idle"
+        prices: new Map(),
+        quotesByCode: new Map(),
+        stocks: [],
+        resultsByCode: new Map(),
+        onOrder: () => ({ ok: true }),
+        onStart: () => {},
+        onReset: () => {},
+        onSettle: () => null,
+        onOpenRules: () => {},
+        news: stubNews(),
+        sessionText: "已收盘",
+        isTradingNow: false,
+        benchmarkName: "沪深300",
+        benchmarkReturnPct: null,
+        totalAssets: 0,
+        holdingsValue: 0,
+      }),
+    );
+  }
+
+  it("未开局时显示资金选择，而不是一个空账户", () => {
+    const html = renderSetup();
+    expect(html).toContain("开始一局");
+    for (const c of CASH_OPTIONS) {
+      expect(html).toContain(`${c / 10000} 万`);
+    }
+    // 不应该出现交易界面
+    expect(html).not.toContain("模拟下单");
+    expect(html).not.toContain("账户总览");
+  });
+
+  it("开局界面也常驻免责声明", () => {
+    expect(renderSetup()).toContain(GAME_DISCLAIMER);
+  });
+
+  it("讲清了资金量对选股的限制", () => {
+    const html = renderSetup();
+    expect(html).toContain("一手 100 股");
+    expect(html).toContain("这个约束本身就是练习的一部分");
+  });
+});
+
+// ── 新闻面板渲染 ─────────────────────────────────────────────
+
+describe("新闻面板渲染", () => {
+  const mk = (id: string, title: string, digest = "", at = Date.now()): NewsItem => ({
+    id,
+    title,
+    digest,
+    at,
+    source: "东方财富 7x24",
+    timeKnown: true,
+  });
+
+  function renderNews(over: Partial<Parameters<typeof NewsPanel>[0]> = {}): string {
+    return renderToStaticMarkup(
+      createElement(NewsPanel, {
+        items: [mk("1", "央行开展逆回购操作"), mk("2", "贵州茅台发布半年报")],
+        source: "东方财富 7x24",
+        degradedReason: null,
+        updatedAt: Date.now(),
+        loading: false,
+        onRefresh: () => {},
+        holdings: [],
+        ...over,
+      }),
+    );
+  }
+
+  it("渲染标题、时间与来源", () => {
+    const html = renderNews();
+    expect(html).toContain("央行开展逆回购操作");
+    expect(html).toContain("东方财富 7x24");
+    expect(html).toContain("市场快讯");
+  });
+
+  it("明确声明不标注利好利空", () => {
+    const html = renderNews();
+    expect(html).toContain("不标注利好利空");
+    // 不能出现任何方向性措辞
+    for (const w of ["利好", "利空", "看涨", "看跌", "建议买"]) {
+      expect(html.includes(`>${w}<`), `不应出现 ${w}`).toBe(false);
+    }
+  });
+
+  it("持仓相关新闻单独成栏，文案用「可能相关」而非断言", () => {
+    const html = renderNews({ holdings: [{ code: "600519.SH", name: "贵州茅台" }] });
+    expect(html).toContain("持仓相关新闻");
+    expect(html).toContain("可能相关，不构成任何判断");
+  });
+
+  it("时间解析失败时显示「时间未知」，不显示 1970", () => {
+    const html = renderNews({ items: [{ ...mk("9", "时间未知的新闻"), at: 0, timeKnown: false }] });
+    expect(html).toContain("时间未知");
+    expect(html).not.toContain("1970");
+  });
+
+  it("取不到新闻时明说，不编造", () => {
+    const html = renderNews({ items: [], degradedReason: "东财快讯 HTTP 501" });
+    expect(html).toContain("暂时没有取到新闻");
+    expect(html).toContain("东财快讯 HTTP 501");
+  });
+
+  it("降级时显示提示", () => {
+    const html = renderNews({ degradedReason: "已降级到 x" });
+    expect(html).toContain("新闻获取异常");
   });
 });

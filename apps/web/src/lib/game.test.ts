@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   benchmarkCurve,
+  CASH_OPTIONS,
   defaultGameState,
+  isValidInitialCash,
+  startGame,
   DEFAULT_INITIAL_CASH,
   lastBuyDates,
   parseGameState,
@@ -27,14 +30,50 @@ const trade = (over: Partial<Trade>): Trade => ({
   ...over,
 });
 
-describe("默认状态", () => {
-  it("初始资金与空账户", () => {
+describe("默认状态与开局", () => {
+  it("默认是「未开局」，账户为空", () => {
     const s = defaultGameState();
-    expect(s.account.cash).toBe(DEFAULT_INITIAL_CASH);
-    expect(s.account.initialCash).toBe(DEFAULT_INITIAL_CASH);
+    expect(s.status).toBe("idle");
+    expect(s.startedAt).toBeNull();
+    expect(s.account.cash).toBe(0);
     expect(s.account.holdings).toEqual([]);
     expect(s.account.trades).toEqual([]);
     expect(s.equity).toEqual([]);
+  });
+
+  it("开局后按选定资金建账", () => {
+    const s = startGame(200_000, 1_700_000_000_000);
+    expect(s.status).toBe("playing");
+    expect(s.startedAt).toBe(1_700_000_000_000);
+    expect(s.account.cash).toBe(200_000);
+    expect(s.account.initialCash).toBe(200_000);
+  });
+
+  it("可选资金档位都在合法区间内", () => {
+    for (const c of CASH_OPTIONS) {
+      expect(isValidInitialCash(c), `${c} 应合法`).toBe(true);
+      expect(startGame(c, 0).account.cash).toBe(c);
+    }
+  });
+
+  it("非法资金回落默认值，不产生离谱账户", () => {
+    for (const bad of [0, -1, Number.NaN, 1e12, 999]) {
+      expect(isValidInitialCash(bad)).toBe(false);
+      expect(startGame(bad, 0).account.cash).toBe(DEFAULT_INITIAL_CASH);
+    }
+  });
+
+  it("开局会清空上一局的持仓与成交", () => {
+    let s = startGame(100_000, 0);
+    s = {
+      ...s,
+      account: { ...s.account, cash: 50_000 },
+      equity: [{ date: "2026-09-23", total: 100_000 }],
+    };
+    const fresh = startGame(300_000, 1);
+    expect(fresh.account.cash).toBe(300_000);
+    expect(fresh.account.holdings).toEqual([]);
+    expect(fresh.equity).toEqual([]);
   });
 });
 
@@ -49,7 +88,9 @@ describe("持久化（本地存储可被篡改，坏数据必须退化为默认�
   it("null / 空串 / 坏 JSON → 默认状态，不抛错", () => {
     for (const raw of [null, undefined, "", "{", "null", "[]", '"x"']) {
       const s = parseGameState(raw as string | null);
-      expect(s.account.initialCash).toBe(DEFAULT_INITIAL_CASH);
+      // 坏数据退化为「未开局」而不是一个有钱的账户 —— 宁可让用户重新设置
+      expect(s.status).toBe("idle");
+      expect(s.account.cash).toBe(0);
       expect(s.account.holdings).toEqual([]);
     }
   });
@@ -95,6 +136,18 @@ describe("持久化（本地存储可被篡改，坏数据必须退化为默认�
     const s = parseGameState(JSON.stringify({ account: { initialCash: -1, holdings: [], trades: [] } }));
     expect(s.account.initialCash).toBe(DEFAULT_INITIAL_CASH);
     expect(s.account.cash).toBe(DEFAULT_INITIAL_CASH);
+  });
+
+  it("旧存档（无 status 字段）视为进行中，不能把已有账户清掉", () => {
+    const legacy = JSON.stringify({
+      version: 1,
+      account: { initialCash: 1_000_000, cash: 900_000, holdings: [], trades: [] },
+      equity: [{ date: "2026-09-22", total: 1_000_000 }],
+    });
+    const s = parseGameState(legacy);
+    expect(s.status).toBe("playing");
+    expect(s.account.cash).toBe(900_000);
+    expect(s.equity).toHaveLength(1);
   });
 
   it("净值点只接受合法项", () => {
