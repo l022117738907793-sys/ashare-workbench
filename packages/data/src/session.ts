@@ -52,6 +52,24 @@ function minutesOfDay(t: BeijingTime): number {
   return t.h * 60 + t.mi;
 }
 
+/**
+ * 快照里的交易日历是否仍然可信。
+ *
+ * 日历以**最后一个交易日**结尾，本身不含未来日期。快照一旦没跟上（例如每日任务
+ * 没跑成功），日历就过期了；此时若继续拿它判定，今天明明是交易日也会被判成
+ * `holiday`，于是页面在整个交易日都不去拉实时行情——这正是"页面一直停在旧快照"
+ * 的根因之一。
+ *
+ * 规则：日历必须覆盖到"今天或更晚"才可用；否则退回按周末粗判（宁可多问一次
+ * 接口，也不要假装全市场休市）。
+ */
+export function isCalendarFresh(calendar: string[] | undefined, iso: string): boolean {
+  if (!calendar || calendar.length === 0) return false;
+  let last = "";
+  for (const d of calendar) if (d > last) last = d;
+  return last >= iso;
+}
+
 const OPEN_AM = 9 * 60 + 30; // 09:30
 const CLOSE_AM = 11 * 60 + 30; // 11:30
 const OPEN_PM = 13 * 60; // 13:00
@@ -64,8 +82,10 @@ const CLOSE_PM = 15 * 60; // 15:00
  */
 export function sessionState(at: Date = new Date(), calendar?: string[]): SessionState {
   const t = beijingTime(at);
+  // 日历过期时不能拿它判"非交易日"，否则每个新交易日都会被误判成 holiday
+  const usable = isCalendarFresh(calendar, t.iso);
 
-  if (calendar && calendar.length > 0) {
+  if (usable && calendar) {
     if (!calendar.includes(t.iso)) {
       return t.dow === 0 || t.dow === 6 ? "weekend" : "holiday";
     }
@@ -97,7 +117,7 @@ export function msUntilNextOpen(at: Date = new Date(), calendar?: string[]): num
   if (sessionState(at, calendar) === "open") return 0;
 
   // 当天还没到 09:30 且今天是交易日 → 今天开盘
-  const todayIsTrading = calendar && calendar.length > 0
+  const todayIsTrading = isCalendarFresh(calendar, t.iso) && calendar
     ? calendar.includes(t.iso)
     : t.dow !== 0 && t.dow !== 6;
 
@@ -113,7 +133,7 @@ export function msUntilNextOpen(at: Date = new Date(), calendar?: string[]): num
   for (let i = 1; i <= 30; i += 1) {
     const probe = new Date(t.dayStartUtc + i * 24 * 3600_000 + 10 * 3600_000); // 次日 10:00 北京
     const pt = beijingTime(probe);
-    const isTrading = calendar && calendar.length > 0
+    const isTrading = isCalendarFresh(calendar, pt.iso) && calendar
       ? calendar.includes(pt.iso)
       : pt.dow !== 0 && pt.dow !== 6;
     if (isTrading) {

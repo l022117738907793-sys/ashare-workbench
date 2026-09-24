@@ -3,8 +3,10 @@
  *
  * 行为（对应需求里的实时刷新约束）：
  * - **只轮询传进来的可见标的**（当前个股 + 屏幕上板块的强势成分 + 漏斗顶层），绝不轮询全池；
- * - 仅在 `isTradingNow()` 为真时按 `intervalMs`（3~5 秒）轮询；
- * - 非交易时段**不发请求**，用一次 `setTimeout(msUntilNextOpen())` 重新武装；
+ * - 交易中按 `intervalMs`（3~5 秒）轮询；
+ * - **休市时也拉一次**：行情接口收盘后返回的就是当日收盘价，比快照新。
+ *   保证"收盘后 / 周末 / 节假日打开页面，看到的也是最新一个交易日的价格"，而不是旧快照；
+ * - 休市期间的其余探测只做时段判断、不发请求，用 `setTimeout(msUntilNextOpen())` 重新武装；
  * - `document.visibilityState !== "visible"` 时暂停，`visibilitychange` 时恢复；
  * - 失败不隐藏：错误原文进 `error`，由 UI 显示成非惊悚提示条。
  */
@@ -27,6 +29,9 @@ const MIN_PROBE_MS = 30_000;
  *  非交易时段的每次探测都**只做时段判断、不发任何行情请求**，所以没有额外流量。 */
 const MAX_PROBE_MS = 30 * 60_000;
 const ERROR_BACKOFF_MS = 15_000;
+/** 休市时的取数间隔。收盘后接口返回的是当日收盘价，半小时问一次足够，
+ *  既能让"收盘后打开页面"看到最新价，又不会给接口添流量。 */
+const CLOSED_REFRESH_MS = 30 * 60_000;
 
 export interface LiveQuotesState {
   /** 最近一次成功结果；从未成功时为 null */
@@ -74,6 +79,8 @@ export function useLiveQuotes(codes: string[], options: UseLiveQuotesOptions): L
   }));
 
   const tickRef = useRef<(() => void) | null>(null);
+  /** 最近一次成功取数的时刻；休市时用它限流，避免每轮探测都发请求 */
+  const lastOkAtRef = useRef<number | null>(null);
   const refresh = useCallback(() => {
     tickRef.current?.();
   }, []);
@@ -84,6 +91,9 @@ export function useLiveQuotes(codes: string[], options: UseLiveQuotesOptions): L
       tickRef.current = null;
       return;
     }
+
+    // 每次「进入页面 / 换标的 / 手动刷新」都重新武装一次：下次 tick 必定真的取数
+    lastOkAtRef.current = null;
 
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -121,12 +131,22 @@ export function useLiveQuotes(codes: string[], options: UseLiveQuotesOptions): L
 
       const now = new Date();
       const session = sessionState(now, calendarRef.current);
-      if (!isTradingNow(now, calendarRef.current)) {
-        scheduleProbe();
-        return;
+      const trading = isTradingNow(now, calendarRef.current);
+
+      // 休市 ≠ 没数据可拿：行情接口收盘后返回的就是当日收盘价。
+      // 隔一段时间拉一次，页面才不会一直停在几天前的快照上。
+      if (!trading) {
+        const since =
+          lastOkAtRef.current === null
+            ? Number.POSITIVE_INFINITY
+            : Date.now() - lastOkAtRef.current;
+        if (since < CLOSED_REFRESH_MS) {
+          scheduleProbe();
+          return;
+        }
       }
 
-      setState((s) => ({ ...s, polling: true, session, nextProbeAt: null }));
+      setState((s) => ({ ...s, polling: trading, session, nextProbeAt: null }));
       const list = codesRef.current;
       if (list.length === 0) return;
 
@@ -136,22 +156,26 @@ export function useLiveQuotes(codes: string[], options: UseLiveQuotesOptions): L
           signal: ctrl.signal,
         });
         if (stopped) return;
+        lastOkAtRef.current = Date.now();
         setState({
           result,
           updatedAt: Date.now(),
           error: null,
           session,
-          polling: true,
+          polling: trading,
           nextProbeAt: null,
           today: beijingTime().iso,
         });
-        timer = setTimeout(() => void tick(), intervalMs);
+        // 交易中按秒轮询；休市则回到"下一次开盘 / 半小时后再看"
+        if (trading) timer = setTimeout(() => void tick(), intervalMs);
+        else scheduleProbe();
       } catch (err) {
         if (stopped) return;
         const msg = err instanceof Error ? err.message : String(err);
-        setState((s) => ({ ...s, error: msg, session, polling: true }));
+        setState((s) => ({ ...s, error: msg, session, polling: trading }));
         // 失败退避，别把限频的接口打爆
-        timer = setTimeout(() => void tick(), Math.max(ERROR_BACKOFF_MS, intervalMs * 3));
+        if (trading) timer = setTimeout(() => void tick(), Math.max(ERROR_BACKOFF_MS, intervalMs * 3));
+        else scheduleProbe();
       }
     }
 

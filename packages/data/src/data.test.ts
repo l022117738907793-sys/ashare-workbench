@@ -8,7 +8,7 @@ import {
   toTencentSymbol,
 } from "./codes";
 import { fetchQuotes } from "./quotes";
-import { beijingTime, isTradingNow, msUntilNextOpen, sessionState } from "./session";
+import { beijingTime, isCalendarFresh, isTradingNow, msUntilNextOpen, sessionState } from "./session";
 import { applyLivePrices, type SnapshotBundle } from "./snapshot";
 import type { Quote, QuoteProvider } from "./types";
 
@@ -90,6 +90,39 @@ describe("交易时段（北京时间，不受本机时区影响）", () => {
     expect(msUntilNextOpen(bj("2026-09-23", 20, 0))).toBeGreaterThan(0);
     // 周四晚 → 周五开盘
     const until = msUntilNextOpen(bj("2026-09-24", 20, 0));
+    expect(until).toBeGreaterThan(0);
+    expect(until).toBeLessThan(24 * 3600_000);
+  });
+
+  it("isCalendarFresh：看日历里最新的那一天，且不依赖数组顺序", () => {
+    expect(isCalendarFresh(["2026-09-23", "2026-09-25"], "2026-09-24")).toBe(true);
+    expect(isCalendarFresh(["2026-09-25", "2026-09-23"], "2026-09-24")).toBe(true);
+    expect(isCalendarFresh(["2026-09-24"], "2026-09-24")).toBe(true);
+    expect(isCalendarFresh(["2026-09-22", "2026-09-23"], "2026-09-24")).toBe(false);
+    expect(isCalendarFresh([], "2026-09-24")).toBe(false);
+    expect(isCalendarFresh(undefined, "2026-09-24")).toBe(false);
+  });
+
+  it("日历过期时，新交易日不再被误判成休市（这正是页面停在旧快照的根因）", () => {
+    const stale = ["2026-09-22", "2026-09-23"]; // 快照没跟上，日历停在 23 号
+    // 2026-09-24 周四不在过期日历里：修复前返回 holiday / 不拉行情，现在必须按交易日走
+    expect(sessionState(bj("2026-09-24", 10, 0), stale)).toBe("open");
+    expect(isTradingNow(bj("2026-09-24", 10, 0), stale)).toBe(true);
+    // 收盘后仍是 closed，不该被当成 holiday
+    expect(sessionState(bj("2026-09-24", 20, 0), stale)).toBe("closed");
+    // 周末判断不受影响
+    expect(sessionState(bj("2026-09-26", 10, 0), stale)).toBe("weekend");
+  });
+
+  it("日历仍然新鲜时，节假日照旧能识别", () => {
+    const fresh = ["2026-09-24", "2026-10-09"];
+    expect(sessionState(bj("2026-10-01", 10, 0), fresh)).toBe("holiday");
+    expect(sessionState(bj("2026-09-24", 10, 0), fresh)).toBe("open");
+  });
+
+  it("日历过期时 msUntilNextOpen 仍能找到下一个工作日", () => {
+    const stale = ["2026-09-22", "2026-09-23"];
+    const until = msUntilNextOpen(bj("2026-09-24", 20, 0), stale);
     expect(until).toBeGreaterThan(0);
     expect(until).toBeLessThan(24 * 3600_000);
   });
