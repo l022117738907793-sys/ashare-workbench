@@ -225,15 +225,72 @@ export async function fetchLatestNews(
 }
 
 /**
+ * 公司名被这些词吞掉时，就不是在说这家公司了。
+ *
+ * 全部来自实测：`scripts/audit-news-match.ts` 拿 800 条真实快讯 × 619 个真实股票名
+ * 跑出来的误命中，只有这一种形状 —— **名字后面接着几个字，凑成了另一个词**：
+ *
+ *   中国银行  →  中国银【行业】对外金融资产      （说的是银行业，不是中国银行）
+ *   上海银行  →  上海银【行间】同业拆放利率      （说的是 Shibor，不是上海银行）
+ *   中国石油  →  中国石油【化工】股份            （说的是中国石化 600028，不是中国石油 601857）
+ *
+ * 判据是「从匹配位置开始的文本是否以某个词开头」，而不是「名字后面跟了什么字」——
+ * 后者会误伤：`业` 后面如果是 `绩`（万科A业绩预告），那说的正是这家公司。
+ * 所以这里列的是**完整的词**，判据也只有一条：这些词一旦出现，名字就不是名字了。
+ *
+ * 关键词匹配不可能全对。新增误命中时，把它加进这张表，并在 news.test.ts 里补一条用例。
+ */
+const GENERIC_PHRASES = [
+  // 银行系：把「XX银行」吃成「银行业 / 银行间 / 银行家 / 银行学」
+  "中国银行业",
+  "银行业",
+  "银行间",
+  "银行家",
+  "银行学",
+  "中国人民银行",
+  // 石化系：「中国石油」与「中国石化」是两家公司
+  "中国石油化工",
+  "石油化工",
+];
+
+/**
  * 新闻与股票的相关性粗筛。
  *
  * 注意：这是**关键词匹配**，不是语义理解。它的用途是"把可能相关的挑出来给玩家看"，
  * 而不是"判断利好利空" —— 后者本项目不做，也做不到。
  */
 export function matchNewsToStock(items: NewsItem[], name: string, code: string): NewsItem[] {
-  const num = code.split(".")[0];
+  const num = code.split(".")[0] ?? "";
+  // 6 位代码要卡住数字边界，否则 1000001 这种金额会把 000001 算成命中
+  const numRe = num ? new RegExp(`(?<!\\d)${num}(?!\\d)`) : null;
+
   return items.filter((n) => {
     const text = `${n.title} ${n.digest}`;
-    return text.includes(name) || text.includes(num) || text.includes(code);
+
+    // 名字出现，且不是被另一个词吞掉的一部分。
+    //
+    // 判据是「有没有一个泛词和这次命中**重叠**」：泛词的起点落在 [i, i+len(name)) 里，
+    // 就说明名字被它吃掉了。这样两种情况都能盖住：
+    //   名字 + 完整泛词   中国银行[业]        → 泛词「银行业」从 i 开始
+    //   名字的尾巴 + 泛词  上海银[行间]        → 泛词「银行间」从 i+2 开始
+    // 而同一个泛词出现在名字**后面很远**的地方（「中国银行发公告，银行业承压」）
+    // 起点 ≥ i+len(name)，不算重叠，名字照常命中。
+    let i = text.indexOf(name);
+    let nameHit = false;
+    while (i >= 0) {
+      const swallowed = GENERIC_PHRASES.some((p) => {
+        const at = text.indexOf(p, i);
+        return at >= 0 && at < i + name.length;
+      });
+      if (!swallowed) {
+        nameHit = true;
+        break;
+      }
+      i = text.indexOf(name, i + 1);
+    }
+
+    if (nameHit) return true;
+    if (numRe?.test(text)) return true;
+    return code !== "" && text.includes(code);
   });
 }
