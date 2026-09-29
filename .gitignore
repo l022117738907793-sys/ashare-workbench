@@ -10,5 +10,10 @@ __pycache__/
 # 快照生成本地缓存（K线原始响应），不入库；快照本身要提交，CI 构建依赖它
 data/cache/
 
+# 网页端的快照副本——**构建产物**，由 sync_web_data.mjs（部署）或
+# make-dev-data.mjs（本地开发）生成，源头是 data/snapshot_<日期>/。
+# 曾经被误提交过，于是仓库里常年躺着两三兆的重复数据，而且会随每日快照一起长。
+apps/web/public/data/
+
 # 回测用的深历史快照（体积大，本地生成即可）
 data/_deep_*/
