@@ -87,7 +87,7 @@ describe("参考价位", () => {
   it("止损低于买入价、目标高于现价", () => {
     const stock = makeStock({ trend: 0.8, volume: 2000 });
     const s = deriveSignal(stock, defaultRules);
-    const price = stock.close[stock.close.length - 1];
+    const price = stock.close[stock.close.length - 1]!;
 
     expect(s.levels.entry).not.toBeNull();
     expect(s.levels.stop).not.toBeNull();
@@ -99,7 +99,8 @@ describe("参考价位", () => {
   it("压力位就是最近 20 日最高收盘价", () => {
     const stock = makeStock({ trend: 0.5 });
     const s = deriveSignal(stock, defaultRules);
-    const expected = Math.max(...stock.close.slice(-20));
+    // close 的元素类型是 Maybe<number>（上游允许停牌日为空），测试数据里没有空值
+    const expected = Math.max(...(stock.close.slice(-20) as number[]));
     expect(s.levels.resistance).toBeCloseTo(expected, 2);
   });
 

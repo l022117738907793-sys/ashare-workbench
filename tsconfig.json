@@ -1,0 +1,12 @@
+{
+  /* 根 tsconfig：给 `npm run typecheck` 用。
+     之前这个文件不存在（疑似 iCloud 驱逐项目目录时被吞掉），导致 typecheck 一直报
+     "error TS5083: Cannot read file '.../tsconfig.json'"，所以改用
+     `tsc -p apps/web/tsconfig.json --noEmit` 临时替代。现在补回来。
+
+     覆盖范围比 apps/web 单独一份更宽：除了网页端，还显式纳入三个 workspace 包的源码，
+     避免「网页端没 import 到」的模块（比如只被测试引用的文件）漏检。
+     scripts/ 下的验证脚本跑在 Node 里，需要 @types/node，这里先不并进来。 */
+  "extends": "./apps/web/tsconfig.json",
+  "include": ["apps/web/src", "packages/*/src"]
+}
