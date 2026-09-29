@@ -660,8 +660,18 @@ export default function App() {
         </div>
         <div className="app-head-meta">
           <span className={`session session-${session}`}>{sessionText}</span>
-          <span>快照 {bundle?.name ?? "—"}</span>
-          <span>数据日期 {metaAsOf ?? "—"}</span>
+          {/* 随机模式正在玩的时候，快照名和数据日期都会泄露「这是哪一段行情」——
+              日期本身就是这个模式唯一要藏的东西，所以整条换掉 */}
+          {replay?.hideDate ? (
+            <span title="随机模式不显示日期，避免提前知道是哪一段行情">
+              数据日期 已隐藏（随机模式）
+            </span>
+          ) : (
+            <>
+              <span>快照 {bundle?.name ?? "—"}</span>
+              <span>数据日期 {metaAsOf ?? "—"}</span>
+            </>
+          )}
         </div>
         <div className="app-head-meta">
           <span>

@@ -25,7 +25,7 @@ import {
   type Snapshot,
   type StockData,
 } from "@aw/core";
-import { createReplay } from "@aw/game";
+import { advanceDay, createReplay, placeOrder } from "@aw/game";
 import { AnalysisView } from "./components/AnalysisView";
 import type { NewsItem } from "@aw/data";
 import { GameRulesView } from "./components/GameRulesView";
@@ -810,6 +810,20 @@ describe("历史推演视图（ReplayView）", () => {
     expect(html).toContain("走一天");
     expect(html).toContain("快进");
     expect(html).toContain("结算");
+  });
+
+  it("藏日期时，日志里的真实日期也要被换成第几天", () => {
+    // 引擎生成的日志句子以日期开头，直接渲染就把整段行情的时间泄露了
+    const placed = placeOrder(mkState(), { code: "600519.SH", side: "buy", shares: 100 });
+    const withTrade = advanceDay(placed.ok ? placed.state : mkState());
+
+    const hidden = renderReplay({ state: withTrade, hideDate: true });
+    expect(hidden).toContain("推演日志");
+    expect(hidden).not.toMatch(/2024-\d\d-\d\d/);
+    expect(hidden).toMatch(/第\s*2\s*天/);
+
+    // 模式 2（传奇）本来就显示日期，不能被连累
+    expect(renderReplay({ state: withTrade, hideDate: false })).toMatch(/2024-\d\d-\d\d/);
   });
 
   it("不允许对界面承诺收益", () => {

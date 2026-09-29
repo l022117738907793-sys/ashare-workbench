@@ -17,7 +17,7 @@ import {
   type Side,
 } from "@aw/game";
 import type { StockData } from "@aw/core";
-import { replayPrices, settleReplay } from "../lib/replay";
+import { displayDate, maskDate, maskDatesIn, replayPrices, settleReplay } from "../lib/replay";
 import { fmtNum, fmtPct } from "../lib/helpers";
 import { Card, EmptyHint, KV, Notice } from "./common";
 
@@ -109,7 +109,7 @@ export function ReplayView(props: ReplayViewProps) {
   }
 
   function finish() {
-    const { result } = settleReplay(state, `${label} · ${date}`);
+    const { result } = settleReplay(state, `${label} · ${displayDate(state, hideDate)}`);
     setLastSeason(result);
   }
 
@@ -192,7 +192,16 @@ export function ReplayView(props: ReplayViewProps) {
 
         {lastSeason && (
           <div className="kv-list">
-            <KV k="本局区间" v={hideDate ? `${lastSeason.startDate} → ${lastSeason.endDate}` : `${lastSeason.startDate} → ${lastSeason.endDate}`} />
+            {/* 随机模式连结算也不能给日期：玩家随时可以点「结算本局」看一眼再接着玩，
+                一旦这里露出年份月份，藏了整局的日期就白藏了 */}
+            <KV
+              k="本局区间"
+              v={
+                hideDate
+                  ? `第 1 天 → ${displayDate(state, true)}`
+                  : `${lastSeason.startDate} → ${lastSeason.endDate}`
+              }
+            />
             <KV k="期末总资产" v={`${fmtNum(lastSeason.finalAssets)} 元`} />
             <KV k="总收益率" v={fmtPct(lastSeason.totalReturnPct)} />
             <KV k={`同期${benchmarkName}`} v={fmtPct(lastSeason.benchmarkReturnPct)} />
@@ -216,7 +225,7 @@ export function ReplayView(props: ReplayViewProps) {
               <li key={o.id} className="trade-item">
                 <span>
                   {o.side === "buy" ? "买入" : "卖出"} {o.name} {o.shares} 股
-                  <span className="trade-note">（{o.placedAt} 挂出）</span>
+                  <span className="trade-note">（{maskDate(state, o.placedAt, hideDate)} 挂出）</span>
                 </span>
                 <button type="button" className="btn btn-ghost btn-tiny" onClick={() => onCancel(o.id)}>
                   撤单
@@ -344,7 +353,7 @@ export function ReplayView(props: ReplayViewProps) {
           <ul className="trade-list">
             {recentLog.map((e, i) => (
               <li key={`${e.date}-${e.code}-${i}`} className="trade-item">
-                <span className={e.ok ? "" : "tone-muted"}>{e.text}</span>
+                <span className={e.ok ? "" : "tone-muted"}>{maskDatesIn(state, e.text, hideDate)}</span>
               </li>
             ))}
           </ul>

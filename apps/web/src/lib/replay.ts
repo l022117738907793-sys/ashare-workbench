@@ -235,5 +235,24 @@ export function displayDate(state: ReplayState, hideDate: boolean): string {
   return hideDate ? `第 ${index} 天` : replayDate(state);
 }
 
+/**
+ * 把某个交易日换成「第 N 天」。
+ *
+ * 模式 3 的规则是不显示日期，但日期会从很多缝里漏出去：日志句子以日期开头、
+ * 委托记着挂单那天、结算的赛季名叫「随机开局 · 2026-05-28」。
+ * 只要还想藏，这些地方就都得过一遍这个函数。
+ */
+export function maskDate(state: ReplayState, date: string, hideDate: boolean): string {
+  if (!hideDate) return date;
+  const i = state.config.calendar.indexOf(date);
+  return i < 0 ? "第 ? 天" : `第 ${i - state.config.startIndex + 1} 天`;
+}
+
+/** 替换一段文字里出现的所有日期（引擎生成的日志句子就是这样） */
+export function maskDatesIn(state: ReplayState, text: string, hideDate: boolean): string {
+  if (!hideDate) return text;
+  return text.replace(/\d{4}-\d{2}-\d{2}/g, (d) => maskDate(state, d, true));
+}
+
 export { advanceDay, advanceDays, cancelOrder, jumpTo, placeOrder, replayDate, replayPrices, settleReplay };
 export type { ReplayState, SeasonResult, Side, EquityPoint };
