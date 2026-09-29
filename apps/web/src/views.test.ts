@@ -582,10 +582,48 @@ describe("使用说明页渲染", () => {
 });
 
 describe("模拟盘开局界面", () => {
-  function renderSetup(): string {
+  function renderSetup(replayReady = false): string {
     return renderToStaticMarkup(
       createElement(GameView, {
         state: defaultGameState(), // status = "idle"
+        prices: new Map(),
+        quotesByCode: new Map(),
+        stocks: [],
+        resultsByCode: new Map(),
+        onOrder: () => ({ ok: true }),
+        onStart: () => {},
+        onReset: () => {},
+        onSettle: () => null,
+        onOpenRules: () => {},
+        news: stubNews(),
+        sessionText: "已收盘",
+        isTradingNow: false,
+        benchmarkName: "沪深300",
+        benchmarkReturnPct: null,
+        totalAssets: 0,
+        holdingsValue: 0,
+        replayReady,
+        onStartReplay: () => {},
+      }),
+    );
+  }
+
+  it("给历史推演留了入口（否则整套引擎没有地方进）", () => {
+    const html = renderSetup();
+    expect(html).toContain("历史推演");
+    expect(html).toContain("把你放回真实的某一天");
+  });
+
+  it("快照带开盘价时给得出随机开局按钮", () => {
+    const html = renderSetup(true);
+    expect(html).toContain("随机开局");
+    expect(html).not.toContain("没有开盘价");
+  });
+
+  it("快照没有开盘价时说明为什么做不了推演", () => {
+    const html = renderToStaticMarkup(
+      createElement(GameView, {
+        state: defaultGameState(),
         prices: new Map(),
         quotesByCode: new Map(),
         stocks: [],
@@ -606,7 +644,9 @@ describe("模拟盘开局界面", () => {
         onStartReplay: () => {},
       }),
     );
-  }
+    expect(html).toContain("没有开盘价");
+    expect(html).not.toContain("随机开局（不显示日期）");
+  });
 
   it("未开局时显示资金选择，而不是一个空账户", () => {
     const html = renderSetup();
