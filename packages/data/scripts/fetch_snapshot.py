@@ -18,7 +18,7 @@ import random
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -234,6 +234,13 @@ def main():
     )
     parser.add_argument("--fresh", action="store_true", help="忽略缓存重新拉取")
     parser.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="并发线程数（默认 4）。调高会被腾讯限流返回 501，反而拉得更差——"
+        "实测 8 线程拉 628 个标的时失败了 206 个",
+    )
+    parser.add_argument(
         "--no-marketcap",
         dest="no_marketcap",
         action="store_true",
@@ -264,6 +271,18 @@ def main():
     target_days = max(60, args.days - 10)
     calendar = calendar[-target_days:]
     print(f"    asOf={as_of} days={len(calendar)}（取数 {args.days} 天，裁剪余量 10 天）")
+    # 磁盘缓存只按「标的 + 天数 + 复权」做键，不含日期：昨天跑过一次，今天再跑会直接命中
+    # 昨天的缓存，asOf 停在昨天，产出一份和昨天完全相同的快照——看着像成功，其实没更新。
+    # CI 每次都是空跑的干净环境，不受影响；本机重复跑必须加 --fresh。
+    _bj = datetime.now(timezone.utc) + timedelta(hours=8)
+    _ref = _bj.date()
+    while _ref.weekday() >= 5:  # 周末没有新数据，参照日回退到最近的工作日
+        _ref -= timedelta(days=1)
+    if as_of != _ref.isoformat() and not args.fresh and _bj.hour >= 9:
+        warn(
+            f"asOf={as_of} 早于最近的工作日（{_ref.isoformat()}）。今天若本该是交易日，"
+            f"多半是命中了过期缓存，请加 --fresh 重跑；节假日看到这条可忽略。"
+        )
 
     print("2/5 拉取申万一级行业与成分股...")
     first_info = ak.sw_index_first_info()
