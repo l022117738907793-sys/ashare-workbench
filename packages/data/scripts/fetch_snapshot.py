@@ -208,13 +208,16 @@ def ts_code_for(code):
 
 def align(rows, calendar):
     by_date = {r["date"]: r for r in rows}
-    out = {k: [] for k in ("close", "high", "low", "volume")}
+    # open 是给「历史推演」用的：玩家在收盘后做决定，只能按次一交易日开盘价成交，
+    # 用当天收盘价成交等于开了天眼。实时页面与四层漏斗不读它，多存一列不影响引擎。
+    out = {k: [] for k in ("open", "close", "high", "low", "volume")}
     for d in calendar:
         r = by_date.get(d)
         if r is None:
             for k in out:
                 out[k].append(None)
         else:
+            out["open"].append(r.get("open"))
             out["close"].append(r["close"])
             out["high"].append(r["high"])
             out["low"].append(r["low"])
@@ -411,14 +414,21 @@ def main():
             hist = hist[hist["日期"] <= as_of].tail(len(calendar))
             by_date = {str(r["日期"]): r for _, r in hist.iterrows()}
             close, high, low, volume = [], [], [], []
+            open_ = []
             for d in calendar:
                 r = by_date.get(d)
                 if r is None:
+                    open_.append(None)
                     close.append(None)
                     high.append(None)
                     low.append(None)
                     volume.append(None)
                 else:
+                    # akshare 的申万行业指数列名是中文，开盘价不一定存在——取不到就存 null，
+                    # 不要用收盘价顶替（那会让回放看起来"开盘即收盘"）。
+                    # `v != v` 是判断 NaN 的老办法，省得为此把 pandas 引进这个函数。
+                    raw_open = r["开盘"] if "开盘" in r else None
+                    open_.append(float(raw_open) if raw_open is not None and raw_open == raw_open else None)
                     close.append(float(r["收盘"]))
                     high.append(float(r["最高"]))
                     low.append(float(r["最低"]))
@@ -427,6 +437,7 @@ def main():
                 {
                     "code": ind["code"],
                     "name": ind["name"],
+                    "open": open_,
                     "close": close,
                     "high": high,
                     "low": low,

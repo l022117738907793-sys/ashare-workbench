@@ -6,7 +6,7 @@
  *   实时报价 → applyLivePrices(bundle) → liveSnapshot → 展示用漏斗 / 七步报告
  * 基础漏斗必须独立算一次：否则"报价 → 快照 → 漏斗 → 轮询代码 → 报价"会自我循环。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   analyzeMarket,
   analyzeSector,
@@ -49,7 +49,20 @@ import { GameView } from "./components/GameView";
 import { HistoryView } from "./components/HistoryView";
 import { SettingsView } from "./components/SettingsView";
 import { WorkbenchView } from "./components/WorkbenchView";
+import { ReplayView } from "./components/ReplayView";
 import { Notice } from "./components/common";
+import {
+  advanceDays,
+  cancelOrder,
+  placeOrder,
+  startReplay,
+  toSave,
+  restoreReplay,
+  readReplaySave,
+  replayAvailable,
+  LS_REPLAY,
+  type ReplaySession,
+} from "./lib/replay";
 import {
   benchmarkCurve,
   defaultGameState,
@@ -134,6 +147,19 @@ export default function App() {
   // ── 模拟盘账户（纯本地，无后端）──────────────────────────────
   const [game, setGame] = useState<GameState>(() => parseGameState(readLS(LS_GAME)));
   useEffect(() => writeLS(LS_GAME, serializeGameState(game)), [game]);
+
+  // ── 历史推演（模式 3：随机开局）─────────────────────────────
+  // 存档里只有进度，行情每次从快照还原 —— 六十万个数字塞不进 localStorage。
+  const [replay, setReplay] = useState<ReplaySession | null>(null);
+  const replayRestored = useRef(false);
+  useEffect(() => {
+    if (!replay) return;
+    writeLS(LS_REPLAY, JSON.stringify(toSave(replay.state, {
+      mode: replay.mode,
+      hideDate: replay.hideDate,
+      codes: replay.codes,
+    })));
+  }, [replay]);
 
   const rules = useMemo(() => mergeRules(settings.ruleOverrides), [settings.ruleOverrides]);
 
@@ -555,6 +581,65 @@ export default function App() {
     return result;
   }, [snapshot, calendar, game.equity, game.account, live.today, gamePricesObj]);
 
+  // ── 历史推演 ────────────────────────────────────────────────
+  // 存档回填：快照加载完成之后才能还原（配置要用到行情）。只尝试一次。
+  useEffect(() => {
+    if (replayRestored.current || replay || !snapshot || !calendar) return;
+    const save = readReplaySave(readLS(LS_REPLAY));
+    if (!save) return;
+    replayRestored.current = true;
+    const restored = restoreReplay(snapshot, calendar, save);
+    if (restored) {
+      setReplay({
+        state: restored,
+        mode: save.mode,
+        hideDate: save.hideDate,
+        codes: save.codes,
+        label: save.label || "历史推演",
+      });
+    }
+  }, [snapshot, calendar, replay]);
+
+  const handleStartReplay = useCallback(
+    (initialCash: number) => {
+      if (!snapshot || !calendar || !replayAvailable(snapshot)) return;
+      const state = startReplay(snapshot, calendar, { mode: "random", initialCash });
+      setReplay({
+        state,
+        mode: "random",
+        // 用户定下的规则：随机模式开局不告诉你是哪一年哪一天，结算时才揭晓
+        hideDate: true,
+        codes: state.config.instruments.map((i) => i.code),
+        label: "随机开局",
+      });
+    },
+    [snapshot, calendar],
+  );
+
+  const handleReplayOrder = useCallback(
+    (code: string, side: Side, shares: number): { ok: boolean; reason?: string } => {
+      if (!replay) return { ok: false, reason: "尚未开局。" };
+      const res = placeOrder(replay.state, { code, side, shares });
+      if (!res.ok) return { ok: false, reason: res.reason };
+      setReplay({ ...replay, state: res.state });
+      return { ok: true };
+    },
+    [replay],
+  );
+
+  const handleReplayAdvance = useCallback((n: number) => {
+    setReplay((s) => (s ? { ...s, state: advanceDays(s.state, n) } : s));
+  }, []);
+
+  const handleReplayCancel = useCallback((orderId: string) => {
+    setReplay((s) => (s ? { ...s, state: cancelOrder(s.state, orderId) } : s));
+  }, []);
+
+  const handleReplayExit = useCallback(() => {
+    setReplay(null);
+    removeLS(LS_REPLAY);
+  }, []);
+
   const missingCount = live.result?.missing.length ?? 0;
   const stockName =
     stockByCode.get(selectedCode ?? "")?.name ?? analysis.stock?.name ?? selectedCode ?? "—";
@@ -690,7 +775,21 @@ export default function App() {
           </div>
         )}
 
-        {!loading && tab === "game" && (
+        {!loading && tab === "game" && replay && (
+          <ReplayView
+            state={replay.state}
+            hideDate={replay.hideDate}
+            label={replay.label}
+            stocks={snapshot?.stocks ?? []}
+            benchmarkName={benchmarkName}
+            onOrder={handleReplayOrder}
+            onCancel={handleReplayCancel}
+            onAdvance={handleReplayAdvance}
+            onExit={handleReplayExit}
+          />
+        )}
+
+        {!loading && tab === "game" && !replay && (
           <GameView
             state={game}
             prices={gamePrices}
@@ -709,6 +808,8 @@ export default function App() {
             benchmarkReturnPct={benchmarkReturnPct}
             totalAssets={gameTotalAssets}
             holdingsValue={gameHoldingsValue}
+            replayReady={snapshot ? replayAvailable(snapshot) : false}
+            onStartReplay={handleStartReplay}
           />
         )}
 

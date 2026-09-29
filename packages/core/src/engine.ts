@@ -6,6 +6,12 @@ export interface SeriesData {
   code: string;
   name: string;
   kind?: string;
+  /**
+   * 开盘价。可选：四层漏斗与个股分析都只用收盘价，老快照与老 fixture 里没有这一列，
+   * 所以不能设成必填。目前唯一的使用方是「历史推演」（@aw/game 的 replay.ts）——
+   * 玩家在收盘后做决定，只能按次一交易日开盘价成交。
+   */
+  open?: Maybe[];
   close: Maybe[];
   high: Maybe[];
   low: Maybe[];

@@ -50,6 +50,10 @@ export interface GameViewProps {
   benchmarkReturnPct: number | null;
   totalAssets: number;
   holdingsValue: number;
+  /** 当前快照带不带开盘价——不带就开不了历史推演 */
+  replayReady: boolean;
+  /** 用随机开局进入历史推演模式 */
+  onStartReplay: (initialCash: number) => void;
 }
 
 function Metric({ k, v, tone }: { k: string; v: string; tone?: "good" | "bad" | "muted" }) {
@@ -66,6 +70,7 @@ export function GameView(props: GameViewProps) {
     state, prices, quotesByCode, stocks, resultsByCode,
     onOrder, onStart, onReset, onSettle, onOpenRules, news, sessionText, isTradingNow,
     benchmarkName, benchmarkReturnPct, totalAssets, holdingsValue,
+    replayReady, onStartReplay,
   } = props;
 
   const { account, equity } = state;
@@ -157,6 +162,45 @@ export function GameView(props: GameViewProps) {
               撮合规则说明
             </button>
           </div>
+        </Card>
+
+        <Card
+          title="另一种玩法：历史推演"
+          subtitle="把你放回真实的某一天，一天走一步"
+        >
+          <p className="rule-body">
+            上面的实时模式从今天开始，要等现实中的交易日慢慢过去。
+            历史推演换一种走法：从**过去**的某个交易日开局，你每点一次「走一天」就推进一步，
+            走的全是**真实发生过的**行情。
+          </p>
+          <p className="rule-body">
+            两条关键规矩：① 今天下单，<strong>按次一交易日的开盘价成交</strong> ——
+            你看到的是一整天的完整走势，用当天收盘价成交就等于开了天眼；
+            ② 随机模式开局<strong>不告诉你这是哪一年哪一天</strong>，结算时才揭晓。
+          </p>
+
+          <div className="kv-list">
+            <KV k="初始资金" v={`${cashChoice / 10000} 万（沿用上面的选择）`} />
+            <KV k="结算方式" v="真实历史日线，按当时的规则（费率、涨跌停、T+1 都按那一天算）" />
+            <KV k="快进" v="1.5 秒一天，快进期间照常可以挂单" />
+          </div>
+
+          {replayReady ? (
+            <div className="btn-row">
+              <button type="button" className="btn btn-primary" onClick={() => onStartReplay(cashChoice)}>
+                随机开局（不显示日期）
+              </button>
+            </div>
+          ) : (
+            <Notice tone="warn">
+              当前这份快照里没有开盘价，暂时做不了历史推演。等下一次每日快照更新后再来。
+            </Notice>
+          )}
+
+          <Notice tone="info">
+            传奇模式（10 个历史关键时刻）还没做。随机模式是它的地基：
+            两者共用同一套推演引擎，区别只在开局位置和要不要给剧情。
+          </Notice>
         </Card>
       </div>
     );

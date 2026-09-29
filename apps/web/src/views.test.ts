@@ -25,6 +25,7 @@ import {
   type Snapshot,
   type StockData,
 } from "@aw/core";
+import { createReplay } from "@aw/game";
 import { AnalysisView } from "./components/AnalysisView";
 import type { NewsItem } from "@aw/data";
 import { GameRulesView } from "./components/GameRulesView";
@@ -38,6 +39,7 @@ import { WorkbenchView } from "./components/WorkbenchView";
 import { CASH_OPTIONS, defaultGameState, GAME_DISCLAIMER, startGame, type GameState } from "./lib/game";
 import { SIGNAL_BACKTEST_CAVEAT } from "./lib/helpers";
 import { SignalBadge, SignalCard, SignalSummary } from "./components/SignalCard";
+import { ReplayView } from "./components/ReplayView";
 import {
   EMPTY_STORE,
   filterStockResults,
@@ -371,6 +373,8 @@ describe("模拟盘页渲染", () => {
         benchmarkReturnPct: 1.5,
         totalAssets: 1_012_000,
         holdingsValue: 122_000,
+        replayReady: false,
+        onStartReplay: () => {},
         ...over,
       }),
     );
@@ -598,6 +602,8 @@ describe("模拟盘开局界面", () => {
         benchmarkReturnPct: null,
         totalAssets: 0,
         holdingsValue: 0,
+        replayReady: false,
+        onStartReplay: () => {},
       }),
     );
   }
@@ -688,5 +694,88 @@ describe("新闻面板渲染", () => {
   it("降级时显示提示", () => {
     const html = renderNews({ degradedReason: "已降级到 x" });
     expect(html).toContain("新闻获取异常");
+  });
+});
+
+// ── 历史推演视图 ──────────────────────────────────────────────
+// 这一屏是本学期新增玩法的主体，值得单独冒烟：它同时要展示
+// 「你以为的价格」和「真实成交的价格」，还背着不剧透的责任。
+describe("历史推演视图（ReplayView）", () => {
+  const CAL = [
+    "2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-08",
+    "2024-01-09", "2024-01-10", "2024-01-11", "2024-01-12", "2024-01-15",
+  ];
+
+  function mkState() {
+    // 用真引擎造状态（不是手搓 mock），保证组件拿到的就是运行时真实形状
+    return createReplay({
+      calendar: CAL,
+      startIndex: 2,
+      initialCash: 200_000,
+      label: "随机开局",
+      instruments: [
+        {
+          code: "600519.SH", name: "贵州茅台", isST: false,
+          open: [1700, 1710, 1720, 1730, 1740, 1750, 1760, 1770, 1780, 1790],
+          close: [1710, 1720, 1730, 1740, 1750, 1760, 1770, 1780, 1790, 1800],
+          high: [1720, 1730, 1740, 1750, 1760, 1770, 1780, 1790, 1800, 1810],
+          low: [1690, 1700, 1710, 1720, 1730, 1740, 1750, 1760, 1770, 1780],
+          volume: [1e6, 1e6, 1e6, 1e6, 1e6, 1e6, 1e6, 1e6, 1e6, 1e6],
+        },
+      ],
+    });
+  }
+
+  function renderReplay(over: Partial<Parameters<typeof ReplayView>[0]> = {}): string {
+    return renderToStaticMarkup(
+      createElement(ReplayView, {
+        state: mkState(),
+        hideDate: true,
+        label: "随机开局",
+        stocks: [] as StockData[],
+        benchmarkName: "沪深300",
+        onOrder: () => ({ ok: true }),
+        onCancel: () => {},
+        onAdvance: () => {},
+        onExit: () => {},
+        ...over,
+      }),
+    );
+  }
+
+  it("常驻免责声明", () => {
+    expect(renderReplay()).toContain(GAME_DISCLAIMER);
+  });
+
+  it("隐藏日期时只给第几天，不给具体年月日", () => {
+    const html = renderReplay({ hideDate: true });
+    expect(html).toContain("第");
+    // 开局日 2024-01-04 不能出现在页面上（否则玩家能反推是哪一段行情）
+    expect(html).not.toContain("2024-01-04");
+    expect(html).not.toContain("2024");
+  });
+
+  it("显示日期时给出具体交易日", () => {
+    expect(renderReplay({ hideDate: false })).toContain("2024-01-04");
+  });
+
+  it("说明成交价来自次一交易日开盘价", () => {
+    const html = renderReplay();
+    expect(html).toContain("次一交易日");
+    expect(html).toContain("开盘价");
+  });
+
+  it("提供走一天、快进与结算入口", () => {
+    const html = renderReplay();
+    expect(html).toContain("走一天");
+    expect(html).toContain("快进");
+    expect(html).toContain("结算");
+  });
+
+  it("不允许对界面承诺收益", () => {
+    const html = renderReplay();
+    for (const word of ["必涨", "必跌", "稳赚", "包赚"]) {
+      expect(html).not.toContain(word);
+    }
   });
 });

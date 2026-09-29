@@ -114,8 +114,14 @@ export function applyLivePrices(
       return { ...s, close };
     }
     if (shouldAppend) {
+      // open 只在原本就存在、且与 close 等长时才一起追加，否则置空——
+      // 一个长度对不上的 open 数组比没有这一列更危险：历史推演会照它按错误的日期撮合。
+      // 追加的这一根是「今天」正在走的 bar，我们并不知道今天的开盘价，
+      // 所以补 null 而不是拿当前价冒充（推演也从不使用未收盘的 bar）。
+      const open = s.open && s.open.length === n ? [...s.open, null] : undefined;
       return {
         ...s,
+        open,
         close: [...s.close, q.price],
         high: [...s.high, q.price],
         low: [...s.low, q.price],
