@@ -10,21 +10,51 @@ export function Card(props: {
   tone?: "default" | "quiet";
   /** 给卡片一个锚点 id，供页面内跳转使用（见 WorkbenchView 的「跳到该板块的个股」） */
   id?: string;
+  /**
+   * 传了 onToggleFold 就把这张卡做成可折叠的：标题栏右侧出现一个折叠按钮。
+   *
+   * 折叠时**整个正文都不渲染**，不是用 CSS 隐藏 —— `.card-body` 是 flex 容器，
+   * `hidden` 属性压不过它（作者样式赢过浏览器默认样式），会看起来「折了但还在」。
+   */
+  folded?: boolean;
+  onToggleFold?: () => void;
   children: ReactNode;
 }) {
-  const { title, subtitle, right, tone = "default", id, children } = props;
+  const { title, subtitle, right, tone = "default", id, folded = false, onToggleFold, children } = props;
+  const foldable = typeof onToggleFold === "function";
+  const bodyId = id ? `${id}-body` : undefined;
   return (
     <section id={id} className={`card${tone === "quiet" ? " card-quiet" : ""}`}>
-      {(title || right) && (
-        <header className="card-head">
+      {(title || right || foldable) && (
+        <header className={`card-head${folded ? " card-head-folded" : ""}`}>
           <div className="card-head-text">
             {title && <h2 className="card-title">{title}</h2>}
             {subtitle && <p className="card-subtitle">{subtitle}</p>}
           </div>
-          {right && <div className="card-head-right">{right}</div>}
+          {(right || foldable) && (
+            <div className="card-head-right">
+              {right}
+              {foldable && (
+                <button
+                  type="button"
+                  className="card-fold"
+                  aria-expanded={!folded}
+                  aria-controls={bodyId}
+                  title={folded ? "展开这一节" : "收起这一节"}
+                  onClick={onToggleFold}
+                >
+                  {folded ? "展开 ▾" : "收起 ▴"}
+                </button>
+              )}
+            </div>
+          )}
         </header>
       )}
-      <div className="card-body">{children}</div>
+      {!folded && (
+        <div className="card-body" id={bodyId}>
+          {children}
+        </div>
+      )}
     </section>
   );
 }

@@ -36,7 +36,8 @@ import { GameView } from "./components/GameView";
 import { LevelDetail, LevelPicker } from "./components/LevelPicker";
 import { HistoryView } from "./components/HistoryView";
 import { SettingsView } from "./components/SettingsView";
-import { WorkbenchView } from "./components/WorkbenchView";
+import { Card } from "./components/common";
+import { WorkbenchView, parseFolds } from "./components/WorkbenchView";
 import { CASH_OPTIONS, defaultGameState, GAME_DISCLAIMER, startGame, type GameState } from "./lib/game";
 import { awayReport, makeMark } from "./lib/awayReport";
 import { REVIEW_CAVEATS, type ReviewReport } from "@aw/game";
@@ -113,8 +114,96 @@ function firstSectorCode(snapshot: Snapshot): string {
   return code;
 }
 
+function renderCard(props: Parameters<typeof Card>[0]): string {
+  return renderToStaticMarkup(createElement(Card, props));
+}
+
+describe("卡片可折叠", () => {
+  it("没传 onToggleFold 就不是折叠卡，不出现按钮", () => {
+    const html = renderCard({ title: "① 大盘环境", children: createElement("p", null, "内容") });
+    expect(html).not.toContain("card-fold");
+  });
+
+  it("传了 onToggleFold 就出现按钮，且默认是展开的", () => {
+    const html = renderCard({
+      title: "② 板块强弱",
+      onToggleFold: () => {},
+      children: createElement("p", null, "正文内容"),
+    });
+    expect(html).toContain("收起 ▴");
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain("正文内容");
+  });
+
+  it("折叠时正文整块不渲染，而不是藏起来", () => {
+    // `.card-body` 是 flex 容器，`hidden` 属性压不过它（作者样式赢过浏览器默认样式），
+    // 用 CSS 隐藏会「看起来折了但其实还在」，所以必须是条件渲染
+    const html = renderCard({
+      title: "② 板块强弱",
+      folded: true,
+      onToggleFold: () => {},
+      children: createElement("p", null, "正文内容"),
+    });
+    expect(html).not.toContain("正文内容");
+    expect(html).toContain("展开 ▾");
+    expect(html).toContain('aria-expanded="false"');
+  });
+
+  it("折叠后头部仍然在，按钮还按得下去", () => {
+    const html = renderCard({
+      id: "layer-sectors",
+      title: "② 板块强弱",
+      folded: true,
+      onToggleFold: () => {},
+      children: createElement("p", null, "x"),
+    });
+    expect(html).toContain("② 板块强弱");
+    expect(html).toContain('aria-controls="layer-sectors-body"');
+  });
+
+  it("折叠时右侧那些筛选按钮还在（折起来也得能清除筛选）", () => {
+    const html = renderCard({
+      title: "② 板块强弱",
+      folded: true,
+      onToggleFold: () => {},
+      right: createElement("button", { type: "button" }, "清除板块筛选 ✕"),
+      children: createElement("p", null, "x"),
+    });
+    expect(html).toContain("清除板块筛选");
+  });
+});
+
+describe("折叠状态存档", () => {
+  it("没存过 → 全展开", () => {
+    expect(parseFolds(null)).toEqual({ sectors: false, stocks: false });
+  });
+
+  it("存过 → 按存的来", () => {
+    expect(parseFolds('{"sectors":true,"stocks":false}')).toEqual({ sectors: true, stocks: false });
+  });
+
+  it("只认真正的 true，别的值当没折", () => {
+    // 手改过的存档、或者以后改了字段含义，都不该让某一层莫名其妙地消失
+    expect(parseFolds('{"sectors":"yes","stocks":1}')).toEqual({ sectors: false, stocks: false });
+  });
+
+  it("坏 json 不抛，退回全展开", () => {
+    expect(parseFolds("{不是 json")).toEqual({ sectors: false, stocks: false });
+    expect(parseFolds("null")).toEqual({ sectors: false, stocks: false });
+    expect(parseFolds('"字符串"')).toEqual({ sectors: false, stocks: false });
+  });
+});
+
 describe("板块跳转：点板块跳到该板块的个股", () => {
   const sectorCode = firstSectorCode(devSnapshot);
+
+  it("第二层和第三层都给得出折叠按钮", () => {
+    const html = renderWorkbench(devSnapshot);
+    expect((html.match(/card-fold/g) ?? []).length).toBe(2);
+    expect(html).toContain("收起 ▴");
+    // 默认展开：一进来就把内容藏掉，等于让人先点一下才看得到东西
+    expect(html).not.toContain("展开 ▾");
+  });
 
   it("第三层带锚点 id，跳转才有地方可跳", () => {
     const html = renderWorkbench(devSnapshot);

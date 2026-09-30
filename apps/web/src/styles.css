@@ -166,6 +166,33 @@ textarea {
 
 .card-head-right {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* 折叠时正文整块不渲染，得自己把底部内边距补回来，否则卡片看着像被截断 */
+.card-head-folded {
+  padding-bottom: 12px;
+}
+
+.card-fold {
+  flex: none;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.card-fold:hover {
+  color: var(--text);
+  border-color: var(--muted);
 }
 
 .card-body {

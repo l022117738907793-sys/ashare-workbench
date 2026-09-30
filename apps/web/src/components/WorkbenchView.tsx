@@ -8,6 +8,8 @@ import {
   fmtRatio,
   hasInsufficientReason,
   NOT_ENOUGH_BANNER,
+  readLS,
+  writeLS,
   type StockGroup,
 } from "../lib/helpers";
 import type { TradeSignal } from "@aw/core";
@@ -56,6 +58,22 @@ export function WorkbenchView(props: WorkbenchProps) {
   const [closed, setClosed] = useState<Record<string, boolean>>({});
 
   /**
+   * 第二层、第三层整卡的折叠状态。
+   *
+   * 这两层加起来能占好几屏，折起来之后读别的层不用一路滚。
+   * 默认展开：一进来就把内容藏掉，等于让人先点一下才看得到东西。
+   * 但选择会记住（localStorage），折过一次之后每次打开都是折着的。
+   */
+  const [folds, setFolds] = useState<Folds>(() => parseFolds(readLS(FOLD_KEY)));
+  function toggleFold(key: keyof Folds): void {
+    setFolds((f) => {
+      const next: Folds = { ...f, [key]: !f[key] };
+      writeLS(FOLD_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  /**
    * 选中板块后跳到第三层。
    *
    * 板块有三十来个，第三层在它们下面好几屏；不跳的话点完屏幕上什么都没变，
@@ -99,6 +117,8 @@ export function WorkbenchView(props: WorkbenchProps) {
         id={SECTOR_LAYER_ID}
         title="② 板块强弱"
         subtitle={`申万口径 · 共 ${sectors.length} 个板块，按强度排序`}
+        folded={folds.sectors}
+        onToggleFold={() => toggleFold("sectors")}
         right={
           sectorCode ? (
             <button type="button" className="chip chip-active" onClick={() => onSelectSector(null)}>
@@ -152,6 +172,8 @@ export function WorkbenchView(props: WorkbenchProps) {
 
       <Card
         id={STOCK_LAYER_ID}
+        folded={folds.stocks}
+        onToggleFold={() => toggleFold("stocks")}
         title="③ 个股分类"
         subtitle={
           selectedSector
@@ -300,6 +322,31 @@ function scrollBelowHeader(el: HTMLElement | null): void {
   const offset = head instanceof HTMLElement ? head.getBoundingClientRect().height + 8 : 8;
   const top = window.scrollY + el.getBoundingClientRect().top - offset;
   window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+}
+
+export interface Folds {
+  sectors: boolean;
+  stocks: boolean;
+}
+
+const FOLD_KEY = "aw.folds.v1";
+const NO_FOLDS: Folds = { sectors: false, stocks: false };
+
+/**
+ * 解析存下来的折叠状态。
+ *
+ * 只认真正的 `true`：存档被手改过、或者是旧版本写的 json，都退回「全展开」。
+ * 这里不能抛 —— 折叠状态坏了顶多是页面长一点，不该让整页打不开。
+ */
+export function parseFolds(raw: string | null): Folds {
+  if (!raw) return NO_FOLDS;
+  try {
+    const parsed = JSON.parse(raw) as Partial<Folds> | null;
+    if (!parsed || typeof parsed !== "object") return NO_FOLDS;
+    return { sectors: parsed.sectors === true, stocks: parsed.stocks === true };
+  } catch {
+    return NO_FOLDS;
+  }
 }
 
 function reasonValue(s: SectorResult, key: string): number | null {

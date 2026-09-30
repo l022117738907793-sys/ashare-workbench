@@ -552,7 +552,67 @@ try {
     `),
   );
 
-  console.log("\n十三、控制台没有报错");
+  console.log("\n十三、卡片可折叠");
+  const foldBtn = (label: string) => `[...document.querySelectorAll("button.card-fold")].find(b => b.textContent.includes(${JSON.stringify(label)}))`;
+  await evaluate(CLICK("筛选"));
+  await sleep(500);
+  const h0 = await evaluate<number>(`return document.body.scrollHeight;`);
+  const fold2 = await evaluate<string>(`
+    const b = ${foldBtn("收起")};
+    if (!b) return "NO_BTN";
+    b.click();
+    return "OK";
+  `);
+  check("第二层给得出折叠按钮", fold2 === "OK", fold2);
+  await sleep(400);
+  const h1 = await evaluate<number>(`return document.body.scrollHeight;`);
+  check(`折起第二层后页面明显变短（${h0} → ${h1}）`, h1 < h0 - 800);
+
+  const bodyGone = await evaluate<boolean>(`
+    const el = document.getElementById("layer-sectors");
+    return el !== null && !el.innerText.includes("点此只看该板块");
+  `);
+  check("折起来之后板块行整块不渲染，不是用 CSS 藏起来", bodyGone);
+
+  await evaluate(`
+    const b = ${foldBtn("收起")};
+    if (b) b.click();
+    return true;
+  `);
+  await sleep(400);
+  const h2 = await evaluate<number>(`return document.body.scrollHeight;`);
+  check(`再折起第三层（${h1} → ${h2}）`, h2 < h1 - 300);
+
+  // 折过之后要记住 —— 否则每次打开都得再折一遍，等于没做
+  await send("Page.reload", { ignoreCache: true });
+  await sleep(3000);
+  const remembered = await evaluate<string>(`
+    const folded = [...document.querySelectorAll("button.card-fold")].filter(b => b.textContent.includes("展开")).length;
+    return JSON.stringify({ folded, h: document.body.scrollHeight });
+  `);
+  const R = JSON.parse(remembered) as { folded: number; h: number };
+  check(`刷新后两层还是折着的（按钮 ${R.folded} 个，高度 ${R.h}）`, R.folded === 2 && R.h < h0);
+  check(
+    "折着的时候筛选按钮还在（要能清除板块筛选）",
+    await evaluate<boolean>(`
+      const b = [...document.querySelectorAll("button.card-fold")].find(x => x.textContent.includes("展开"));
+      const card = b && b.closest(".card");
+      return !!card;
+    `),
+  );
+
+  // 复原，免得影响后面/下次跑
+  await evaluate(`
+    for (const b of [...document.querySelectorAll("button.card-fold")]) {
+      if (b.textContent.includes("展开")) b.click();
+    }
+    return true;
+  `);
+  await sleep(400);
+  const h3 = await evaluate<number>(`return document.body.scrollHeight;`);
+  check(`展开后恢复原长（${h3}）`, Math.abs(h3 - h0) < 50);
+
+  console.log("\n十四、控制台没有报错");
   const errs = await evaluate<string[]>(`
     return (window.__e2eErrors || []);
   `);
