@@ -491,7 +491,68 @@ try {
   );
   check("复盘里至少列出那一笔成交", Number(JSON.parse(reviewMeta)) >= 1, reviewMeta);
 
-  console.log("\n十二、控制台没有报错");
+  console.log("\n十二、板块跳转：点板块跳到该板块的个股");
+  await evaluate(CLICK("筛选"));
+  await sleep(600);
+  // 先滚到板块卡，再点第一个板块 —— 否则本来就在页面顶部，跳不跳看不出来
+  await evaluate(`
+    const el = document.getElementById("layer-sectors");
+    if (el) el.scrollIntoView({ block: "start" });
+    return true;
+  `);
+  await sleep(500);
+  const beforeY = await evaluate<number>(`return window.scrollY;`);
+  const sectorClick = await evaluate<string>(`
+    const el = document.getElementById("layer-sectors");
+    if (!el) return "NO_SECTORS";
+    const b = [...el.querySelectorAll("button.row-tap")].find(x => x.textContent);
+    if (!b) return "NO_ROW";
+    b.click();
+    return "OK";
+  `);
+  check("点得到第一个板块", sectorClick === "OK", sectorClick);
+  await sleep(1200);
+  const afterY = await evaluate<number>(`return window.scrollY;`);
+  check(`点板块后页面往下跳了（${Math.round(beforeY)} → ${Math.round(afterY)}）`, afterY > beforeY + 200);
+
+  const landed = await evaluate<string>(`
+    const el = document.getElementById("layer-stocks");
+    if (!el) return "NO_TARGET";
+    const head = document.querySelector(".app-head");
+    const headH = head ? head.getBoundingClientRect().height : 0;
+    const top = el.getBoundingClientRect().top;
+    return JSON.stringify({ top: Math.round(top), headH: Math.round(headH), vh: window.innerHeight });
+  `);
+  const L = JSON.parse(landed) as { top: number; headH: number; vh: number };
+  check(
+    `个股卡的标题落在视口里，且没被顶栏挡住（top=${L.top}, 顶栏=${L.headH}, 视口=${L.vh}）`,
+    L.top >= L.headH - 4 && L.top < L.vh / 2,
+    landed,
+  );
+  check(
+    "跳过去之后确实只显示这个板块",
+    await evaluate<boolean>(`return document.body.innerText.includes("已按板块")`),
+  );
+  check(
+    "给得出「回到板块列表」的出口",
+    await evaluate<boolean>(`return document.body.innerText.includes("回到板块列表")`),
+  );
+
+  // 回头路也要真的走得通：点了要清掉筛选、并滚回板块卡
+  const backClick = await evaluate<string>(CLICK("回到板块列表"));
+  check("点得到「回到板块列表」", backClick === "OK", backClick);
+  await sleep(1200);
+  const backY = await evaluate<number>(`return window.scrollY;`);
+  check(`点返回后滚回板块（${Math.round(afterY)} → ${Math.round(backY)}）`, backY < afterY - 200);
+  check(
+    "返回后筛选已清除，第三层恢复成全池",
+    await evaluate<boolean>(`
+      const t = document.body.innerText;
+      return !t.includes("已按板块") && t.includes("全池");
+    `),
+  );
+
+  console.log("\n十三、控制台没有报错");
   const errs = await evaluate<string[]>(`
     return (window.__e2eErrors || []);
   `);

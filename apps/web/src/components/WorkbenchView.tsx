@@ -1,5 +1,5 @@
 /** 第一层～第三层：大盘环境 → 板块强弱 → 个股分类（漏斗）。 */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MarketResult, SectorResult, StockMetrics } from "@aw/core";
 import { sourceLabel, type Quote } from "@aw/data";
 import {
@@ -54,6 +54,24 @@ export function WorkbenchView(props: WorkbenchProps) {
 
   const firstNonEmpty = groups.findIndex((g) => g.items.length > 0);
   const [closed, setClosed] = useState<Record<string, boolean>>({});
+
+  /**
+   * 选中板块后跳到第三层。
+   *
+   * 板块有三十来个，第三层在它们下面好几屏；不跳的话点完屏幕上什么都没变，
+   * 会让人以为没点上。只在「用户真的换了一个板块」时跳：清除筛选（null）不跳，
+   * 否则点「清除」会被莫名其妙地往下带一段。
+   */
+  const jumpedTo = useRef<string | null>(null);
+  useEffect(() => {
+    if (!sectorCode) {
+      jumpedTo.current = null;
+      return;
+    }
+    if (jumpedTo.current === sectorCode) return;
+    jumpedTo.current = sectorCode;
+    scrollBelowHeader(document.getElementById(STOCK_LAYER_ID));
+  }, [sectorCode]);
   const isOpen = (type: string, idx: number) =>
     closed[type] === undefined ? idx === firstNonEmpty : !closed[type];
   const toggle = (type: string, idx: number) =>
@@ -78,6 +96,7 @@ export function WorkbenchView(props: WorkbenchProps) {
       </Card>
 
       <Card
+        id={SECTOR_LAYER_ID}
         title="② 板块强弱"
         subtitle={`申万口径 · 共 ${sectors.length} 个板块，按强度排序`}
         right={
@@ -116,7 +135,9 @@ export function WorkbenchView(props: WorkbenchProps) {
                       最强成分：
                       {s.strongestMembers.length > 0 ? s.strongestMembers.join("、") : "—"}
                     </span>
-                    <span className="row-action">{active ? "已选中：第三层只显示该板块" : "点此只看该板块 →"}</span>
+                    <span className="row-action">
+                      {active ? "已选中：第三层只显示该板块（再点一下取消）" : "点此只看该板块，并跳到下面的个股 ↓"}
+                    </span>
                   </button>
                   {s.state === "数据不足" && !hasInsufficientReason(s.reasons) && (
                     <p className="muted small">{NOT_ENOUGH_BANNER} 板块数据缺失。</p>
@@ -130,11 +151,27 @@ export function WorkbenchView(props: WorkbenchProps) {
       </Card>
 
       <Card
+        id={STOCK_LAYER_ID}
         title="③ 个股分类"
         subtitle={
           selectedSector
             ? `已按板块「${selectedSector.name}」过滤 · 命中 ${filteredStocks} / ${totalStocks} 只`
             : `全池 ${totalStocks} 只 · 命中 ${filteredStocks} 只`
+        }
+        right={
+          // 跳下来之后要能跳回去。否则想换个板块得自己往上翻好几屏 —— 那就成了死胡同
+          selectedSector ? (
+            <button
+              type="button"
+              className="chip chip-active"
+              onClick={() => {
+                onSelectSector(null);
+                scrollBelowHeader(document.getElementById(SECTOR_LAYER_ID));
+              }}
+            >
+              ↑ 回到板块列表
+            </button>
+          ) : undefined
         }
       >
         <div className="filter-bar">
@@ -241,6 +278,28 @@ export function WorkbenchView(props: WorkbenchProps) {
       </Card>
     </div>
   );
+}
+
+/**
+ * 卡片锚点 id。点板块时会跳到这张卡。
+ * 改这里要同步改 e2e 里的断言。
+ */
+const STOCK_LAYER_ID = "layer-stocks";
+const SECTOR_LAYER_ID = "layer-sectors";
+
+/**
+ * 把某个元素滚到「粘性顶栏下面」。
+ *
+ * 不能直接用 `scrollIntoView({block:"start"})`：顶栏是 `position: sticky`，
+ * 卡片顶端会被压在它下面，跳过去反而看不到标题。所以自己量一下顶栏高度再滚。
+ * 顶栏高度随宽度变化（meta 那行会折行），所以要每次现量，不能写死。
+ */
+function scrollBelowHeader(el: HTMLElement | null): void {
+  if (!el || typeof window === "undefined") return;
+  const head = document.querySelector(".app-head");
+  const offset = head instanceof HTMLElement ? head.getBoundingClientRect().height + 8 : 8;
+  const top = window.scrollY + el.getBoundingClientRect().top - offset;
+  window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
 }
 
 function reasonValue(s: SectorResult, key: string): number | null {

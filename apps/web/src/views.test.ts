@@ -75,7 +75,10 @@ function loadFixture(name: string): Fixture {
 
 const devSnapshot = loadFixture("market_normal_sector_active_stock_high.json");
 
-function renderWorkbench(snapshot: Snapshot): string {
+function renderWorkbench(
+  snapshot: Snapshot,
+  over: Partial<Parameters<typeof WorkbenchView>[0]> = {},
+): string {
   const byCode = new Map<string, StockData>(snapshot.stocks.map((s) => [s.code, s]));
   const results = snapshot.stocks.map((s) => classifyStock(s, defaultRules));
   const metrics = new Map(snapshot.stocks.map((s) => [s.code, computeStockMetrics(s, defaultRules)]));
@@ -98,9 +101,43 @@ function renderWorkbench(snapshot: Snapshot): string {
       filteredStocks: filterStockResults(results, byCode).length,
       mainIndexText: "主指数 沪深300 最新收盘 3750.00",
       signals: deriveSignals(snapshot.stocks, defaultRules),
+      ...over,
     }),
   );
 }
+
+/** 找一个板块代码，用来测「选中板块之后」的样子 */
+function firstSectorCode(snapshot: Snapshot): string {
+  const code = snapshot.sectors[0]?.code;
+  if (!code) throw new Error("fixture 里没有板块，测不了");
+  return code;
+}
+
+describe("板块跳转：点板块跳到该板块的个股", () => {
+  const sectorCode = firstSectorCode(devSnapshot);
+
+  it("第三层带锚点 id，跳转才有地方可跳", () => {
+    const html = renderWorkbench(devSnapshot);
+    expect(html).toContain('id="layer-stocks"');
+    expect(html).toContain('id="layer-sectors"');
+  });
+
+  it("板块行说清楚点了会跳到下面，而不是只说「只看该板块」", () => {
+    const html = renderWorkbench(devSnapshot);
+    expect(html).toContain("点此只看该板块，并跳到下面的个股 ↓");
+  });
+
+  it("选中板块后，个股卡给一个「回到板块列表」的出口", () => {
+    // 跳下去之后没有回头路就是死胡同 —— 想换个板块得自己往上翻好几屏
+    const html = renderWorkbench(devSnapshot, { sectorCode });
+    expect(html).toContain("回到板块列表");
+    expect(html).toContain("已选中：第三层只显示该板块");
+  });
+
+  it("没选板块时不给返回按钮", () => {
+    expect(renderWorkbench(devSnapshot)).not.toContain("回到板块列表");
+  });
+});
 
 describe("筛选页渲染", () => {
   const html = renderWorkbench(devSnapshot);

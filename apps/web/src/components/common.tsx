@@ -8,11 +8,13 @@ export function Card(props: {
   subtitle?: ReactNode;
   right?: ReactNode;
   tone?: "default" | "quiet";
+  /** 给卡片一个锚点 id，供页面内跳转使用（见 WorkbenchView 的「跳到该板块的个股」） */
+  id?: string;
   children: ReactNode;
 }) {
-  const { title, subtitle, right, tone = "default", children } = props;
+  const { title, subtitle, right, tone = "default", id, children } = props;
   return (
-    <section className={`card${tone === "quiet" ? " card-quiet" : ""}`}>
+    <section id={id} className={`card${tone === "quiet" ? " card-quiet" : ""}`}>
       {(title || right) && (
         <header className="card-head">
           <div className="card-head-text">
