@@ -151,3 +151,23 @@ if (existsSync(HISTORY_SRC)) {
 } else {
   console.log("（没有 data/history，跳过历史关卡分片；跑 scripts/build-history-shards.ts 生成）");
 }
+
+// ── 历史推演当天的资讯 ────────────────────────────────────────
+// 传奇/随机模式里「那天发生了什么」来自 data/history/news/<日期>.json
+// （由 scripts/fetch_history_news.py 抓新浪财经首页归档生成）。网页端按模拟日
+// **按需取单个文件**，所以这里是平铺的一堆按日期命名的 json，不做索引。
+// 一天 18 条标题 + 链接，约 2 KB；380 天合计不到 1 MB。
+const NEWS_SRC = join(HISTORY_SRC, "news");
+const NEWS_DEST = join(HISTORY_DEST, "news");
+if (existsSync(NEWS_SRC)) {
+  // 只认 YYYY-MM-DD.json，别把 .tmp 残留或缓存文件带进产物
+  const days = readdirSync(NEWS_SRC).filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f));
+  if (days.length > 0) {
+    mkdirSync(NEWS_DEST, { recursive: true });
+    for (const f of days) cpSync(join(NEWS_SRC, f), join(NEWS_DEST, f));
+    const bytes = days.reduce((n, f) => n + statSync(join(NEWS_SRC, f)).size, 0);
+    console.log(`同步历史资讯 ${days.length} 天 -> apps/web/public/history/news（${(bytes / 1024).toFixed(0)} KB）`);
+  }
+} else {
+  console.log("（没有 data/history/news，跳过历史资讯；跑 scripts/fetch_history_news.py 生成）");
+}

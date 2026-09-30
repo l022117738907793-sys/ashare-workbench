@@ -136,9 +136,16 @@ async function evaluate<T = unknown>(expr: string): Promise<T> {
   return res.result?.value as T;
 }
 
-/** 按可见文字点按钮 */
+/**
+ * 按可见文字点按钮。
+ *
+ * **必须把术语按钮（`button.term`）排除掉。** 术语高亮会把界面里的专业词都包成
+ * 一个按钮，而它的文字就是那个词本身 —— 比如「待成交委托」卡的空提示写着
+ * 「还没有挂单」，于是 `CLICK("挂单")` 会点到那个**解释**按钮上，真正的「挂单」
+ * 提交按钮一次都没被按，而 `CLICK` 照样返回 OK。这类按钮不是动作，别让它参与匹配。
+ */
 const CLICK = (text: string) => `
-  const btns = [...document.querySelectorAll("button")];
+  const btns = [...document.querySelectorAll("button")].filter(b => !b.classList.contains("term"));
   const b = btns.find(x => x.textContent && x.textContent.includes(${JSON.stringify(text)}));
   if (!b) return "NOT_FOUND";
   b.click();
@@ -1070,25 +1077,42 @@ try {
       r("OK");
     }, 250));
   `);
-  await evaluate(CLICK("挂单"));
+  const ghPlaced = await evaluate<string>(CLICK("挂单"));
+  check("推演里也挂得上单", ghPlaced === "OK", ghPlaced);
   await sleep(400);
   await evaluate(CLICK("走一天"));
-  await sleep(600);
+  await sleep(700);
 
   await evaluate(CLICK("游戏记录"));
   check(
     "切到游戏记录，两边的成交都在",
     await waitFor(`document.body.innerText.includes("成交记录（")`, "游戏记录界面"),
   );
+
+  /**
+   * 这里**必须看成交行本身**，不能看 `document.body.innerText`。
+   *
+   * 教训：切换条上那两个 chip 的文案恰好就是「实时模式」和「历史推演 · 第 N 关」，
+   * 于是 `body.innerText.includes("实时模式")` 与 `includes("历史推演 · 第")`
+   * **在一条成交都没有的情况下照样通过** —— 断言看着很合理，实际什么都没验。
+   * 换成读 `.history-row` 之后，它当场就暴露出「推演那单根本没成交」这个真问题。
+   */
   const ghText = await evaluate<string>(`return document.body.innerText;`);
-  check("实时那单标成「实时模式」", ghText.includes("实时模式"), ghText.slice(0, 80));
+  const ghRows = await evaluate<string[]>(`
+    return [...document.querySelectorAll(".history-row")].map(r => r.innerText.split("\\n").join(" | ").trim());
+  `);
+  const rowsText = ghRows.join("  //  ");
+  check("成交记录里真的有行（不是只有切换条上的字）", ghRows.length >= 2, `实际 ${ghRows.length} 行：${rowsText.slice(0, 200)}`);
+  check("实时那单标成「实时模式」", rowsText.includes("实时模式"), rowsText.slice(0, 200));
   check(
     "推演那单标成「模拟日」，并写明是第几关",
-    ghText.includes("模拟日") && /历史推演 · 第 \d+ 关/.test(ghText),
+    rowsText.includes("模拟日") && /历史推演 · 第 \d+ 关/.test(rowsText),
+    rowsText.slice(0, 300),
   );
   check(
     "两笔各属于一边（不是全归到一处）",
-    ghText.includes("实时模式") && ghText.includes("历史推演 · 第"),
+    rowsText.includes("实时模式") && rowsText.includes("历史推演 · 第"),
+    rowsText.slice(0, 300),
   );
   check("赛季结算也是一张卡", ghText.includes("赛季结算（"));
   check("这一屏照旧带免责声明", ghText.includes("不构成投资建议"));
@@ -1130,6 +1154,127 @@ try {
   check(
     "点横幅回到推演本身",
     await waitFor(`document.body.innerText.includes("待成交委托")`, "推演界面"),
+  );
+
+  console.log("\n十三之五、术语：点两下就有解释，同时只开一个");
+
+  /**
+   * 用户提的：「对专业术语标蓝（就是没接触过股票的看不懂的），用户点两下能看到
+   * 解析。解析的形式是教学助手来解释。」
+   *
+   * 「点两下」指的是**两层**：第一下出一句话，第二下（点「让翡翠细讲」）出完整
+   * 解释。这里把这两层和「同时只开一个」都验一遍 —— 一屏几十个词，全开着会变成
+   * 一屏解释，那是功能没做完而不是功能多。
+   */
+  // 回到筛选页：这一页术语最密，而且和上一节留下的游戏状态无关
+  await evaluate(CLICK("筛选"));
+  await sleep(600);
+  const termBefore = await evaluate<number>(`return document.querySelectorAll(".term-panel").length;`);
+  check("没点之前一个解释都不展开", termBefore === 0, `实际 ${termBefore} 个`);
+
+  const termWord = await evaluate<string>(`
+    const b = document.querySelector("button.term");
+    if (!b) return "NOT_FOUND";
+    b.scrollIntoView({ block: "center" });
+    const w = b.textContent;
+    b.click();
+    return w;
+  `);
+  check("页面上能找到术语按钮", termWord !== "NOT_FOUND", termWord);
+
+  check(
+    "点第一下：原地撑开一句话的解释",
+    await waitFor(
+      `(() => {
+        const p = document.querySelector(".term-panel");
+        return !!p && p.innerText.includes("翡翠") && p.innerText.includes("让翡翠细讲");
+      })()`,
+      "术语气泡",
+    ),
+  );
+
+  const termFull = await evaluate<string>(`
+    const more = document.querySelector(".term-more");
+    if (!more) return "NOT_FOUND";
+    more.click();
+    return more.textContent;
+  `);
+  check("气泡里有「让翡翠细讲」这个入口", termFull !== "NOT_FOUND", termFull);
+  check(
+    "点第二下：换成完整解析（有「是什么、为什么」那几段）",
+    await waitFor(
+      `(() => {
+        const p = document.querySelector(".term-panel");
+        return !!p && !p.innerText.includes("让翡翠细讲") && p.innerText.length > 40;
+      })()`,
+      "完整解析",
+    ),
+  );
+
+  /**
+   * 同时只开一个：点另一个词，前一个必须收起来。
+   * 判据是**面板数量恒为 1**，不是「某个词关着」—— 后者在实现只做加法时也会过。
+   */
+  const exclusive = await evaluate<string>(`
+    const all = [...document.querySelectorAll("button.term")];
+    const other = all.find(b => b.getAttribute("aria-expanded") === "false");
+    if (!other) return "NO_OTHER";
+    other.click();
+    return other.textContent;
+  `);
+  await sleep(300);
+  const panels = await evaluate<number>(`return document.querySelectorAll(".term-panel").length;`);
+  check("点另一个词之后，仍然只有一个展开", panels === 1, `实际 ${panels} 个（点了「${exclusive}」）`);
+
+  const collapsed = await evaluate<number>(`
+    return [...document.querySelectorAll("button.term")].filter(b => b.getAttribute("aria-expanded") === "true").length;
+  `);
+  check("展开的词自己也标记成展开了（aria-expanded）", collapsed === 1, `实际 ${collapsed} 个`);
+
+  console.log("\n十三之六、历史推演里也有当天的资讯");
+
+  /**
+   * 用户提的：「另外历史推演里面好像没有资讯」。
+   *
+   * 不是 bug 是没数据：实时那套是滚动接口（只有今天），历史推演跑在过去的某一天，
+   * 所以另抓了一份按天的离线归档。这里验的是**它真的接上了**，不是「代码里有这个
+   * 组件」—— 所以要求卡片里出现具体条数，而不只是标题。
+   */
+  await evaluate(CLICK("模拟游戏"));
+  await sleep(600);
+  const toReplay = await evaluate<string>(CLICK("历史推演"));
+  check("推演还开着，切换条上点得回去", toReplay === "OK", toReplay);
+  check(
+    "推演界面回来了",
+    await waitFor(`document.body.innerText.includes("那一天的资讯")`, "那一天的资讯卡片", 60),
+  );
+  const dayNews = await evaluate<string>(`
+    const card = [...document.querySelectorAll("section.card")].find(s => s.textContent.includes("那一天的资讯"));
+    return card ? card.innerText : "NO_CARD";
+  `);
+  check("资讯卡在推演界面里", dayNews !== "NO_CARD", dayNews.slice(0, 60));
+  check("写明了来源是离线归档", dayNews.includes("新浪财经首页归档"), dayNews.slice(0, 80));
+  check(
+    "取不到的日子会明说「没抓到」，不假装当天没有新闻",
+    dayNews.includes("条") || dayNews.includes("没有抓到"),
+    dayNews.slice(0, 80),
+  );
+  const dayLinks = await evaluate<number>(`
+    const card = [...document.querySelectorAll("section.card")].find(s => s.textContent.includes("那一天的资讯"));
+    return card ? card.querySelectorAll("a.news-link").length : -1;
+  `);
+  check("每条资讯都给了原文链接", dayLinks > 0, `链接 ${dayLinks} 个`);
+  check(
+    "链接不在按钮里（嵌套可交互元素是非法 HTML）",
+    await evaluate<boolean>(`
+      const card = [...document.querySelectorAll("section.card")].find(s => s.textContent.includes("那一天的资讯"));
+      if (!card) return false;
+      for (const m of card.innerHTML.matchAll(/<button[\\s\\S]*?<\\/button>/g)) {
+        const inner = m[0].replace(/^<button[^>]*>/, "").replace(/<\\/button>$/, "");
+        if (inner.includes("<a ") || inner.includes("<button")) return false;
+      }
+      return true;
+    `),
   );
 
   console.log("\n十四、控制台没有报错");

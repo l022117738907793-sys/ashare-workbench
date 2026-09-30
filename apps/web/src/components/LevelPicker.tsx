@@ -10,7 +10,7 @@
  */
 import { useState } from "react";
 import { LEVELS, type ReplayLevel } from "@aw/game";
-import { Card, Notice } from "./common";
+import { Card, Notice, RichP } from "./common";
 import { GAME_DISCLAIMER } from "../lib/game";
 
 export interface LevelPickerProps {
@@ -106,9 +106,9 @@ export function LevelDetail(props: LevelDetailProps) {
           </Notice>
         )}
 
-        <p className="hint">
+        <RichP className="hint">
           价格用前复权（按今天的复权因子回算）：收益连续，但绝对价位和当年不一样。
-        </p>
+        </RichP>
       </Card>
     </div>
   );
@@ -178,9 +178,9 @@ export function LevelPicker(props: LevelPickerProps) {
           ))}
         </ol>
 
-        <p className="hint">
+        <RichP className="hint">
           节点按「大幅波动或成交异常」筛出，不代表这些日子容易赚钱。
-        </p>
+        </RichP>
       </Card>
     </div>
   );

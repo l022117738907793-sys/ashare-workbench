@@ -1286,6 +1286,15 @@ code {
 .news-head:hover {
   background: var(--surface-2);
 }
+/* 历史推演的那一天：标题是现成的，没有摘要可展开，所以整行不是按钮。
+   复用 .news-head 的排版，但把「可以点」的信号（手指+悬停底色）去掉 —— 
+   看着能点、点了没反应比不点更糟。 */
+.news-head-static {
+  cursor: default;
+}
+.news-head-static:hover {
+  background: none;
+}
 .news-time {
   flex-shrink: 0;
   font-size: 11px;
@@ -1714,4 +1723,109 @@ code {
 }
 .pick-caveat {
   margin: 6px 0 0;
+}
+
+/* ── 术语：蓝色的词 + 就地展开的解释 ────────────────────────────
+   解释不做浮层，就地撑开下面一行。浮层会盖住下单按钮，而琥珀那份接入包
+   明确要求助手不遮住下单、暂停和日期。 */
+.term {
+  display: inline;
+  padding: 0 1px;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  cursor: pointer;
+  text-align: left;
+}
+.term:hover {
+  background: var(--accent-soft);
+}
+.term[aria-expanded="true"] {
+  background: var(--accent-soft);
+  border-bottom-style: solid;
+}
+.term-panel {
+  display: block;
+  margin: 8px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--accent-soft);
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text);
+  text-align: left;
+}
+.term-panel-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.hisui-face {
+  flex: 0 0 auto;
+  display: inline-block;
+  border-radius: 50%;
+  background-size: 300% 200%;
+  background-repeat: no-repeat;
+  box-shadow: 0 0 0 1px var(--border);
+}
+.term-panel-body {
+  display: block;
+  min-width: 0;
+}
+.term-panel-who {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 1px;
+}
+.term-panel-text {
+  display: block;
+}
+.term-more {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.hisui-ask {
+  display: block;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.hisui-ask-row {
+  display: flex;
+  gap: 6px;
+}
+.hisui-ask-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+}
+.hisui-ask-err {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--bad);
+}
+.hisui-ask-answer {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 8px;
 }

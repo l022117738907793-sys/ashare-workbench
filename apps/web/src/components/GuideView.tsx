@@ -7,7 +7,7 @@
  * 内容与 docs/user-guide.md 对应，但按手机屏幕阅读重排
  * （长文分段、每段一个 Card）。改动时两边要同步。
  */
-import { Card, KV, Notice } from "./common";
+import { Card, KV, Notice, RichP } from "./common";
 
 export function GuideView({ onBack }: { onBack: () => void }) {
   return (
@@ -26,18 +26,18 @@ export function GuideView({ onBack }: { onBack: () => void }) {
       </Notice>
 
       <Card title="四层漏斗" subtitle="整个工具的核心结构">
-        <p className="rule-body">
+        <RichP className="rule-body">
           一层层收窄，每一层的结论都建立在上一层之上：
-        </p>
+        </RichP>
         <div className="kv-list">
           <KV k="① 大盘环境" v="现在整体市场适不适合做趋势？" />
           <KV k="② 板块强弱" v="哪些行业在走强、哪些在走弱？" />
           <KV k="③ 个股分类" v="这只股票属于哪一类？" />
           <KV k="④ 个股分析" v="七个步骤拆开看，每步都有依据" />
         </div>
-        <p className="rule-body">
+        <RichP className="rule-body">
           <strong>大盘不好的时候，后面几层的结论要打折看。</strong>
-        </p>
+        </RichP>
       </Card>
 
       <Card title="三个页面" subtitle="底部标签栏">
@@ -64,29 +64,29 @@ export function GuideView({ onBack }: { onBack: () => void }) {
       </Card>
 
       <Card title="怎么读「判断依据」" subtitle="这是整个工具最重要的东西">
-        <p className="rule-body">
+        <RichP className="rule-body">
           每个结论下面都有一行行小字：
-        </p>
+        </RichP>
         <p className="rule-body mono-sample">
           沪深300 近20日涨幅&nbsp;&nbsp;−2.31&nbsp;&nbsp;阈值 ≥3%&nbsp;&nbsp;未通过
         </p>
-        <p className="rule-body">
+        <RichP className="rule-body">
           读法：<strong>左边是实际值，中间是要求，右边是通过还是没通过。</strong>
-        </p>
-        <p className="rule-body">
+        </RichP>
+        <RichP className="rule-body">
           结论不是拍脑袋来的，是这些条件算出来的。
           <strong>你想反驳结论，就看哪一条依据你不认同。</strong>
-        </p>
+        </RichP>
       </Card>
 
       <Card title="【数据不足，不许编造】是什么意思" subtitle="不是系统坏了">
-        <p className="rule-body">
+        <RichP className="rule-body">
           如果某只股票可用交易日不够（少于 60 天），或者长期停牌，系统会明确显示
           <strong>「数据不足」</strong>并列出缺什么。
-        </p>
-        <p className="rule-body">
+        </RichP>
+        <RichP className="rule-body">
           <strong>它不会猜。</strong>缺数据就是缺数据，不会用 0 或推测值顶上去。
-        </p>
+        </RichP>
       </Card>
 
       <Card title="模拟游戏规则" subtitle="和真实 A 股一致，点模拟游戏页的「规则说明」看详细解释">
@@ -98,10 +98,10 @@ export function GuideView({ onBack }: { onBack: () => void }) {
           <KV k="一手" v="100 股整数倍" />
           <KV k="停牌/无行情" v="拒绝下单，不猜价格" />
         </div>
-        <p className="rule-body">
+        <RichP className="rule-body">
           <strong>成绩看超额收益</strong>（你的收益 − 同期沪深300），
           而不是绝对收益 —— 否则牛市里人人都是股神。
-        </p>
+        </RichP>
       </Card>
 
       <Card title="⚠️ 关于交易信号" subtitle="务必看完这条">
@@ -109,18 +109,18 @@ export function GuideView({ onBack }: { onBack: () => void }) {
           个股分析页顶部那张信号卡，给出的买入/卖出方向
           <strong>没有证据支持它有效</strong>。
         </Notice>
-        <p className="rule-body">
+        <RichP className="rule-body">
           用它自己的历史数据回测了 580 个交易日，结果是：看多信号比看空信号的前瞻收益只高
           <strong>0.16~0.27 个百分点</strong>，三种统计检验<strong>全部跨越 0</strong>
           —— 也就是和随机无法区分。
-        </p>
-        <p className="rule-body">
+        </RichP>
+        <RichP className="rule-body">
           <strong>说白了：准确度和抛硬币差不多。</strong>
           留着它是因为它展示了完整的判断逻辑，<strong>当观察框架可以，当交易依据不行</strong>。
-        </p>
-        <p className="rule-body">
+        </RichP>
+        <RichP className="rule-body">
           那三个参考价位（买入价 / 止损 / 目标）是 ATR 技术测算，<strong>不是收益承诺</strong>。
-        </p>
+        </RichP>
       </Card>
 
       <Card title="常见问题">

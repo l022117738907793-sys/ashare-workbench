@@ -12,6 +12,14 @@ import {
   type AppSettings,
   type RuleGroup,
 } from "../lib/helpers";
+import { useState } from "react";
+import {
+  HISUI_NAME,
+  isUsableEndpoint,
+  loadHisuiSettings,
+  saveHisuiSettings,
+  type HisuiSettings,
+} from "../lib/hisui";
 import { Card, KV, Notice } from "./common";
 
 export interface SettingsProps {
@@ -57,6 +65,16 @@ export function SettingsView(props: SettingsProps) {
     updatedText,
     quoteSourceText,
   } = props;
+
+  /*
+   * 翡翠的问答代理。**默认是空的**，因为纯静态站点不能保管 API Key ——
+   * 留一个「看着能问、点了说没接通」的入口比没有入口更糟，所以没配就整块
+   * 提问框都不渲染（判断在 AskBox 里，见 Terms.tsx）。
+   */
+  const [hisui, setHisui] = useState<HisuiSettings>(() => loadHisuiSettings());
+  const [hisuiDraft, setHisuiDraft] = useState(() => loadHisuiSettings().endpoint);
+  const [hisuiSaved, setHisuiSaved] = useState(false);
+  const hisuiOk = hisui.endpoint !== "" && isUsableEndpoint(hisui.endpoint);
 
   const overrides = overrideCount(settings.ruleOverrides);
   const groups: RuleGroup[] = ["market", "sector", "stock"];
@@ -201,6 +219,70 @@ export function SettingsView(props: SettingsProps) {
             })}
           </div>
         ))}
+      </Card>
+
+      <Card
+        title={`${HISUI_NAME}的问答（可选）`}
+        subtitle="不填也能用：术语解释是写好的，问答题才需要这个地址。"
+      >
+        <KV
+          k="现在的状态"
+          v={hisuiOk ? `已接通 ${hisui.endpoint}` : "没配 —— 术语照常解释，只是没有提问框"}
+        />
+        <label className="field">
+          <span className="field-label">问答代理地址</span>
+          <input
+            className="text-input"
+            type="url"
+            inputMode="url"
+            placeholder="https://你的代理.example.com/ask"
+            value={hisuiDraft}
+            onChange={(e) => {
+              setHisuiDraft(e.target.value);
+              setHisuiSaved(false);
+            }}
+          />
+        </label>
+        <div className="btn-row">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => {
+              const endpoint = hisuiDraft.trim();
+              const next = { endpoint };
+              saveHisuiSettings(next);
+              setHisui(next);
+              setHisuiSaved(true);
+            }}
+          >
+            保存
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => {
+              const next = { endpoint: "" };
+              saveHisuiSettings(next);
+              setHisui(next);
+              setHisuiDraft("");
+              setHisuiSaved(true);
+            }}
+          >
+            清除
+          </button>
+        </div>
+        {hisuiDraft.trim() !== "" && !isUsableEndpoint(hisuiDraft.trim()) ? (
+          <p className="field-hint">
+            这个地址看起来不对：要是一个 <code>https://</code> 开头的完整地址。
+          </p>
+        ) : null}
+        {hisuiSaved ? <p className="field-hint">已存在这台浏览器上，只影响你自己。</p> : null}
+        <Notice tone="info">
+          问答题要调用大模型，而大模型需要一个密钥。这个站点是<strong>纯静态</strong>的，
+          没有后端、也不保管任何密钥 —— 所以密钥得放在你自己的代理上，这里只填代理地址。
+          {HISUI_NAME}只会把屏幕上已经显示过的术语和解释发过去，
+          <strong>不会</strong>发送你的账户、持仓或没走到的行情。
+        </Notice>
       </Card>
 
       <Card title="本地数据" subtitle="历史记录与设置都存在浏览器里。">

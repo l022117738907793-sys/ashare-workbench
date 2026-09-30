@@ -24,3 +24,7 @@ data/_deep_*/
 # 历史推演的中间产物：619 只股票 × 9 年日线，几十兆。
 # data/history/（切好的关卡分片）才是要进仓库的发布产物。
 data/history-cache/
+
+# 历史资讯抓取时存下来的整页 HTML，只为断点续抓和复查用。
+# data/history/news/（按天切好的标题）才是要进仓库的发布产物。
+data/news-cache/

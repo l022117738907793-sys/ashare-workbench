@@ -18,10 +18,12 @@ import {
 } from "@aw/game";
 import { displayDate, maskDate, maskDatesIn, replayPrices, settleReplay } from "../lib/replay";
 import { fmtNum, fmtPct } from "../lib/helpers";
-import { Card, EmptyHint, KV, Notice } from "./common";
+import { Card, EmptyHint, KV, Notice, RichP } from "./common";
 import { StockPicker } from "./StockPicker";
 import { amountOf, changePctOf, type PickStock } from "../lib/picks";
 import { GAME_DISCLAIMER } from "../lib/game";
+import { useDayNews } from "../lib/useDayNews";
+import { DayNewsCard } from "./DayNewsCard";
 
 export interface ReplayViewProps {
   state: ReplayState;
@@ -105,6 +107,9 @@ export function ReplayView(props: ReplayViewProps) {
   const dayNo = state.dayIndex - startIndex + 1;
   const date = calendar[state.dayIndex] ?? "";
   const totalDays = calendar.length - startIndex;
+
+  // 这一天的资讯：离线归档，按日期读一份。取不到就当没有，不编。
+  const dayNews = useDayNews(date);
 
   const prices = useMemo(() => replayPrices(state), [state]);
 
@@ -196,12 +201,20 @@ export function ReplayView(props: ReplayViewProps) {
             <strong>这一局要想清楚的是：</strong>
             {briefing.theme}
           </Notice>
-          <p className="hint">
+          <RichP className="hint">
             你知道后来发生了什么，当时的人不知道。简报只写到进场那天。
-          </p>
-          {briefing.note ? <p className="hint">{briefing.note}</p> : null}
+          </RichP>
+          {briefing.note ? <RichP className="hint">{briefing.note}</RichP> : null}
         </Card>
       ) : null}
+
+      <DayNewsCard
+        loading={dayNews.loading}
+        missing={dayNews.missing}
+        items={dayNews.news?.items ?? []}
+        source={dayNews.news?.source}
+        mask={(t) => maskDatesIn(state, t, hideDate)}
+      />
 
       <Card
         title={label}

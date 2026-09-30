@@ -14,6 +14,7 @@
 | [docs/analysis-rules.md](docs/analysis-rules.md) | 分析规则唯一事实来源 |
 | [docs/data-sources.md](docs/data-sources.md) | **行情**数据源实测（CORS/限频/字段表） |
 | [docs/news-sources.md](docs/news-sources.md) | **新闻**数据源实测（历史覆盖/抓取坑/版权） |
+| [docs/terms-and-hisui.md](docs/terms-and-hisui.md) | 术语高亮与翡翠问答（词典规则/纯静态边界） |
 | [docs/game-design.md](docs/game-design.md) | 模拟游戏设计 |
 | [docs/gpt-game-review-2.md](docs/gpt-game-review-2.md) | 游戏模式设计评审（含实测证据） |
 | [docs/chatgpt-game-prompt.md](docs/chatgpt-game-prompt.md) | 给外部评审的提问稿 |

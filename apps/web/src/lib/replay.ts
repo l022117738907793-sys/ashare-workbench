@@ -280,7 +280,13 @@ export function maskDate(state: ReplayState, date: string, hideDate: boolean): s
 /** 替换一段文字里出现的所有日期（引擎生成的日志句子就是这样） */
 export function maskDatesIn(state: ReplayState, text: string, hideDate: boolean): string {
   if (!hideDate) return text;
-  return text.replace(/\d{4}-\d{2}-\d{2}/g, (d) => maskDate(state, d, true));
+  return (
+    text
+      .replace(/\d{4}-\d{2}-\d{2}/g, (d) => maskDate(state, d, true))
+      // 引擎的日志只写 ISO 日期，但关卡的新闻标题是中文写法（「2月3日」「2020年2月3日」）。
+      // 随机模式要藏日期，这两种写法一样会漏，统一换掉。
+      .replace(/(?:\d{4}年)?\d{1,2}月\d{1,2}日/g, () => "当天")
+  );
 }
 
 // ── 传奇模式（模式 2）：关卡 ────────────────────────────────
@@ -355,8 +361,72 @@ export async function loadLevelShard(
   return raw;
 }
 
-/** 用一份关卡分片开局。玩家总是从这一关的第 1 天进场，所以 startIndex 恒为 0。 */
-export function startLevelReplay(shard: LevelShard, initialCash: number, label?: string): ReplayState {
+// ── 那一天的资讯（历史推演专用） ──────────────────────────────
+//
+// 实时模式看的是**今天**的快讯（packages/data/src/news.ts 的滚动接口）。
+// 历史推演跑在过去的某一天，滚动接口给不出那天的东西，所以按日期读一份离线
+// 快照：`history/news/<YYYY-MM-DD>.json`，由 packages/data/scripts/
+// fetch_history_news.py 抓新浪财经首页归档生成，一天十几条标题 + 原文链接。
+
+export interface DayNewsItem {
+  title: string;
+  url: string;
+}
+
+export interface DayNews {
+  date: string;
+  source: string;
+  url?: string;
+  note?: string;
+  items: DayNewsItem[];
+}
+
+/** 日期合不合法。它会被拼进 URL，不能放任意字符串进去。 */
+export function isIsoDate(v: unknown): v is string {
+  return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+}
+
+/** 一份资讯文件合不合法。宁可当场说「这天没抓到」，也不要渲染半截数据。 */
+export function isDayNews(raw: unknown): raw is DayNews {
+  if (typeof raw !== "object" || raw === null) return false;
+  const o = raw as Record<string, unknown>;
+  if (!isIsoDate(o.date)) return false;
+  if (!Array.isArray(o.items)) return false;
+  return o.items.every(
+    (it) =>
+      typeof it === "object" &&
+      it !== null &&
+      typeof (it as DayNewsItem).title === "string" &&
+      typeof (it as DayNewsItem).url === "string",
+  );
+}
+
+/**
+ * 读某一天的资讯。
+ *
+ * 没有这一天（那天不是交易日、或者还没抓到）返回 null —— 这不是错误：
+ * 关卡日历里有、资讯没有的日子本来就可能存在。抓取脚本没跑过的仓库整个目录
+ * 都不存在，也会走到这条路上。
+ */
+export async function loadDayNews(
+  date: string,
+  opts: { base?: string; fetchImpl?: typeof fetch } = {},
+): Promise<DayNews | null> {
+  if (!isIsoDate(date)) return null;
+  const base = (opts.base ?? DEFAULT_HISTORY_BASE).replace(/\/+$/, "");
+  const f = opts.fetchImpl ?? fetch;
+  const url = `${base}/news/${date}.json`;
+  try {
+    const res = await f(url);
+    if (!res.ok) return null;
+    const raw: unknown = await res.json();
+    return isDayNews(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 用一份关卡分片开局。玩家总是从这一关的第 1 天进场，所以 startIndex 恒为 0。 */export function startLevelReplay(shard: LevelShard, initialCash: number, label?: string): ReplayState {
   return createReplay({
     calendar: [...shard.calendar],
     startIndex: 0,

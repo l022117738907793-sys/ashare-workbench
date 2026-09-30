@@ -12,6 +12,18 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+/**
+ * 去掉标签，只留人眼读到的那串字。
+ *
+ * 术语高亮会把「板块」「持仓」这类词包成一个 `<button class="term">`，于是原本
+ * 连续的短语在源码里被切开（`<h2><button>板块</button><span>强弱</span></h2>`）——
+ * 直接对 HTML 字符串做 `toContain` 会误报成「文案丢了」。断言**用户读到什么**
+ * 的时候用这个函数，断言**结构**（class、aria、顺序）的时候仍然看原始 HTML。
+ */
+function plain(html: string): string {
+  return html.replace(/<[^>]*>/g, "");
+}
+
 import {
   analyzeMarket,
   analyzeSector,
@@ -162,7 +174,7 @@ describe("卡片可折叠", () => {
       onToggleFold: () => {},
       children: createElement("p", null, "x"),
     });
-    expect(html).toContain("② 板块强弱");
+    expect(plain(html)).toContain("② 板块强弱");
     expect(html).toContain('aria-controls="layer-sectors-body"');
   });
 
@@ -271,10 +283,11 @@ describe("筛选页渲染", () => {
   const html = renderWorkbench(devSnapshot);
 
   it("三层结构和判断依据都渲染出来", () => {
-    expect(html).toContain("① 大盘环境");
-    expect(html).toContain("② 板块强弱");
-    expect(html).toContain("③ 个股分类");
-    expect(html).toContain("判断依据");
+    const text = plain(html);
+    expect(text).toContain("① 大盘环境");
+    expect(text).toContain("② 板块强弱");
+    expect(text).toContain("③ 个股分类");
+    expect(text).toContain("判断依据");
     expect(html).toContain("上涨占比");
     expect(html).toContain("最强成分");
   });
@@ -285,7 +298,7 @@ describe("筛选页渲染", () => {
     // 默认展开的组里，每条个股都有一份 reasons 列表
     const reasonBlocks = html.match(/class="reasons"/g) ?? [];
     expect(reasonBlocks.length).toBeGreaterThanOrEqual(2); // 大盘 + 板块 + 个股
-    expect(html).toContain("近20日涨跌幅");
+    expect(plain(html)).toContain("近20日涨跌幅");
   });
 
   it("不出现任何红线词", () => {
@@ -320,9 +333,11 @@ describe("个股分析页渲染", () => {
 
   it("七步齐全、顺序正确", () => {
     const titles = ["① 大盘环境", "② 板块状态", "③ 个股中期趋势", "④ 近期价格行为", "⑤ 当前位置", "⑥ 下一步观察", "⑦ 结论"];
+    // 顺序要在**读到的文字**里比：术语按钮会把标题切成几段，源码里的 indexOf 会错位
+    const text = plain(html);
     let cursor = -1;
     for (const t of titles) {
-      const at = html.indexOf(t);
+      const at = text.indexOf(t);
       expect(at, `${t} 应该出现`).toBeGreaterThan(-1);
       expect(at, `${t} 顺序应在上一张卡片之后`).toBeGreaterThan(cursor);
       cursor = at;
@@ -701,9 +716,11 @@ describe("下单预览：显示价就是成交价", () => {
 
   it("买入：参考价 52.50 → 预计成交价 52.55，并把滑点写清楚", () => {
     const html = renderPreview();
-    expect(html).toContain("预计成交价");
-    expect(html).toContain("52.55");
-    expect(html).toContain("参考价 52.5");
+    // 「预计成交价」里的「成交价」现在是个术语按钮，会被切成两段，所以看读到的文字
+    const text = plain(html);
+    expect(text).toContain("预计成交价");
+    expect(text).toContain("52.55");
+    expect(text).toContain("参考价 52.5");
     expect(html).toContain("加 0.1% 滑点");
   });
 
@@ -1079,8 +1096,8 @@ describe("模拟游戏页渲染", () => {
   it("无持仓无成交时不崩，给引导文案", () => {
     const empty = startGame(200_000, 0);
     const html = renderGame({ state: empty, totalAssets: empty.account.cash, holdingsValue: 0 });
-    expect(html).toContain("暂无持仓");
-    expect(html).toContain("暂无成交记录");
+    expect(plain(html)).toContain("暂无持仓");
+    expect(plain(html)).toContain("暂无成交记录");
   });
   it("实时模式已经开局了，历史推演的入口还在", () => {
     // 用户踩到的：先开一局实时，想再玩传奇模式时，入口整张卡都不见了 ——
@@ -1187,8 +1204,9 @@ describe("规则讲解页渲染", () => {
   const html = renderToStaticMarkup(createElement(GameRulesView, { onBack: () => {} }));
 
   it("覆盖全部关键规则", () => {
+    const text = plain(html);
     for (const topic of ["T+1", "涨跌停", "佣金", "印花税", "过户费", "滑点", "一手", "沪深300", "风险报酬比"]) {
-      expect(html.includes(topic), `规则页缺少「${topic}」`).toBe(true);
+      expect(text.includes(topic), `规则页缺少「${topic}」`).toBe(true);
     }
   });
 
@@ -1210,6 +1228,34 @@ describe("规则讲解页渲染", () => {
 });
 
 // ── 使用说明页渲染 ───────────────────────────────────────────
+
+/**
+ * 术语高亮会把一个词渲染成 `<button>`。若它落在另一个按钮或链接里面，就是非法
+ * 的嵌套可交互元素 —— 浏览器会把标签拆开重排，用户看到的是「点了没反应」。
+ *
+ * 上面每个页面的断言都只看文案，看不出这件事，所以单独立一条守着。
+ */
+function nestedButtonsIn(html: string): string[] {
+  const bad: string[] = [];
+  for (const m of html.matchAll(/<button[\s\S]*?<\/button>/g)) {
+    // 只看**内部**：m[0] 必然含它自己的 `<button` 开标签
+    const inner = m[0].replace(/^<button[^>]*>/, "").replace(/<\/button>$/, "");
+    if (inner.includes("<button") || inner.includes("<a ")) bad.push(m[0]);
+  }
+  return bad;
+}
+
+describe("术语高亮：正文里也不能造出嵌套按钮", () => {
+  it("规则讲解页与使用说明页都干净（这两页正文最多，术语也最密）", () => {
+    const pages: Array<[string, string]> = [
+      ["规则讲解页", renderToStaticMarkup(createElement(GameRulesView, { onBack: () => {} }))],
+      ["使用说明页", renderToStaticMarkup(createElement(GuideView, { onBack: () => {} }))],
+    ];
+    for (const [name, html] of pages) {
+      expect(nestedButtonsIn(html), `${name}里有嵌套的按钮/链接`).toEqual([]);
+    }
+  });
+});
 
 describe("使用说明页渲染", () => {
   const html = renderToStaticMarkup(createElement(GuideView, { onBack: () => {} }));
@@ -1248,8 +1294,9 @@ describe("使用说明页渲染", () => {
   });
 
   it("讲清模拟游戏规则与免责", () => {
+    const text = plain(html);
     for (const kw of ["T+1", "涨跌停", "佣金", "印花税", "滑点", "超额收益"]) {
-      expect(html.includes(kw), `缺少规则说明「${kw}」`).toBe(true);
+      expect(text.includes(kw), `缺少规则说明「${kw}」`).toBe(true);
     }
     expect(html).toContain("不构成投资建议");
   });
@@ -1354,7 +1401,7 @@ describe("模拟游戏开局界面", () => {
         onOpenLegend: () => {},
       }),
     );
-    expect(html).toContain("没有开盘价");
+    expect(plain(html)).toContain("没有开盘价");
     expect(html).not.toContain("随机开局（不显示日期）");
   });
 
@@ -1397,10 +1444,11 @@ describe("模拟游戏开局界面", () => {
 
   it("讲清了资金量对选股的限制", () => {
     const html = renderSetup();
-    expect(html).toContain("一手 100 股");
+    // 「一手」现在是个术语按钮，会被切成两段，所以看读到的文字
+    expect(plain(html)).toContain("一手 100 股");
     // 简化文案时把「为什么要有资金档位」压缩成了一句，但这个事实不能丢
-    expect(html).toContain("一手 100 股");
-    expect(html).toContain("买不起一手高价股");
+    expect(plain(html)).toContain("一手 100 股");
+    expect(plain(html)).toContain("买不起一手高价股");
   });
 });
 
@@ -1449,7 +1497,7 @@ describe("新闻面板渲染", () => {
 
   it("持仓相关新闻单独成栏，文案用「可能相关」而非断言", () => {
     const html = renderNews({ holdings: [{ code: "600519.SH", name: "贵州茅台" }] });
-    expect(html).toContain("持仓相关新闻");
+    expect(plain(html)).toContain("持仓相关新闻");
     expect(html).toContain("可能相关，不构成任何判断");
   });
 

@@ -34,7 +34,7 @@ import {
   type GameState,
 } from "../lib/game";
 import { fmtNum, fmtPct } from "../lib/helpers";
-import { Card, EmptyHint, KV, Notice, StateBadge } from "./common";
+import { Card, EmptyHint, KV, Notice, RichP, StateBadge } from "./common";
 import { NewsPanel } from "./NewsPanel";
 import { AwayCard } from "./AwayCard";
 import { ReviewBlock } from "./ReviewBlock";
@@ -151,14 +151,14 @@ function ReplayEntryCard(props: {
         </>
       ) : (
         <>
-          <p className="rule-body">
+          <RichP className="rule-body">
             从<strong>过去</strong>的某个交易日开局，每点一次「走一天」推进一步，
             走的全是真实发生过的行情。
-          </p>
-          <p className="rule-body">
+          </RichP>
+          <RichP className="rule-body">
             今天下单<strong>按次一交易日的开盘价成交</strong> ——
             你看到的是一整天的完整走势。
-          </p>
+          </RichP>
 
           <div className="kv-list">
             <KV k="初始资金" v={`${cashChoice / 10000} 万（沿用上面的选择）`} />
@@ -306,9 +306,9 @@ export function GameView(props: GameViewProps) {
         </p>
 
         <Card title="实时模式" subtitle="从现在开始，按现实规则结算">
-          <p className="rule-body">
+          <RichP className="rule-body">
             先选初始资金。A 股一手 100 股 —— 10 万块买不起一手高价股。
-          </p>
+          </RichP>
 
           <div className="cash-options">
             {CASH_OPTIONS.map((c) => (
