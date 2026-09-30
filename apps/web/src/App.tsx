@@ -182,6 +182,14 @@ export default function App() {
   // 存档里只有进度，行情每次从快照还原 —— 六十万个数字塞不进 localStorage。
   const [replay, setReplay] = useState<ReplaySession | null>(null);
   const replayRestored = useRef(false);
+  /*
+   * 模拟游戏页显示哪一边。
+   *
+   * 实时模式和历史推演各有各的存档（aw.game.v1 / aw.replay.v1），本来就能同时
+   * 存在 —— 问题是推演一开始整页就被它占满，实时那边看不到也回不去，玩家会以为
+   * 自己的开局被清掉了。所以给两边一个并排的入口。
+   */
+  const [gamePane, setGamePane] = useState<"live" | "replay">("live");
   // 传奇模式（模式 2）的关卡选择：只在没开局时出现
   const [legendOpen, setLegendOpen] = useState(false);
   const [legendLoading, setLegendLoading] = useState<string | null>(null);
@@ -678,6 +686,7 @@ export default function App() {
 
   const handleStartGame = useCallback((initialCash: number) => {
     setGame(startGame(initialCash, Date.now()));
+    setGamePane("live");
   }, []);
 
   const handleResetGame = useCallback(() => setGame(defaultGameState()), []);
@@ -722,6 +731,7 @@ export default function App() {
             label: save.label || levelId,
             levelId,
           });
+          setGamePane("replay");
         })
         .catch((e: unknown) => {
           // 分片没了（换版本、网络不通）时不要静默丢掉玩家的存档，明说一句
@@ -741,6 +751,7 @@ export default function App() {
         label: save.label || "历史推演",
         levelId: null,
       });
+      setGamePane("replay");
     }
   }, [snapshot, calendar, replay]);
 
@@ -757,6 +768,7 @@ export default function App() {
         label: "随机开局",
         levelId: null,
       });
+      setGamePane("replay");
     },
     [snapshot, calendar],
   );
@@ -788,6 +800,7 @@ export default function App() {
             levelId: level.id,
           });
           setLegendOpen(false);
+          setGamePane("replay");
         })
         .catch((e: unknown) => {
           setLegendError(e instanceof Error ? e.message : String(e));
@@ -820,6 +833,7 @@ export default function App() {
     setReplay(null);
     setLegendOpen(false);
     setLegendError(null);
+    setGamePane("live");
     removeLS(LS_REPLAY);
   }, []);
 
@@ -976,7 +990,37 @@ export default function App() {
           </div>
         )}
 
+        {/*
+          两局同时在跑时的切换条。
+          实时模式和历史推演各存各的存档，所以这不是「切换存档」，只是换着看。
+        */}
         {!loading && tab === "game" && replay && (
+          <div className="view">
+            <div className="chips pane-switch">
+              <button
+                type="button"
+                className={`chip${gamePane === "live" ? " chip-active" : ""}`}
+                aria-pressed={gamePane === "live"}
+                onClick={() => {
+                  setGamePane("live");
+                  setLegendOpen(false);
+                }}
+              >
+                实时模式
+              </button>
+              <button
+                type="button"
+                className={`chip${gamePane === "replay" ? " chip-active" : ""}`}
+                aria-pressed={gamePane === "replay"}
+                onClick={() => setGamePane("replay")}
+              >
+                历史推演{replayLegend ? ` · 第 ${replayLegend.order} 关` : ""}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!loading && tab === "game" && replay && gamePane === "replay" && (
           <ReplayView
             state={replay.state}
             hideDate={replay.hideDate}
@@ -1000,7 +1044,7 @@ export default function App() {
           />
         )}
 
-        {!loading && tab === "game" && !replay && legendOpen && (
+        {!loading && tab === "game" && (!replay || gamePane === "live") && legendOpen && (
           <LevelPicker
             ready={legendReady}
             loadingId={legendLoading}
@@ -1015,7 +1059,7 @@ export default function App() {
           />
         )}
 
-        {!loading && tab === "game" && !replay && !legendOpen && (
+        {!loading && tab === "game" && (!replay || gamePane === "live") && !legendOpen && (
           <GameView
             state={game}
             prices={gamePrices}
@@ -1039,6 +1083,11 @@ export default function App() {
             onDismissAway={() => setAway(null)}
             onStartReplay={handleStartReplay}
             onOpenLegend={() => setLegendOpen(true)}
+            replayInProgress={!!replay}
+            onResumeReplay={() => {
+              setGamePane("replay");
+              setLegendOpen(false);
+            }}
           />
         )}
 

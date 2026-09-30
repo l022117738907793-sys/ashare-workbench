@@ -568,6 +568,18 @@ textarea {
   gap: 6px;
 }
 
+/* 游戏页顶部：实时模式 / 历史推演 的切换条。两半分满，像分段控件。 */
+.pane-switch {
+  flex-wrap: nowrap;
+}
+
+.pane-switch .chip {
+  flex: 1 1 0;
+  text-align: center;
+  font-size: 13px;
+  padding: 7px 10px;
+}
+
 .chip {
   border: 1px solid var(--border);
   background: var(--surface);

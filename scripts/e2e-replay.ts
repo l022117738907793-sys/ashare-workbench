@@ -184,7 +184,7 @@ try {
   check("切到模拟游戏页", inGame);
   check(
     "看到历史推演入口",
-    await evaluate<boolean>(`return document.body.innerText.includes("另一种玩法") || document.body.innerText.includes("历史推演");`),
+    await evaluate<boolean>(`return document.body.innerText.includes("历史推演");`),
   );
 
   console.log("\n三、开局");
@@ -313,7 +313,7 @@ try {
   await sleep(700);
   check(
     "退出后回到开局界面",
-    await waitFor(`document.body.innerText.includes("另一种玩法") || document.body.innerText.includes("传奇模式")`, "回到开局"),
+    await waitFor(`document.body.innerText.includes("传奇模式") || document.body.innerText.includes("历史推演")`, "回到开局"),
   );
 
   const openLegend = await evaluate<string>(CLICK("传奇模式"));
@@ -752,6 +752,11 @@ try {
   const scrollBefore = await evaluate<number>(`return window.scrollY;`);
   await evaluate(CLICK("去筛选"));
   check("点了「去筛选」之后卡片闪起来", await waitFor(FLASHING, "卡片闪起来"));
+  /*
+   * 滚动用的是 behavior: "smooth"，是**动画**，不是瞬间到位。
+   * 只量一次的话，量到的是动画开始前的位置（0），这一条就会随机失败。
+   */
+  const scrolled = await waitFor(`window.scrollY > ${scrollBefore + 100}`, "页面滚下去");
   const afterJump = await evaluate<string>(`
     const card = document.getElementById("layer-stocks");
     return JSON.stringify({
@@ -762,7 +767,7 @@ try {
   `);
   const j = JSON.parse(afterJump) as { y: number; onWorkbench: boolean; hasCard: boolean };
   check("已经切回筛选页", j.onWorkbench && j.hasCard);
-  check("页面滚到了个股列表", j.y > scrollBefore + 100, `之前 ${scrollBefore}，现在 ${j.y}`);
+  check("页面滚到了个股列表", scrolled && j.y > scrollBefore + 100, `之前 ${scrollBefore}，现在 ${j.y}`);
 
   check("闪一下就停，不会一直闪下去", await waitFor(`!(${FLASHING})`, "闪完收起"));
 
@@ -781,6 +786,120 @@ try {
   await evaluate(CLICK("去筛选"));
   check("折着跳过去会自动展开，并照常闪", await waitFor(FLASHING, "展开了并且在闪"));
   check("展开之后不再是折着的", !(await evaluate<boolean>(`return ${FOLDED};`)));
+
+  console.log("\n十三之三、两局并存：实时模式和历史推演互不清空");
+
+  /**
+   * 用户提的：先开一局实时模式，中途想玩传奇模式，又不想丢掉实时那边的存档。
+   *
+   * 两边本来就各存各的（aw.game.v1 / aw.replay.v1），问题出在界面上 ——
+   * 推演一旦开局，整页就被 ReplayView 占满，实时那边看不到也回不去。
+   * 所以这一节要证明的不只是「存档还在」，而是**切得回去**。
+   *
+   * 注意上面的「清空本地数据」**不会**动这两个键（它只管设置与历史），
+   * 所以这里得自己把两边清干净再开局，否则跑第二次时游戏已经在进行中了。
+   */
+  await evaluate(`
+    localStorage.removeItem("aw.game.v1");
+    localStorage.removeItem("aw.replay.v1");
+    return "OK";
+  `);
+  await send("Page.enable");
+  await send("Page.reload", { ignoreCache: true });
+  await sleep(1800);
+  await waitFor(`document.body.innerText.includes("A 股趋势筛选工作台")`, "重新加载");
+  await evaluate(CLICK("模拟游戏"));
+  check(
+    "两边都是空的，回到开局界面",
+    await waitFor(`document.body.innerText.includes("以 20 万开始")`, "开局界面", 60),
+  );
+
+  // 选 10 万，和默认的 20 万分开，免得后面把「没被动过」看成「被重置了」
+  await evaluate(CLICK("10 万"));
+  await evaluate(CLICK("以 10 万开始"));
+  check(
+    "实时模式开局成功",
+    await waitFor(`document.body.innerText.includes("账户总览")`, "账户总览"),
+  );
+
+  const COEXIST_CASH = `(function () {
+    const m = document.body.innerText.match(/可用资金\\n([^\\n]+)/);
+    return m ? m[1].trim() : "";
+  })()`;
+  const coCash0 = await evaluate<string>(`return ${COEXIST_CASH};`);
+  // 界面上没有千分位：可用资金显示成 100000
+  check("新开局的可用资金就是本金", coCash0.includes("100000"), coCash0);
+
+  // 再开一局历史推演 —— 实时那边不该被动到
+  const coexistLevel = LEVELS.find((l) => l.id === "2024-09-25")!;
+  await evaluate(CLICK("传奇模式"));
+  check(
+    "关卡列表出来了",
+    await waitFor(`document.body.innerText.includes("${coexistLevel.startDate}")`, "关卡列表"),
+  );
+  await evaluate(CLICK(coexistLevel.title));
+  await sleep(500);
+  await evaluate(CLICK(`进入 ${coexistLevel.startDate}`));
+  check(
+    "推演开局成功",
+    await waitFor(
+      `document.body.innerText.includes("待成交委托") && document.body.innerText.includes("走一天")`,
+      "推演界面",
+      60,
+    ),
+  );
+
+  const coChips = await evaluate<string[]>(`
+    return [...document.querySelectorAll(".pane-switch .chip")].map((b) => b.innerText.trim());
+  `);
+  check("顶上出现了两边的切换条", coChips.length === 2, coChips.join(" | "));
+  check(
+    "切换条把两边都写清楚了",
+    coChips.some((c) => c.includes("实时模式")) && coChips.some((c) => c.includes("历史推演")),
+    coChips.join(" | "),
+  );
+
+  // 切回实时模式：账户必须还是刚才那一局
+  await evaluate(CLICK("实时模式"));
+  check(
+    "切得回实时模式",
+    await waitFor(`document.body.innerText.includes("账户总览")`, "实时模式的账户总览"),
+  );
+  const coCash1 = await evaluate<string>(`return ${COEXIST_CASH};`);
+  check("实时模式的存档没被推演清掉", coCash1 === coCash0, `之前 ${coCash0}，现在 ${coCash1}`);
+  check(
+    "已经有一局推演在跑时，不再给开局按钮",
+    await evaluate<boolean>(`
+      const t = document.body.innerText;
+      return t.includes("回到正在跑的那一局") && !t.includes("传奇模式 · 10 个历史时刻");
+    `),
+  );
+
+  // 再切回去
+  await evaluate(CLICK("回到正在跑的那一局"));
+  check(
+    "从卡片上的按钮也能回到推演",
+    await waitFor(`document.body.innerText.includes("待成交委托")`, "回到推演界面"),
+  );
+
+  // 刷新之后两边都还得在
+  await send("Page.enable");
+  await send("Page.reload", { ignoreCache: true });
+  await sleep(1800);
+  await waitFor(`document.body.innerText.includes("A 股趋势筛选工作台")`, "重新加载");
+  await evaluate(CLICK("模拟游戏"));
+  check(
+    "刷新后回到的是推演，不是开局页",
+    await waitFor(`document.body.innerText.includes("待成交委托")`, "推演被还原", 60),
+  );
+  check(
+    "刷新后切换条还在",
+    (await evaluate<number>(`return document.querySelectorAll(".pane-switch .chip").length;`)) === 2,
+  );
+  await evaluate(CLICK("实时模式"));
+  await waitFor(`document.body.innerText.includes("账户总览")`, "实时模式的账户总览");
+  const coCash2 = await evaluate<string>(`return ${COEXIST_CASH};`);
+  check("刷新之后实时模式的存档也还在", coCash2 === coCash0, coCash2);
 
   console.log("\n十四、控制台没有报错");
   const errs = await evaluate<string[]>(`

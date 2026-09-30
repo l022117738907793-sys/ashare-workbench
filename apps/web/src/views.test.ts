@@ -817,6 +817,32 @@ describe("模拟游戏页渲染", () => {
     expect(html).toContain("暂无持仓");
     expect(html).toContain("暂无成交记录");
   });
+  it("实时模式已经开局了，历史推演的入口还在", () => {
+    // 用户踩到的：先开一局实时，想再玩传奇模式时，入口整张卡都不见了 ——
+    // 只画在未开局的那张界面上。想玩推演就只能把实时那份存档重置掉。
+    const html = renderGame({
+      replayReady: true,
+      onStartReplay: () => {},
+      onOpenLegend: () => {},
+    });
+    expect(html).toContain("账户总览"); // 确认是「进行中」那张界面
+    expect(html).toContain("历史推演");
+    expect(html).toContain("传奇模式 · 10 个历史时刻");
+    expect(html).toContain("随机开局（不显示日期）");
+  });
+  it("推演在跑的时候，进行中的这张界面也只给「回去」", () => {
+    const html = renderGame({
+      replayReady: true,
+      replayInProgress: true,
+      onStartReplay: () => {},
+      onOpenLegend: () => {},
+      onResumeReplay: () => {},
+    });
+    expect(html).toContain("回到正在跑的那一局");
+    expect(html).not.toContain("传奇模式 · 10 个历史时刻");
+  });
+
+
 });
 
 // ── 交易信号渲染 ─────────────────────────────────────────────
@@ -954,10 +980,12 @@ describe("使用说明页渲染", () => {
     }
     expect(html).toContain("不构成投资建议");
   });
+
+
 });
 
 describe("模拟游戏开局界面", () => {
-  function renderSetup(replayReady = false): string {
+  function renderSetup(replayReady = false, replayInProgress = false): string {
     return renderToStaticMarkup(
       createElement(GameView, {
         state: defaultGameState(), // status = "idle"
@@ -980,6 +1008,8 @@ describe("模拟游戏开局界面", () => {
         replayReady,
         onStartReplay: () => {},
         onOpenLegend: () => {},
+        replayInProgress,
+        onResumeReplay: () => {},
       }),
     );
   }
@@ -1055,7 +1085,7 @@ describe("模拟游戏开局界面", () => {
 
   it("未开局时显示资金选择，而不是一个空账户", () => {
     const html = renderSetup();
-    expect(html).toContain("开始一局");
+    expect(html).toContain("实时模式");
     for (const c of CASH_OPTIONS) {
       expect(html).toContain(`${c / 10000} 万`);
     }
@@ -1066,6 +1096,28 @@ describe("模拟游戏开局界面", () => {
 
   it("开局界面也常驻免责声明", () => {
     expect(renderSetup()).toContain(GAME_DISCLAIMER);
+  });
+
+  it("两张卡各叫各的名字，不再写「另一种玩法」", () => {
+    // 用户提的：把「开始一局」改个名字，「另一个玩法：」去掉 ——
+    // 并列的两个入口不需要分主次，标题直接写模式名就够了
+    const html = renderSetup(true);
+    expect(html).toContain("实时模式");
+    expect(html).toContain("历史推演");
+    expect(html).not.toContain("开始一局");
+    expect(html).not.toContain("另一种玩法");
+  });
+
+  it("已经有一局推演在跑时，只给「回去」，不再给开局按钮", () => {
+    // 两边的存档是分开的（aw.game.v1 / aw.replay.v1），实时模式不该被清掉；
+    // 但也不能让玩家顺手再开一局把正在跑的那局冲掉
+    const html = renderSetup(true, true);
+    expect(html).toContain("回到正在跑的那一局");
+    expect(html).toContain("各存各的");
+    expect(html).not.toContain("传奇模式 · 10 个历史时刻");
+    expect(html).not.toContain("随机开局（不显示日期）");
+    // 实时模式那半边照常
+    expect(html).toContain("以 20 万开始");
   });
 
   it("讲清了资金量对选股的限制", () => {

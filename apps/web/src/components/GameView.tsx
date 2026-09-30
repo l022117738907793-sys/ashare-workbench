@@ -57,6 +57,10 @@ export interface GameViewProps {
   holdingsValue: number;
   /** 当前快照带不带开盘价——不带就开不了历史推演 */
   replayReady: boolean;
+  /** 已经有一局历史推演在跑：这时不能再开一局，只能回去。 */
+  replayInProgress?: boolean;
+  /** 回到正在跑的那一局推演。 */
+  onResumeReplay?: () => void;
   /** 用随机开局进入历史推演模式 */
   onStartReplay: (initialCash: number) => void;
   /** 打开传奇模式（模式 2）的关卡列表 */
@@ -80,12 +84,90 @@ function Metric({ k, v, tone }: { k: string; v: string; tone?: "good" | "bad" | 
   );
 }
 
+/**
+ * 「历史推演」的入口卡。
+ *
+ * 开局之后也要留着 —— 玩家常常先开一局实时模式，过一会儿才想试试推演。
+ * 这张卡以前只画在未开局的那张界面上，一开局入口就没了，想玩推演只能把实时
+ * 那份存档重置掉（用户就是这么踩到的）。
+ */
+function ReplayEntryCard(props: {
+  cashChoice: number;
+  replayReady: boolean;
+  replayInProgress: boolean;
+  onResumeReplay?: () => void;
+  onStartReplay: (initialCash: number) => void;
+  onOpenLegend: () => void;
+}) {
+  const { cashChoice, replayReady, replayInProgress, onResumeReplay, onStartReplay, onOpenLegend } = props;
+  return (
+    <Card title="历史推演" subtitle="把你放回真实的某一天，一天走一步">
+      {replayInProgress ? (
+        /*
+         * 已经有一局在跑时不能再开一局 —— 那会把那一局冲掉。
+         *
+         * 两边各有各的存档（aw.game.v1 / aw.replay.v1），本来就能同时进行，
+         * 所以这里给的是「回去」，不是「重开」。
+         */
+        <>
+          <Notice tone="info">
+            你已经有一局历史推演在跑。它和实时模式各存各的，互不影响。
+          </Notice>
+          <div className="btn-row">
+            <button type="button" className="btn btn-primary" onClick={onResumeReplay}>
+              回到正在跑的那一局
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="rule-body">
+            从<strong>过去</strong>的某个交易日开局，每点一次「走一天」推进一步，
+            走的全是真实发生过的行情。
+          </p>
+          <p className="rule-body">
+            今天下单<strong>按次一交易日的开盘价成交</strong> ——
+            你看到的是一整天的完整走势。
+          </p>
+
+          <div className="kv-list">
+            <KV k="初始资金" v={`${cashChoice / 10000} 万（沿用上面的选择）`} />
+            <KV k="结算方式" v="真实历史日线，按当时的规则（费率、涨跌停、T+1 都按那一天算）" />
+            <KV k="快进" v="1.5 秒一天，快进期间照常可以挂单" />
+          </div>
+
+          {replayReady ? (
+            <div className="btn-row">
+              <button type="button" className="btn btn-primary" onClick={onOpenLegend}>
+                传奇模式 · 10 个历史时刻
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={() => onStartReplay(cashChoice)}>
+                随机开局（不显示日期）
+              </button>
+            </div>
+          ) : (
+            <Notice tone="warn">
+              当前这份快照里没有开盘价，暂时做不了历史推演。等下一次每日快照更新后再来。
+            </Notice>
+          )}
+
+          <p className="field-hint">
+            <strong>传奇模式</strong>给完整日期和进场简报，<strong>随机模式</strong>不告诉你这是哪一年哪一天 ——
+            差别只在开局那一步。
+          </p>
+        </>
+      )}
+    </Card>
+  );
+}
+
 export function GameView(props: GameViewProps) {
   const {
     state, prices, quotesByCode, stocks, resultsByCode,
     onOrder, onStart, onReset, onSettle, onOpenRules, news, sessionText, isTradingNow,
     benchmarkName, benchmarkReturnPct, totalAssets, holdingsValue,
     replayReady, onStartReplay, onOpenLegend,
+    replayInProgress = false, onResumeReplay,
     away = null, onDismissAway,
   } = props;
 
@@ -172,7 +254,7 @@ export function GameView(props: GameViewProps) {
           ⚠️ {GAME_DISCLAIMER}
         </p>
 
-        <Card title="开始一局" subtitle="这是实时模式：从现在开始，按现实规则结算">
+        <Card title="实时模式" subtitle="从现在开始，按现实规则结算">
           <p className="rule-body">
             先选初始资金。A 股一手 100 股 —— 10 万块买不起一手高价股。
           </p>
@@ -211,45 +293,15 @@ export function GameView(props: GameViewProps) {
           </div>
         </Card>
 
-        <Card
-          title="另一种玩法：历史推演"
-          subtitle="把你放回真实的某一天，一天走一步"
-        >
-          <p className="rule-body">
-            从<strong>过去</strong>的某个交易日开局，每点一次「走一天」推进一步，
-            走的全是真实发生过的行情。
-          </p>
-          <p className="rule-body">
-            今天下单<strong>按次一交易日的开盘价成交</strong> ——
-            你看到的是一整天的完整走势。
-          </p>
+        <ReplayEntryCard
+          cashChoice={cashChoice}
+          replayReady={replayReady}
+          replayInProgress={replayInProgress}
+          onResumeReplay={onResumeReplay}
+          onStartReplay={onStartReplay}
+          onOpenLegend={onOpenLegend}
+        />
 
-          <div className="kv-list">
-            <KV k="初始资金" v={`${cashChoice / 10000} 万（沿用上面的选择）`} />
-            <KV k="结算方式" v="真实历史日线，按当时的规则（费率、涨跌停、T+1 都按那一天算）" />
-            <KV k="快进" v="1.5 秒一天，快进期间照常可以挂单" />
-          </div>
-
-          {replayReady ? (
-            <div className="btn-row">
-              <button type="button" className="btn btn-primary" onClick={onOpenLegend}>
-                传奇模式 · 10 个历史时刻
-              </button>
-              <button type="button" className="btn btn-ghost" onClick={() => onStartReplay(cashChoice)}>
-                随机开局（不显示日期）
-              </button>
-            </div>
-          ) : (
-            <Notice tone="warn">
-              当前这份快照里没有开盘价，暂时做不了历史推演。等下一次每日快照更新后再来。
-            </Notice>
-          )}
-
-          <p className="field-hint">
-            <strong>传奇模式</strong>给完整日期和进场简报，<strong>随机模式</strong>不告诉你这是哪一年哪一天 ——
-            差别只在开局那一步。
-          </p>
-        </Card>
       </div>
     );
   }
@@ -570,6 +622,15 @@ export function GameView(props: GameViewProps) {
           </ul>
         )}
       </Card>
+
+      <ReplayEntryCard
+        cashChoice={cashChoice}
+        replayReady={replayReady}
+        replayInProgress={replayInProgress}
+        onResumeReplay={onResumeReplay}
+        onStartReplay={onStartReplay}
+        onOpenLegend={onOpenLegend}
+      />
     </div>
   );
 }
