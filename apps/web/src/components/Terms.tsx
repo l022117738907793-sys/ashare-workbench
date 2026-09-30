@@ -54,7 +54,13 @@ function Portrait({ mood, size = 44 }: { mood: HisuiMood; size?: number }) {
   );
 }
 
-function AskBox({ term, context }: { term: string; context: string }) {
+/**
+ * 「问翡翠」的输入框。**没配代理地址就返回 null。**
+ *
+ * 导出是为了能直接测这一条 —— `TermPanel` 静态渲染停在第一档，看不到它，
+ * 而这个「不配就不出现」的规则恰恰是最该钉死的（用户明确要求过不要假入口）。
+ */
+export function AskBox({ term, context }: { term: string; context: string }) {
   const [endpoint] = useState(() => loadHisuiSettings().endpoint);
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
