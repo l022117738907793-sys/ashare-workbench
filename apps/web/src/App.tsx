@@ -48,6 +48,7 @@ import { GameRulesView } from "./components/GameRulesView";
 import { GuideView } from "./components/GuideView";
 import { GameView } from "./components/GameView";
 import { HistoryView } from "./components/HistoryView";
+import { GameHistoryView } from "./components/GameHistoryView";
 import { SettingsView } from "./components/SettingsView";
 import { WorkbenchView } from "./components/WorkbenchView";
 import { ReplayView } from "./components/ReplayView";
@@ -122,14 +123,15 @@ import { useLiveNews } from "./lib/useLiveNews";
 
 // "rules" 与 "guide" 不是底部 tab，而是子页面：
 // "rules" 从模拟游戏进入，"guide" 从页头进入（放在最显眼处，同学才会看到）
-type Tab = "workbench" | "analysis" | "game" | "rules" | "guide" | "history" | "settings";
+// "settings" 也不再占底部一格：它从页头右上角的齿轮进（齿轮是设置最通行的入口，
+// 常驻底栏反而不如一个图标省地方）。历史则并进了「个股分析」页，理由见那里的注释。
+type Tab = "workbench" | "analysis" | "game" | "rules" | "guide" | "settings";
 
+// 底部导航只留三条主干。三格比五格好按，也不用再猜「历史」和「设置」算不算主功能。
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "workbench", label: "筛选" },
   { key: "analysis", label: "个股分析" },
   { key: "game", label: "模拟游戏" },
-  { key: "history", label: "历史" },
-  { key: "settings", label: "设置" },
 ];
 
 function errText(e: unknown): string {
@@ -189,8 +191,10 @@ export default function App() {
    * 实时模式和历史推演各有各的存档（aw.game.v1 / aw.replay.v1），本来就能同时
    * 存在 —— 问题是推演一开始整页就被它占满，实时那边看不到也回不去，玩家会以为
    * 自己的开局被清掉了。所以给两边一个并排的入口。
+   *
+   * "history" 是游戏记录：把两边的成交与结算并成一条时间线，只读，可以跳回去。
    */
-  const [gamePane, setGamePane] = useState<"live" | "replay">("live");
+  const [gamePane, setGamePane] = useState<"live" | "replay" | "history">("live");
   // 传奇模式（模式 2）的关卡选择：只在没开局时出现
   const [legendOpen, setLegendOpen] = useState(false);
   const [legendLoading, setLegendLoading] = useState<string | null>(null);
@@ -835,6 +839,12 @@ export default function App() {
     removeLS(LS_REPLAY);
   }, []);
 
+  // 兜底：推演没了（退出、或者存档在别的标签页被清掉）时别把页面停在空白的那一屏。
+  // 「游戏记录」不受影响 —— 它没有推演也照样有内容（至少是实时那边，或者一句空状态）。
+  useEffect(() => {
+    if (!replay && gamePane === "replay") setGamePane("live");
+  }, [replay, gamePane]);
+
   const missingCount = live.result?.missing.length ?? 0;
   const stockName =
     stockByCode.get(selectedCode ?? "")?.name ?? analysis.stock?.name ?? selectedCode ?? "—";
@@ -848,8 +858,24 @@ export default function App() {
             <button type="button" className="btn btn-primary btn-tiny" onClick={openGuide}>
               使用说明
             </button>
-            <button type="button" className="btn btn-ghost btn-tiny" onClick={() => setReloadNonce((n) => n + 1)}>
-              重新加载
+            <button
+              type="button"
+              className="btn btn-ghost btn-tiny icon-btn"
+              onClick={() => setTab("settings")}
+              aria-label="设置"
+              title="设置"
+            >
+              {/* 齿轮用图形而不是文字：底栏里删掉的那一格，在这里只需要一个通用符号 */}
+              <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  fill="currentColor"
+                  d="M12 8.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2Zm0 5.8a2.2 2.2 0 1 1 0-4.4 2.2 2.2 0 0 1 0 4.4Z"
+                />
+                <path
+                  fill="currentColor"
+                  d="M20.3 13.4c.1-.5.1-1 .1-1.4s0-.9-.1-1.4l2-1.5-1.9-3.3-2.3.9a7.6 7.6 0 0 0-2.4-1.4L15.4 3h-3.8l-.4 2.3c-.9.3-1.7.8-2.4 1.4l-2.3-.9-1.9 3.3 2 1.5a7.5 7.5 0 0 0 0 2.8l-2 1.5 1.9 3.3 2.3-.9c.7.6 1.5 1.1 2.4 1.4l.4 2.3h3.8l.4-2.3c.9-.3 1.7-.8 2.4-1.4l2.3.9 1.9-3.3-2.1-1.5Zm-1.5 2.4-1.8.7-.4.6a5.8 5.8 0 0 1-1.6 1.4l-.6.4-.1.7-.3 1.8h-2l-.3-1.8-.1-.7-.6-.4c-.6-.3-1.1-.8-1.6-1.4l-.4-.6-.7-.2-1.8-.7.7-2 .5-.6-.2-.7a6 6 0 0 1 0-2.2l.2-.7-.5-.6-.7-2 1.8-.7.7-.2.4-.6c.4-.6 1-.9 1.6-1.3l.6-.4.1-.7.3-1.8h2l.3 1.8.1.7.6.4c.6.4 1.2.7 1.6 1.3l.4.6.7.2 1.8.7-.7 2-.5.6.2.7a6 6 0 0 1 0 2.2l-.2.7.2.6.7 2Z"
+                />
+              </svg>
             </button>
           </span>
         </div>
@@ -970,10 +996,27 @@ export default function App() {
           />
         )}
 
+        {/*
+          「最近分析」和「学习记录」跟着个股分析走，不再单占底部一格。
+          理由：这两张表回答的是同一个问题 —— 「我上次看的是哪只、当时答了什么」，
+          而这个问题只会在一只股票看完了、想换一只的时候冒出来。放在这儿正好顺路。
+        */}
+        {!loading && tab === "analysis" && (
+          <>
+            <HistoryView
+              store={store}
+              onOpenStock={openStock}
+              onRemoveAnalysed={(code) => setStore((s) => removeAnalysed(s, code))}
+              onClearAnalysed={() => setStore((s) => ({ ...s, analysed: [] }))}
+              onClearLearning={() => setStore((s) => ({ ...s, learning: [] }))}
+            />
+          </>
+        )}
+
         {!loading && tab === "analysis" && !selectedCode && (
           <div className="view">
             <Notice tone="info">
-              还没有选中个股。到「筛选」页点开任意一只个股，或从「历史」里重新打开。
+              还没有选中个股。到「筛选」页点开任意一只个股，或从下面的「最近分析」里重新打开。
               <button
                 type="button"
                 className="btn btn-ghost"
@@ -989,10 +1032,11 @@ export default function App() {
         )}
 
         {/*
-          两局同时在跑时的切换条。
+          游戏页顶部的三条切换：「实时模式 / 历史推演 / 游戏记录」。
           实时模式和历史推演各存各的存档，所以这不是「切换存档」，只是换着看。
+          「游戏记录」始终在，哪怕两边都还没开局 —— 它正是要给人「以后来这儿翻」的预期。
         */}
-        {!loading && tab === "game" && replay && (
+        {!loading && tab === "game" && !legendOpen && (
           <div className="view">
             <div className="chips pane-switch">
               <button
@@ -1006,19 +1050,29 @@ export default function App() {
               >
                 实时模式
               </button>
+              {replay && (
+                <button
+                  type="button"
+                  className={`chip${gamePane === "replay" ? " chip-active" : ""}`}
+                  aria-pressed={gamePane === "replay"}
+                  onClick={() => setGamePane("replay")}
+                >
+                  历史推演{replayLegend ? ` · 第 ${replayLegend.order} 关` : ""}
+                </button>
+              )}
               <button
                 type="button"
-                className={`chip${gamePane === "replay" ? " chip-active" : ""}`}
-                aria-pressed={gamePane === "replay"}
-                onClick={() => setGamePane("replay")}
+                className={`chip${gamePane === "history" ? " chip-active" : ""}`}
+                aria-pressed={gamePane === "history"}
+                onClick={() => setGamePane("history")}
               >
-                历史推演{replayLegend ? ` · 第 ${replayLegend.order} 关` : ""}
+                游戏记录
               </button>
             </div>
           </div>
         )}
 
-        {!loading && tab === "game" && replay && gamePane === "replay" && (
+        {!loading && tab === "game" && gamePane === "replay" && replay && (
           <ReplayView
             state={replay.state}
             hideDate={replay.hideDate}
@@ -1042,7 +1096,19 @@ export default function App() {
           />
         )}
 
-        {!loading && tab === "game" && (!replay || gamePane === "live") && legendOpen && (
+        {!loading && tab === "game" && gamePane === "history" && (
+          <GameHistoryView
+            live={game}
+            replay={replay}
+            onOpenStock={openStock}
+            onResumeReplay={() => {
+              setGamePane("replay");
+              setLegendOpen(false);
+            }}
+          />
+        )}
+
+        {!loading && tab === "game" && gamePane === "live" && legendOpen && (
           <LevelPicker
             ready={legendReady}
             loadingId={legendLoading}
@@ -1057,7 +1123,7 @@ export default function App() {
           />
         )}
 
-        {!loading && tab === "game" && (!replay || gamePane === "live") && !legendOpen && (
+        {!loading && tab === "game" && gamePane === "live" && !legendOpen && (
           <GameView
             state={game}
             prices={gamePrices}
@@ -1093,22 +1159,17 @@ export default function App() {
 
         {tab === "guide" && <GuideView onBack={() => setTab("workbench")} />}
 
-        {tab === "history" && (
-          <HistoryView
-            store={store}
-            onOpenStock={openStock}
-            onRemoveAnalysed={(code) => setStore((s) => removeAnalysed(s, code))}
-            onClearAnalysed={() => setStore((s) => ({ ...s, analysed: [] }))}
-            onClearLearning={() => setStore((s) => ({ ...s, learning: [] }))}
-            onClearAll={clearLocal}
-          />
-        )}
-
+        {/*
+          设置不再占底部一格，从页头右上角的齿轮进。
+          进来之后底栏三条都不高亮 —— 这是有意的：设置是「离开主流程去调一调」，
+          不属于任何一条主干。左上角的返回按钮负责把人送回去。
+        */}
         {tab === "settings" && (
           <SettingsView
             settings={settings}
             onChange={setSettings}
             rules={rules}
+            onBack={() => setTab("workbench")}
             onReload={() => setReloadNonce((n) => n + 1)}
             onClearLocal={clearLocal}
             snapshotName={bundle?.name ?? null}

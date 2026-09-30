@@ -25,7 +25,7 @@ import {
   type Snapshot,
   type StockData,
 } from "@aw/core";
-import { advanceDay, createReplay, LEVELS, placeOrder } from "@aw/game";
+import { advanceDay, createReplay, LEVELS, placeOrder, type Trade } from "@aw/game";
 import { AnalysisView } from "./components/AnalysisView";
 import type { NewsItem } from "@aw/data";
 import { GameRulesView } from "./components/GameRulesView";
@@ -35,6 +35,7 @@ import { GuideView } from "./components/GuideView";
 import { GameView } from "./components/GameView";
 import { LevelDetail, LevelPicker } from "./components/LevelPicker";
 import { HistoryView } from "./components/HistoryView";
+import { GameHistoryView } from "./components/GameHistoryView";
 import { SettingsView } from "./components/SettingsView";
 import { Card } from "./components/common";
 import { StockPicker } from "./components/StockPicker";
@@ -47,6 +48,7 @@ import { ReviewBlock } from "./components/ReviewBlock";
 import { SIGNAL_BACKTEST_CAVEAT } from "./lib/helpers";
 import { SignalBadge, SignalCard, SignalSummary } from "./components/SignalCard";
 import { ReplayView } from "./components/ReplayView";
+import { startLevelReplay, type LevelShard, type ReplaySession } from "./lib/replay";
 import {
   EMPTY_STORE,
   filterStockResults,
@@ -425,11 +427,26 @@ describe("历史页与设置页渲染", () => {
         onRemoveAnalysed: () => {},
         onClearAnalysed: () => {},
         onClearLearning: () => {},
-        onClearAll: () => {},
       }),
     );
     expect(html).toContain("还没有分析记录");
     expect(html).toContain("还没有学习作答");
+  });
+
+  it("历史并进个股分析之后，清空按钮只留在设置页", () => {
+    // 「清空本地数据」原来是历史页第三张卡上的，现在只在设置页。
+    // 一个不可撤销的按钮不该跟日常列表挨着放 —— 顺手点到的代价太大。
+    const html = renderToStaticMarkup(
+      createElement(HistoryView, {
+        store: EMPTY_STORE,
+        onOpenStock: () => {},
+        onRemoveAnalysed: () => {},
+        onClearAnalysed: () => {},
+        onClearLearning: () => {},
+      }),
+    );
+    expect(html).not.toContain("清空本地数据");
+    expect(html).not.toContain("本地数据");
   });
 
   it("设置页显示快照信息、交易时段与阈值项", () => {
@@ -440,6 +457,7 @@ describe("历史页与设置页渲染", () => {
         rules: defaultRules,
         onReload: () => {},
         onClearLocal: () => {},
+        onBack: () => {},
         snapshotName: "snapshot_dev",
         metaAsOf: "2026-09-23",
         metaSource: "fixture",
@@ -457,6 +475,186 @@ describe("历史页与设置页渲染", () => {
     expect(html).toContain("大盘环境阈值");
     expect(html).toContain("个股分类阈值");
     expect(html).toContain("./data");
+  });
+
+  it("设置页自带出口：从齿轮进来，得有路回去", () => {
+    // 设置不再占底部导航，没有这个返回按钮就是死胡同 —— 只能靠浏览器后退。
+    const html = renderToStaticMarkup(
+      createElement(SettingsView, {
+        settings: parseSettings(null),
+        onChange: () => {},
+        rules: defaultRules,
+        onReload: () => {},
+        onClearLocal: () => {},
+        onBack: () => {},
+        snapshotName: null,
+        metaAsOf: null,
+        metaSource: null,
+        metaDays: null,
+        calendarDays: 0,
+        sessionText: "已收盘",
+        polling: false,
+        updatedText: "—（暂无实时数据）",
+        quoteSourceText: "—（未取到实时行情）",
+      }),
+    );
+    expect(html).toContain("← 返回");
+    expect(html).toContain("清空本地数据");
+  });
+});
+
+// ── 游戏记录（模拟游戏页的第三屏） ──────────────────────────────
+
+describe("游戏记录：实时模式和历史推演的成交并成一条时间线", () => {
+  /**
+   * 用真实引擎跑出一局传奇推演，别手搓一个长得像 ReplayState 的对象 ——
+   * 手搓的那个一旦引擎改了字段，测试还是绿的。
+   */
+  function legendSession(trades: Trade[] = [], levelId = "2020-02-03"): ReplaySession {
+    const days = ["2020-01-20", "2020-01-21", "2020-01-22", "2020-01-23"];
+    const shard: LevelShard = {
+      levelId,
+      startDate: days[0]!,
+      days: days.length,
+      calendar: [...days],
+      benchmark: { code: "000300.SH", name: "沪深300", close: [4000, 4010, 3990, 3950] },
+      instruments: [
+        {
+          code: "600519.SH",
+          name: "贵州茅台",
+          isST: false,
+          open: [1000, 1010, 1005, 990],
+          close: [1005, 1008, 995, 985],
+          high: [1010, 1015, 1010, 995],
+          low: [995, 1000, 990, 980],
+          volume: [1000, 1200, 900, 1500],
+        },
+      ],
+      note: "前复权",
+    };
+    const state = startLevelReplay(shard, 200_000, "4. 春节之后");
+    return {
+      state: { ...state, account: { ...state.account, trades } },
+      mode: "legend",
+      hideDate: false,
+      codes: ["600519.SH"],
+      label: "4. 春节之后",
+      levelId,
+    };
+  }
+
+  const liveTrade: Trade = {
+    id: "t1",
+    at: 2,
+    date: "2026-09-23",
+    code: "600519.SH",
+    name: "贵州茅台",
+    side: "buy",
+    price: 100,
+    shares: 100,
+    amount: 10_000,
+    fee: 5,
+    typeAtTrade: "趋势观察",
+  };
+
+  const replayTrade: Trade = {
+    ...liveTrade,
+    id: "r1",
+    at: 1,
+    date: "2020-01-21",
+    side: "sell",
+    shares: 200,
+  };
+
+  /** 一份「实时模式已经开局」的存档 */
+  function liveState(trades: Trade[] = [liveTrade]): GameState {
+    const base = startGame(200_000, 0);
+    return { ...base, account: { ...base.account, trades } };
+  }
+
+  function render(over: Partial<Parameters<typeof GameHistoryView>[0]> = {}): string {
+    return renderToStaticMarkup(
+      createElement(GameHistoryView, {
+        live: null,
+        replay: null,
+        onOpenStock: () => {},
+        onResumeReplay: () => {},
+        ...over,
+      }),
+    );
+  }
+
+  it("两边都没开局时给出引导，而不是一张空表", () => {
+    const html = render();
+    expect(html).toContain("还没有任何成交");
+    expect(html).toContain("还没有结算过");
+    expect(html).toContain(GAME_DISCLAIMER);
+  });
+
+  it("实时模式的那笔标「实时模式」，日期不写「模拟日」", () => {
+    const html = render({ live: liveState() });
+    expect(html).toContain("成交记录（1）");
+    expect(html).toContain("实时模式");
+    expect(html).toContain("贵州茅台");
+    expect(html).not.toContain("模拟日");
+  });
+
+  it("推演的那笔写「模拟日」，并标出是哪一关", () => {
+    // 推演的日期是模拟出来的，和真实下单时间不是一回事。不标出来，
+    // 玩家会以为「2020-01-21」是自己真的在那天下过单。
+    const html = render({ replay: legendSession([replayTrade]) });
+    expect(html).toContain("模拟日 2020-01-21");
+    expect(html).toContain("历史推演 · 第 4 关");
+  });
+
+  it("一边一笔时两笔都在，最新的在前", () => {
+    const html = render({ live: liveState(), replay: legendSession([replayTrade]) });
+    expect(html).toContain("成交记录（2）");
+    const firstLive = html.indexOf("2026-09-23");
+    const firstReplay = html.indexOf("2020-01-21");
+    expect(firstLive).toBeGreaterThan(-1);
+    expect(firstReplay).toBeGreaterThan(-1);
+    // liveTrade.at = 2 > replayTrade.at = 1，所以实时那笔排在前面
+    expect(firstLive).toBeLessThan(firstReplay);
+  });
+
+  it("每一行都能跳去个股分析", () => {
+    const html = render({ live: liveState(), replay: legendSession([replayTrade]) });
+    const jumps = html.split("看这只票 →").length - 1;
+    expect(jumps).toBe(2);
+  });
+
+  it("推演还在跑时给一条回去的路，没跑时不给", () => {
+    expect(render({ replay: legendSession([replayTrade]) })).toContain("回到正在跑的那一局");
+    expect(render({ live: liveState() })).not.toContain("回到正在跑的那一局");
+  });
+
+  it("赛季结算把两边的成绩分开列，基准只认沪深300", () => {
+    const html = render({ live: liveState(), replay: legendSession() });
+    expect(html).toContain("同期沪深300");
+    // 开关都没点过，所以是空状态 —— 这里要的就是「没成绩时别装作有」
+    expect(html).toContain("赛季结算（0）");
+  });
+
+  it("这一屏是只读的：没有任何下单、结算或重置入口", () => {
+    // 进得来、改不到 —— 手滑一下不会把正在跑的那一局弄坏。
+    // 「买入/卖出」标签本身可以有（那是玩家自己下过的单，不是程序的建议），
+    // 不能有的是**能改状态**的按钮。所以逐条 <button> 查，而不是查全文 ——
+    // 空状态里那句「在任意一边点『结算本季』」只是指路，不是入口。
+    const html = render({ live: liveState(), replay: legendSession([replayTrade]) });
+    const buttons = [...html.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)].map((m) => m[1]!);
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const text of buttons) {
+      for (const bad of ["重新开局", "重置", "结算本季", "下单", "全部卖出"]) {
+        expect(text, `按钮里不该出现「${bad}」`).not.toContain(bad);
+      }
+    }
+    // 买入/卖出只能以「事后标签」的形态出现，不能是按钮文案
+    for (const side of ["买入", "卖出"]) {
+      const all = html.split(side).length - 1;
+      const tags = html.split(`<span class="tag">${side}</span>`).length - 1;
+      expect(all, `「${side}」只该出现在分类标签里`).toBe(tags);
+    }
   });
 });
 
@@ -949,13 +1147,21 @@ describe("规则讲解页渲染", () => {
 describe("使用说明页渲染", () => {
   const html = renderToStaticMarkup(createElement(GuideView, { onBack: () => {} }));
 
-  it("覆盖五个页面与六种分类", () => {
-    for (const kw of ["筛选", "个股分析", "模拟游戏", "历史", "设置"]) {
+  it("覆盖三个页面与六种分类", () => {
+    for (const kw of ["筛选", "个股分析", "模拟游戏"]) {
       expect(html.includes(kw), `缺少页面说明「${kw}」`).toBe(true);
     }
     for (const kw of ["启动观察", "趋势观察", "回调观察", "高位观察", "排除", "数据不足"]) {
       expect(html.includes(kw), `缺少分类说明「${kw}」`).toBe(true);
     }
+  });
+
+  it("导航改成三条之后，说明页不再写「五个页面」", () => {
+    // 底栏和说明页是同一件事的两处说法，改了一处忘了另一处，
+    // 用户就会照着说明去找一个不存在的按钮。
+    expect(html).toContain("三个页面");
+    expect(html).not.toContain("五个页面");
+    expect(html).toContain("右上角的齿轮");
   });
 
   it("教用户怎么读判断依据", () => {

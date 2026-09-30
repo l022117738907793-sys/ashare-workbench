@@ -1,6 +1,13 @@
-/** 第三层视图：本地历史（最近分析 + 学习作答）。数据只存在浏览器 localStorage 里。 */
+/**
+ * 个股分析页下半部分的本地历史（最近分析 + 学习作答）。数据只存在浏览器 localStorage 里。
+ *
+ * 这两张卡原来占着底部导航的一格「历史」。挪进来的理由：它们回答的是同一个问题 ——
+ * 「我上次看的是哪只、当时答了什么」，而这个问题只会在看完了想换一只的时候冒出来。
+ *
+ * 「清空本地数据」不在这儿，在设置页 —— 一个危险按钮不该跟日常列表挨着放。
+ */
 import { beijingDateTime, type LocalStore } from "../lib/helpers";
-import { Card, EmptyHint, Notice, StateBadge } from "./common";
+import { Card, EmptyHint, StateBadge } from "./common";
 
 export interface HistoryProps {
   store: LocalStore;
@@ -8,11 +15,10 @@ export interface HistoryProps {
   onRemoveAnalysed: (code: string) => void;
   onClearAnalysed: () => void;
   onClearLearning: () => void;
-  onClearAll: () => void;
 }
 
 export function HistoryView(props: HistoryProps) {
-  const { store, onOpenStock, onRemoveAnalysed, onClearAnalysed, onClearLearning, onClearAll } = props;
+  const { store, onOpenStock, onRemoveAnalysed, onClearAnalysed, onClearLearning } = props;
 
   return (
     <div className="view">
@@ -89,16 +95,6 @@ export function HistoryView(props: HistoryProps) {
         )}
       </Card>
 
-      <Card title="本地数据" subtitle="全部保存在本机浏览器，不上传任何服务器。">
-        <Notice tone="info">
-          清空只影响本机的历史与设置；快照数据在 <code>public/data</code> 里，不受影响。
-        </Notice>
-        <div className="btn-row">
-          <button type="button" className="btn btn-danger" onClick={onClearAll}>
-            清空本地数据
-          </button>
-        </div>
-      </Card>
     </div>
   );
 }

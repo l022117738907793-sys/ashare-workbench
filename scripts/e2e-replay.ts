@@ -145,6 +145,19 @@ const CLICK = (text: string) => `
   return "OK";
 `;
 
+/**
+ * 按 aria-label 点。
+ *
+ * 页头右上角那个齿轮没有文字，CLICK() 靠 textContent 找它必然落空 ——
+ * 所以图标按钮要单独有一条按无障碍名字找的路径（也顺带证明它真的有无障碍名字）。
+ */
+const CLICK_LABEL = (label: string) => `
+  const b = document.querySelector('button[aria-label=${JSON.stringify(label)}]');
+  if (!b) return "NOT_FOUND";
+  b.click();
+  return "OK";
+`;
+
 async function waitFor(expr: string, label: string, tries = 40): Promise<boolean> {
   for (let i = 0; i < tries; i += 1) {
     if (await evaluate<boolean>(`return ${expr};`)) return true;
@@ -172,6 +185,49 @@ try {
   check(
     "没有抛出运行时错误（快照加载完成，不是加载态）",
     await waitFor(`!document.body.innerText.includes("正在加载")`, "加载完成"),
+  );
+
+  console.log("\n一之二、底部导航只剩三条，设置搬到右上角齿轮");
+
+  /**
+   * 用户提的：底栏五格太挤 —— 历史并进个股分析，设置挪到页头齿轮。
+   *
+   * 这一节查的是**结构**，不是「某个按钮点得动」：底栏多一格少一格，
+   * 比按钮失灵更难被发现（点得到别的东西，就以为都对）。
+   */
+  const tabs = await evaluate<string[]>(`
+    return [...document.querySelectorAll(".tabbar button")].map((b) => b.innerText.trim());
+  `);
+  check("底栏只剩三条", tabs.length === 3, tabs.join(" | "));
+  check(
+    "底栏是筛选 / 个股分析 / 模拟游戏",
+    tabs.join("|") === "筛选|个股分析|模拟游戏",
+    tabs.join(" | "),
+  );
+  check(
+    "历史与设置都不在底栏",
+    !tabs.some((t) => t.includes("历史")) && !tabs.some((t) => t.includes("设置")),
+    tabs.join(" | "),
+  );
+
+  const gearClick = await evaluate<string>(CLICK_LABEL("设置"));
+  check("页头找得到齿轮（靠 aria-label，图标没有文字）", gearClick === "OK", gearClick);
+  check(
+    "点齿轮进设置页",
+    await waitFor(`document.body.innerText.includes("清空本地数据")`, "设置页打开"),
+  );
+  check(
+    "设置页自带返回按钮（它不在底栏，否则回不去）",
+    await evaluate<boolean>(`return document.body.innerText.includes("← 返回");`),
+  );
+  check(
+    "设置不是底栏的一格，所以三条都不高亮",
+    (await evaluate<number>(`return document.querySelectorAll(".tabbar .tab-active").length;`)) === 0,
+  );
+  await evaluate(CLICK("← 返回"));
+  check(
+    "返回之后回到筛选页",
+    await waitFor(`document.body.innerText.includes("① 大盘环境")`, "筛选页", 60),
   );
 
   console.log("\n二、进入模拟游戏");
@@ -737,7 +793,7 @@ try {
     return !!c && !!c.querySelector(".card-head-folded");
   })()`;
 
-  await evaluate(CLICK("设置"));
+  await evaluate(CLICK_LABEL("设置"));
   await waitFor(`document.body.innerText.includes("清空本地数据")`, "设置页打开");
   await evaluate(CLICK("清空本地数据"));
   await waitFor(`document.body.innerText.includes("① 大盘环境")`, "清空后回到筛选页", 60);
@@ -864,10 +920,13 @@ try {
   const coChips = await evaluate<string[]>(`
     return [...document.querySelectorAll(".pane-switch .chip")].map((b) => b.innerText.trim());
   `);
-  check("顶上出现了两边的切换条", coChips.length === 2, coChips.join(" | "));
+  // 三格：实时模式 / 历史推演（有推演时才出现）/ 游戏记录（一直在）
+  check("顶上出现了三条切换", coChips.length === 3, coChips.join(" | "));
   check(
-    "切换条把两边都写清楚了",
-    coChips.some((c) => c.includes("实时模式")) && coChips.some((c) => c.includes("历史推演")),
+    "切换条把两边都写清楚了，外加游戏记录",
+    coChips.some((c) => c.includes("实时模式")) &&
+      coChips.some((c) => c.includes("历史推演")) &&
+      coChips.some((c) => c.includes("游戏记录")),
     coChips.join(" | "),
   );
 
@@ -906,12 +965,123 @@ try {
   );
   check(
     "刷新后切换条还在",
-    (await evaluate<number>(`return document.querySelectorAll(".pane-switch .chip").length;`)) === 2,
+    (await evaluate<number>(`return document.querySelectorAll(".pane-switch .chip").length;`)) === 3,
   );
   await evaluate(CLICK("实时模式"));
   await waitFor(`document.body.innerText.includes("账户总览")`, "实时模式的账户总览");
   const coCash2 = await evaluate<string>(`return ${COEXIST_CASH};`);
   check("刷新之后实时模式的存档也还在", coCash2 === coCash0, coCash2);
+
+  console.log("\n十三之四、游戏记录：两边的成交并成一条时间线");
+
+  /**
+   * 用户提的：游戏板块要单独有一个历史记录，并且能跳转。
+   *
+   * 这一屏是**只读**的。所以两件事都要证明：一张表里同时看得到两边下的单，
+   * 以及点一行真的能跳去个股分析 —— 没有出口的列表等于又一处死胡同。
+   */
+  // 先给实时模式下一单，否则这张表是空的，什么都验不出来
+  const ghFill = await evaluate<string>(`
+    const codeInput = document.querySelector('input[placeholder*="代码"], input[placeholder*="名称"]');
+    if (!codeInput) return "NO_CODE_INPUT";
+    const row = document.querySelector('.pick-row');
+    if (!row) return "NO_PICK_ROW";
+    const name = row.innerText.split("\\n")[0].trim();
+    row.click();
+    return new Promise((r) => setTimeout(() => {
+      const numInput = [...document.querySelectorAll('input[type="number"]')].pop();
+      if (!numInput) return r("NO_QTY_INPUT");
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      setter.call(numInput, "100");
+      numInput.dispatchEvent(new Event("input", { bubbles: true }));
+      r("OK:" + name);
+    }, 250));
+  `);
+  check("实时模式下得单（点榜单填代码与股数）", ghFill.startsWith("OK:"), ghFill);
+  await evaluate(CLICK("提交委托"));
+  await sleep(500);
+
+  // 推演那边也下一单（挂单 → 走一天才成交）
+  await evaluate(CLICK("历史推演"));
+  check(
+    "切到历史推演",
+    await waitFor(`document.body.innerText.includes("待成交委托")`, "推演界面"),
+  );
+  await evaluate(`
+    const codeInput = document.querySelector('input[placeholder*="代码"], input[placeholder*="名称"]');
+    const row = document.querySelector('.pick-row');
+    if (row) row.click();
+    return new Promise((r) => setTimeout(() => {
+      const numInput = [...document.querySelectorAll('input[type="number"]')].pop();
+      if (codeInput && numInput) {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        setter.call(numInput, "100");
+        numInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      r("OK");
+    }, 250));
+  `);
+  await evaluate(CLICK("挂单"));
+  await sleep(400);
+  await evaluate(CLICK("走一天"));
+  await sleep(600);
+
+  await evaluate(CLICK("游戏记录"));
+  check(
+    "切到游戏记录，两边的成交都在",
+    await waitFor(`document.body.innerText.includes("成交记录（")`, "游戏记录界面"),
+  );
+  const ghText = await evaluate<string>(`return document.body.innerText;`);
+  check("实时那单标成「实时模式」", ghText.includes("实时模式"), ghText.slice(0, 80));
+  check(
+    "推演那单标成「模拟日」，并写明是第几关",
+    ghText.includes("模拟日") && /历史推演 · 第 \d+ 关/.test(ghText),
+  );
+  check(
+    "两笔各属于一边（不是全归到一处）",
+    ghText.includes("实时模式") && ghText.includes("历史推演 · 第"),
+  );
+  check("赛季结算也是一张卡", ghText.includes("赛季结算（"));
+  check("这一屏照旧带免责声明", ghText.includes("不构成投资建议"));
+
+  // 点一行 → 个股分析
+  const ghJump = await evaluate<string>(`
+    const row = document.querySelector(".history-row .row-tap");
+    if (!row) return "NO_ROW";
+    const code = row.querySelector(".code");
+    row.click();
+    return "OK:" + (code ? code.innerText.trim() : "");
+  `);
+  check("点得到成交记录里的一行", ghJump.startsWith("OK:"), ghJump);
+  const ghCode = ghJump.split(":")[1] ?? "";
+  check(
+    "点一行跳到个股分析",
+    await waitFor(
+      `document.querySelector(".tabbar .tab-active") && document.querySelector(".tabbar .tab-active").innerText.trim() === "个股分析"`,
+      "个股分析页出现",
+      60,
+    ),
+  );
+  check(
+    "跳过去的是那一行对应的票",
+    await evaluate<boolean>(`return document.body.innerText.includes(${JSON.stringify(ghCode)});`),
+    ghCode,
+  );
+
+  // 回到游戏记录，再从横幅回推演
+  await evaluate(CLICK("模拟游戏"));
+  await sleep(500);
+  await evaluate(CLICK("游戏记录"));
+  check(
+    "从个股分析绕一圈回来，游戏记录还在",
+    await waitFor(`document.body.innerText.includes("成交记录（")`, "游戏记录界面", 60),
+  );
+  const ghBack = await evaluate<string>(CLICK("回到正在跑的那一局"));
+  check("推演还在跑，横幅上给得回得去", ghBack === "OK", ghBack);
+  check(
+    "点横幅回到推演本身",
+    await waitFor(`document.body.innerText.includes("待成交委托")`, "推演界面"),
+  );
 
   console.log("\n十四、控制台没有报错");
   const errs = await evaluate<string[]>(`

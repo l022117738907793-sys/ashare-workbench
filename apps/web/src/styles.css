@@ -1190,6 +1190,24 @@ code {
   flex-shrink: 0;
 }
 
+/*
+ * 页头右上角的齿轮。方形图标按钮，尺寸和旁边的 btn-tiny 对齐，
+ * 点按区不小于 44px 的高 —— 手机上这一个按钮是要按得准的。
+ */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  padding: 0;
+  aspect-ratio: 1 / 1;
+  color: var(--text-2);
+}
+
+.icon-btn:hover {
+  color: var(--text);
+}
+
 /* 说明页里引用判断依据的示例行 */
 .mono-sample {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

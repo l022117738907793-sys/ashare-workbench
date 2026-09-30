@@ -20,6 +20,8 @@ export interface SettingsProps {
   rules: Rules;
   onReload: () => void;
   onClearLocal: () => void;
+  /** 从页头齿轮进来，所以需要自己把人送回去 */
+  onBack: () => void;
   snapshotName: string | null;
   metaAsOf: string | null;
   metaSource: string | null;
@@ -44,6 +46,7 @@ export function SettingsView(props: SettingsProps) {
     rules,
     onReload,
     onClearLocal,
+    onBack,
     snapshotName,
     metaAsOf,
     metaSource,
@@ -60,6 +63,17 @@ export function SettingsView(props: SettingsProps) {
 
   return (
     <div className="view">
+      {/*
+        设置现在从页头右上角的齿轮进来，不再占底部导航的一格，所以必须自己带一个出口。
+        标题不写「返回设置」这类绕圈的话，直接写这一页是什么。
+      */}
+      <div className="back-bar">
+        <button type="button" className="btn btn-ghost btn-tiny" onClick={onBack}>
+          ← 返回
+        </button>
+        <h2 className="back-title">设置</h2>
+      </div>
+
       <Card title="数据源" subtitle="快照是分析的数据底座；实时行情只用于盘中叠加最新价。">
         <label className="field">
           <span className="field-label">数据根路径</span>

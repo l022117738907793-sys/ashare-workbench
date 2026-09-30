@@ -40,14 +40,16 @@ export function GuideView({ onBack }: { onBack: () => void }) {
         </p>
       </Card>
 
-      <Card title="五个页面" subtitle="底部标签栏">
+      <Card title="三个页面" subtitle="底部标签栏">
         <div className="kv-list">
           <KV k="筛选" v="主页面。大盘环境 → 板块强弱 → 个股分类" />
-          <KV k="个股分析" v="点开一只股票后的七步分析 + 学习模式" />
-          <KV k="模拟游戏" v="100 万虚拟资金，按 A 股真实规则练手" />
-          <KV k="历史" v="你分析过什么，存在你自己的浏览器里" />
-          <KV k="设置" v="调阈值、改刷新间隔、清空本地数据" />
+          <KV k="个股分析" v="点开一只股票后的七步分析 + 学习模式；页面下半部分是你分析过什么" />
+          <KV k="模拟游戏" v="实时模式、历史推演、游戏记录三个入口" />
         </div>
+        <p className="field-hint">
+          调阈值、改刷新间隔、清空本地数据在<strong>右上角的齿轮</strong>里 —— 设置不属于任何一条主干，
+          所以没占底栏的一格。
+        </p>
       </Card>
 
       <Card title="六种分类的含义" subtitle="筛选页第三层">
