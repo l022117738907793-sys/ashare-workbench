@@ -44,7 +44,7 @@ export function GuideView({ onBack }: { onBack: () => void }) {
         <div className="kv-list">
           <KV k="筛选" v="主页面。大盘环境 → 板块强弱 → 个股分类" />
           <KV k="个股分析" v="点开一只股票后的七步分析 + 学习模式" />
-          <KV k="模拟盘" v="100 万虚拟资金，按 A 股真实规则练手" />
+          <KV k="模拟游戏" v="100 万虚拟资金，按 A 股真实规则练手" />
           <KV k="历史" v="你分析过什么，存在你自己的浏览器里" />
           <KV k="设置" v="调阈值、改刷新间隔、清空本地数据" />
         </div>
@@ -87,7 +87,7 @@ export function GuideView({ onBack }: { onBack: () => void }) {
         </p>
       </Card>
 
-      <Card title="模拟盘规则" subtitle="和真实 A 股一致，点模拟盘页的「规则说明」看详细解释">
+      <Card title="模拟游戏规则" subtitle="和真实 A 股一致，点模拟游戏页的「规则说明」看详细解释">
         <div className="kv-list">
           <KV k="T+1" v="今天买的明天才能卖" />
           <KV k="涨跌停" v="涨停买不进、跌停卖不出" />

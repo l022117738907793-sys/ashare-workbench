@@ -19,6 +19,7 @@ import {
 import { displayDate, maskDate, maskDatesIn, replayPrices, settleReplay } from "../lib/replay";
 import { fmtNum, fmtPct } from "../lib/helpers";
 import { Card, EmptyHint, KV, Notice } from "./common";
+import { GAME_DISCLAIMER } from "../lib/game";
 
 export interface ReplayViewProps {
   state: ReplayState;
@@ -133,7 +134,7 @@ export function ReplayView(props: ReplayViewProps) {
   return (
     <div className="view">
       <p className="game-disclaimer" role="note">
-        ⚠️ 模拟盘 · 虚拟资金 · 不构成投资建议
+        {`⚠️ ${GAME_DISCLAIMER}`}
       </p>
 
       {briefing ? (

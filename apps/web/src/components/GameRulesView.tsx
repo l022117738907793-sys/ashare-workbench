@@ -1,5 +1,5 @@
 /**
- * 模拟盘规则讲解。
+ * 模拟游戏规则讲解。
  *
  * 定位：这些规则本身就是最值得学的部分——T+1、涨跌停、手续费看起来是"限制"，
  * 实际是 A 股交易成本结构与制度约束的直接体现，不懂这些就没法理解真实收益。
@@ -37,13 +37,13 @@ export function GameRulesView({ onBack }: { onBack: () => void }) {
     <div className="view">
       <div className="back-bar">
         <button type="button" className="btn btn-ghost btn-tiny" onClick={onBack}>
-          ← 返回模拟盘
+          ← 返回模拟游戏
         </button>
         <h2 className="back-title">撮合规则说明</h2>
       </div>
 
       <Notice tone="info">
-        模拟盘按 A 股真实规则撮合。理解这些规则比记住任何"结论"都有用——
+        模拟游戏按 A 股真实规则撮合。理解这些规则比记住任何"结论"都有用——
         它们决定了你的实际收益与真实交易的差距。
       </Notice>
 
@@ -58,7 +58,7 @@ export function GameRulesView({ onBack }: { onBack: () => void }) {
         </p>
         <p className="rule-body">
           <strong>资金侧同样受约束：</strong>卖出所得当日可用于继续买入（资金 T+0），
-          但取现要到次日。模拟盘实现了股票侧的 T+1。
+          但取现要到次日。模拟游戏实现了股票侧的 T+1。
         </p>
       </Card>
 
@@ -72,7 +72,7 @@ export function GameRulesView({ onBack }: { onBack: () => void }) {
           <KV k="ST / 风险警示股" v={`±${pct(priceLimitPct(true, false))}`} />
         </div>
         <p className="rule-body">
-          <strong>为什么重要：</strong>涨停时买不进、跌停时卖不出，这不是模拟盘的 bug，
+          <strong>为什么重要：</strong>涨停时买不进、跌停时卖不出，这不是模拟游戏的 bug，
           而是真实市场的流动性约束。极端行情下"想跑跑不掉"是常态。
         </p>
       </Card>
@@ -98,13 +98,13 @@ export function GameRulesView({ onBack }: { onBack: () => void }) {
 
       <Card title="滑点：成交价和你看到的不一样" subtitle={`默认 ${pct(DEFAULT_SLIPPAGE)}`}>
         <p className="rule-body">
-          下单到成交有延迟，且你的买单要吃掉卖一档的挂单。模拟盘按
+          下单到成交有延迟，且你的买单要吃掉卖一档的挂单。模拟游戏按
           <strong>买入价上浮 {pct(DEFAULT_SLIPPAGE)}、卖出价下浮 {pct(DEFAULT_SLIPPAGE)}</strong> 成交，
           用来近似这个冲击成本。
         </p>
         <p className="rule-body">
           <strong>为什么重要：</strong>它让"看到什么价就按什么价成交"的幻觉消失。
-          流动性差的股票实际滑点远大于此，模拟盘给的是一个乐观下限。
+          流动性差的股票实际滑点远大于此，模拟游戏给的是一个乐观下限。
         </p>
       </Card>
 
@@ -118,14 +118,14 @@ export function GameRulesView({ onBack }: { onBack: () => void }) {
         </p>
       </Card>
 
-      <Card title="非交易时段下单会怎样" subtitle="本模拟盘的处理方式">
+      <Card title="非交易时段下单会怎样" subtitle="本模拟游戏的处理方式">
         <p className="rule-body">
           非交易时段仍可下单，但按<strong>最近收盘价</strong>成交，
           并在成交记录中标注「非交易时段下单，按最近收盘价成交（非实时价）」。
         </p>
         <p className="rule-body">
           真实的排队机制是：非交易时段的委托会进入次一交易日的集合竞价，按<strong>开盘价</strong>成交。
-          模拟盘做不到这一点（纯前端拿不到未来的开盘价），因此选择"按最新价成交 + 明确标注"，
+          模拟游戏做不到这一点（纯前端拿不到未来的开盘价），因此选择"按最新价成交 + 明确标注"，
           而不是假装能排队。
         </p>
       </Card>

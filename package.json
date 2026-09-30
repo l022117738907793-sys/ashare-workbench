@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "A 股趋势筛选工作台 · 纯前端版（实时行情 + 四层漏斗 + 学习模式 + 模拟盘）",
+  "description": "A 股趋势筛选工作台 · 纯前端版（实时行情 + 四层漏斗 + 学习模式 + 模拟游戏）",
   "workspaces": [
     "packages/*",
     "apps/*"

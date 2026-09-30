@@ -191,7 +191,7 @@ writeFileSync(`${dirOf}/game-away.html`, page("你不在的这段时间", awayHt
 writeFileSync(`${dirOf}/game-review.html`, page("结算复盘报告", reviewHtml), "utf8");
 console.log(`已写出 ${dirOf}/game-away.html 与 game-review.html`);
 
-// 模拟盘开局页（看按钮主次）+ 新闻面板（看原文链接）
+// 模拟游戏开局页（看按钮主次）+ 新闻面板（看原文链接）
 const setupHtml = renderToStaticMarkup(
   createElement(GameView, {
     state: defaultGameState(),
@@ -237,7 +237,7 @@ const setupHtml = renderToStaticMarkup(
     onOpenLegend: () => {},
   }),
 );
-writeFileSync(`${dirOf}/game-setup.html`, page("模拟盘开局页", setupHtml), "utf8");
+writeFileSync(`${dirOf}/game-setup.html`, page("模拟游戏开局页", setupHtml), "utf8");
 console.log(`已写出 ${dirOf}/game-setup.html`);
 
 const settled = settleReplay(state);

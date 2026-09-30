@@ -1,5 +1,5 @@
 /**
- * 模拟盘视图。
+ * 模拟游戏视图。
  *
  * ⚠️ 与「分析红线」的关系（重要，别改错）：
  * 红线禁止的是**程序给出买卖建议**——所以分析引擎的 conclusion / why / nextSteps
@@ -484,7 +484,7 @@ export function GameView(props: GameViewProps) {
             type="button"
             className="btn btn-danger"
             onClick={() => {
-              if (confirm("确定重置模拟盘？所有持仓与成交记录将清空，不可恢复。")) {
+              if (confirm("确定重置模拟游戏？所有持仓与成交记录将清空，不可恢复。")) {
                 onReset();
                 setLastSeason(null);
                 setLastReview(null);
@@ -492,7 +492,7 @@ export function GameView(props: GameViewProps) {
               }
             }}
           >
-            重置模拟盘
+            重置模拟游戏
           </button>
         </div>
 

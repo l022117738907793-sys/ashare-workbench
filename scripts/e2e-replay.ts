@@ -166,14 +166,14 @@ try {
     await waitFor(`!document.body.innerText.includes("正在加载")`, "加载完成"),
   );
 
-  console.log("\n二、进入模拟盘");
-  await evaluate(CLICK("模拟盘"));
+  console.log("\n二、进入模拟游戏");
+  await evaluate(CLICK("模拟游戏"));
   await sleep(400);
   const inGame = await waitFor(
-    `document.body.innerText.includes("模拟盘")`,
-    "模拟盘页出现",
+    `document.body.innerText.includes("模拟游戏")`,
+    "模拟游戏页出现",
   );
-  check("切到模拟盘页", inGame);
+  check("切到模拟游戏页", inGame);
   check(
     "看到历史推演入口",
     await evaluate<boolean>(`return document.body.innerText.includes("另一种玩法") || document.body.innerText.includes("历史推演");`),
@@ -249,7 +249,7 @@ try {
   await send("Page.reload", { ignoreCache: true });
   await sleep(1800);
   await waitFor(`document.body.innerText.includes("A 股趋势筛选工作台")`, "重新加载");
-  await evaluate(CLICK("模拟盘"));
+  await evaluate(CLICK("模拟游戏"));
   await sleep(600);
   const resumed = await waitFor(
     `document.body.innerText.includes("走一天") && document.body.innerText.includes("推演日志")`,
@@ -386,7 +386,7 @@ try {
   await send("Page.reload", { ignoreCache: true });
   await sleep(2000);
   await waitFor(`document.body.innerText.includes("A 股趋势筛选工作台")`, "重新加载");
-  await evaluate(CLICK("模拟盘"));
+  await evaluate(CLICK("模拟游戏"));
   await sleep(800);
   check(
     "刷新后还在推演里，没有退回关卡列表",
@@ -396,12 +396,12 @@ try {
   check("还原的是同一关（能看到这一关的日期）", restored.includes(level.startDate));
   check("成交记录还在", restored.includes("开盘价") || restored.includes("推演日志"));
 
-  console.log("\n十、回到模拟盘：你不在的这段时间");
-  // 回到模拟盘页（前面几节都在历史推演里）
+  console.log("\n十、回到模拟游戏：你不在的这段时间");
+  // 回到模拟游戏页（前面几节都在历史推演里）
   await evaluate(`window.confirm = () => true; return true;`);
   await evaluate(CLICK("退出推演"));
   await sleep(600);
-  await evaluate(CLICK("模拟盘"));
+  await evaluate(CLICK("模拟游戏"));
   await sleep(600);
 
   /**
@@ -445,7 +445,7 @@ try {
   await send("Page.reload", { ignoreCache: true });
   await sleep(1800);
   await waitFor(`!document.body.innerText.includes("正在加载")`, "加载完成");
-  await evaluate(CLICK("模拟盘"));
+  await evaluate(CLICK("模拟游戏"));
   await sleep(800);
 
   const awayShown = await waitFor(

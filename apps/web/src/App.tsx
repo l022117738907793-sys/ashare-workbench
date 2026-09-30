@@ -120,13 +120,13 @@ import { useLiveQuotes } from "./lib/useLiveQuotes";
 import { useLiveNews } from "./lib/useLiveNews";
 
 // "rules" 与 "guide" 不是底部 tab，而是子页面：
-// "rules" 从模拟盘进入，"guide" 从页头进入（放在最显眼处，同学才会看到）
+// "rules" 从模拟游戏进入，"guide" 从页头进入（放在最显眼处，同学才会看到）
 type Tab = "workbench" | "analysis" | "game" | "rules" | "guide" | "history" | "settings";
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "workbench", label: "筛选" },
   { key: "analysis", label: "个股分析" },
-  { key: "game", label: "模拟盘" },
+  { key: "game", label: "模拟游戏" },
   { key: "history", label: "历史" },
   { key: "settings", label: "设置" },
 ];
@@ -135,7 +135,7 @@ function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** 模拟盘的业绩基准 */
+/** 模拟游戏的业绩基准 */
 const BENCHMARK_CODE = "000300.SH";
 
 function lastClose(close: Maybe[]): number | null {
@@ -161,7 +161,7 @@ export default function App() {
   useEffect(() => writeLS(LS_SETTINGS, serializeSettings(settings)), [settings]);
   useEffect(() => writeLS(LS_STORE, serializeStore(store)), [store]);
 
-  // ── 模拟盘账户（纯本地，无后端）──────────────────────────────
+  // ── 模拟游戏账户（纯本地，无后端）──────────────────────────────
   const [game, setGame] = useState<GameState>(() => parseGameState(readLS(LS_GAME)));
   useEffect(() => writeLS(LS_GAME, serializeGameState(game)), [game]);
 
@@ -311,7 +311,7 @@ export default function App() {
       });
     }
     if (tab === "game") {
-      // 模拟盘要盯的是自己的持仓；没有持仓就不请求行情
+      // 模拟游戏要盯的是自己的持仓；没有持仓就不请求行情
       return selectPollCodes({
         selectedStock: null,
         sectorMemberNames: [],
@@ -329,7 +329,7 @@ export default function App() {
     nonce: reloadNonce,
   });
 
-  // 新闻与行情节奏不同：行情 3~5 秒，新闻 3 分钟。只在模拟盘页且已开局时拉取。
+  // 新闻与行情节奏不同：行情 3~5 秒，新闻 3 分钟。只在模拟游戏页且已开局时拉取。
   const news = useLiveNews({
     enabled: tab === "game" && game.status === "playing",
   });
@@ -503,7 +503,7 @@ export default function App() {
   const degraded = live.result?.degradedReason ?? null;
   const updatedText = live.updatedAt === null ? "—（暂无实时数据）" : beijingClock(live.updatedAt);
   const quoteSourceText = live.result ? sourceLabel(live.result.source) : "—（未取到实时行情）";
-  // ── 模拟盘 ──────────────────────────────────────────────────
+  // ── 模拟游戏 ──────────────────────────────────────────────────
   const isTradingNow = session === "open";
 
   /** 价格表：先用快照收盘价铺底，再用实时价覆盖。取不到的保持 null（不猜） */

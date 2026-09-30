@@ -11,6 +11,7 @@
 import { useState } from "react";
 import { LEVELS, type ReplayLevel } from "@aw/game";
 import { Card, Notice } from "./common";
+import { GAME_DISCLAIMER } from "../lib/game";
 
 export interface LevelPickerProps {
   /** 关卡数据是否已经就位（分片缺少时只能看名单，不能开局） */
@@ -20,7 +21,7 @@ export interface LevelPickerProps {
   error: string | null;
   onStart: (level: ReplayLevel, initialCash: number) => void;
   onBack: () => void;
-  /** 可选资金档位，与实时模拟盘共用 */
+  /** 可选资金档位，与实时模拟游戏共用 */
   cashOptions: number[];
   defaultCash: number;
 }
@@ -49,7 +50,7 @@ export function LevelDetail(props: LevelDetailProps) {
   return (
     <div className="view">
       <p className="game-disclaimer" role="note">
-        ⚠️ 模拟盘 · 虚拟资金 · 不构成投资建议
+        {`⚠️ ${GAME_DISCLAIMER}`}
       </p>
 
       <Card
@@ -141,7 +142,7 @@ export function LevelPicker(props: LevelPickerProps) {
   return (
     <div className="view">
       <p className="game-disclaimer" role="note">
-        ⚠️ 模拟盘 · 虚拟资金 · 不构成投资建议
+        {`⚠️ ${GAME_DISCLAIMER}`}
       </p>
 
       <Card

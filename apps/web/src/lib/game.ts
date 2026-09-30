@@ -1,5 +1,5 @@
 /**
- * 模拟盘的本地持久化与界面辅助逻辑。
+ * 模拟游戏的本地持久化与界面辅助逻辑。
  *
  * 与撮合规则（@aw/game）分开：那边是纯函数，这边只管「怎么存、怎么取、怎么对齐日期」。
  * 坏数据一律退化为空状态，不抛错——本地存储是用户可随意篡改的。
@@ -272,5 +272,5 @@ export function suggestedMaxShares(
   return Math.max(0, Math.floor(budget / 100) * 100);
 }
 
-/** 常驻提示语。红线要求：模拟盘必须显著说明是虚拟的 */
-export const GAME_DISCLAIMER = "模拟盘 · 虚拟资金 · 不构成投资建议";
+/** 常驻提示语。红线要求：模拟游戏必须显著说明是虚拟的 */
+export const GAME_DISCLAIMER = "模拟游戏 · 虚拟资金 · 不构成投资建议";

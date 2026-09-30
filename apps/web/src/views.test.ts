@@ -437,12 +437,12 @@ function stubNews(over: Partial<LiveNewsState> = {}): LiveNewsState {
   };
 }
 
-// ── 模拟盘渲染 ───────────────────────────────────────────────
+// ── 模拟游戏渲染 ───────────────────────────────────────────────
 
-describe("模拟盘页渲染", () => {
+describe("模拟游戏页渲染", () => {
   /**
-   * 注意：模拟盘**允许**出现「买入/卖出」——那是用户的操作标签，不是程序的建议。
-   * 模拟盘允许出现买卖标签（那是用户的操作，不是程序的建议），因此改为断言：
+   * 注意：模拟游戏**允许**出现「买入/卖出」——那是用户的操作标签，不是程序的建议。
+   * 模拟游戏允许出现买卖标签（那是用户的操作，不是程序的建议），因此改为断言：
    *   1. 常驻免责声明确实渲染出来了；
    *   2. 不出现任何引导性/建议性文案；
    *   3. 取不到行情时显示"无行情"而不是编造盈亏。
@@ -728,7 +728,7 @@ describe("模拟盘页渲染", () => {
   it("不出现任何引导性/建议性文案", () => {
     const html = renderGame();
     for (const w of ["建议买入", "建议卖出", "推荐", "看涨", "看跌", "抄底", "稳赚", "必赚", "目标价"]) {
-      expect(html.includes(w), `模拟盘出现引导性文案「${w}」`).toBe(false);
+      expect(html.includes(w), `模拟游戏出现引导性文案「${w}」`).toBe(false);
     }
   });
 
@@ -888,7 +888,7 @@ describe("使用说明页渲染", () => {
   const html = renderToStaticMarkup(createElement(GuideView, { onBack: () => {} }));
 
   it("覆盖五个页面与六种分类", () => {
-    for (const kw of ["筛选", "个股分析", "模拟盘", "历史", "设置"]) {
+    for (const kw of ["筛选", "个股分析", "模拟游戏", "历史", "设置"]) {
       expect(html.includes(kw), `缺少页面说明「${kw}」`).toBe(true);
     }
     for (const kw of ["启动观察", "趋势观察", "回调观察", "高位观察", "排除", "数据不足"]) {
@@ -912,7 +912,7 @@ describe("使用说明页渲染", () => {
     expect(html).toContain("当交易依据不行");
   });
 
-  it("讲清模拟盘规则与免责", () => {
+  it("讲清模拟游戏规则与免责", () => {
     for (const kw of ["T+1", "涨跌停", "佣金", "印花税", "滑点", "超额收益"]) {
       expect(html.includes(kw), `缺少规则说明「${kw}」`).toBe(true);
     }
@@ -920,7 +920,7 @@ describe("使用说明页渲染", () => {
   });
 });
 
-describe("模拟盘开局界面", () => {
+describe("模拟游戏开局界面", () => {
   function renderSetup(replayReady = false): string {
     return renderToStaticMarkup(
       createElement(GameView, {

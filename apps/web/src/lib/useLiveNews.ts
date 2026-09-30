@@ -25,7 +25,7 @@ export interface LiveNewsState {
 }
 
 export interface UseLiveNewsOptions {
-  /** 是否启用（未开局或不在模拟盘页时关掉） */
+  /** 是否启用（未开局或不在模拟游戏页时关掉） */
   enabled: boolean;
   /**
    * 刷新间隔，默认 10 分钟。

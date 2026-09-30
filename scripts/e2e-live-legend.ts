@@ -106,8 +106,8 @@ try {
   );
   check("快照加载完成", await waitFor(`!document.body.innerText.includes("正在加载")`, "加载完成"));
 
-  console.log("\n二、进模拟盘 → 传奇模式");
-  await evaluate(CLICK("模拟盘"));
+  console.log("\n二、进模拟游戏 → 传奇模式");
+  await evaluate(CLICK("模拟游戏"));
   await sleep(500);
   const entry = await evaluate<string>(CLICK("传奇模式"));
   check("线上有「传奇模式」入口（说明这次部署带上去了）", entry === "OK", entry);

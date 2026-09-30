@@ -423,14 +423,14 @@ describe("判断依据的状态与取值", () => {
  *
  * 保留的两条不是合规约束，而是产品本身的质量要求：
  *   1. 数据不足时统一文案，避免各处措辞漂移；
- *   2. 模拟盘常驻免责声明——那是"这是虚拟盘"的如实标注，与买卖建议无关。
+ *   2. 模拟游戏常驻免责声明——那是"这是虚拟盘"的如实标注，与买卖建议无关。
  */
 describe("界面文案", () => {
   it("数据不足横幅文案固定", () => {
     expect(NOT_ENOUGH_BANNER).toBe("【数据不足，不许编造】");
   });
 
-  it("模拟盘常驻免责声明", () => {
+  it("模拟游戏常驻免责声明", () => {
     const files = import.meta.glob("./**/*.tsx", { query: "?raw", import: "default", eager: true }) as Record<
       string,
       string
