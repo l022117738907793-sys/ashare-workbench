@@ -34,7 +34,6 @@ import {
 import {
   executeOrder,
   holdingsValue as calcHoldingsValue,
-  periodReturnPct,
   rolloverTradingDay,
   settleSeason,
   totalAssets as calcTotalAssets,
@@ -90,6 +89,8 @@ import {
   pushEquity,
   serializeGameState,
   type GameState,
+
+  samePeriodBenchmark,
 } from "./lib/game";
 import {
   beijingClock,
@@ -628,16 +629,13 @@ export default function App() {
     });
   }, [snapshot, live.today, gamePricesObj]);
 
-  /** 基准：沪深300 在「开始玩到现在」这一段区间的涨跌幅 */
+  /** 基准：沪深300 在「这一局开始到现在」这一段区间的涨跌幅 */
   const benchmarkName = "沪深300";
   const benchmarkReturnPct = useMemo(() => {
     const idx = snapshot?.indices.find((i) => i.code === BENCHMARK_CODE);
-    if (!idx || !calendar || calendar.length === 0) return null;
-    const first = game.equity[0]?.date ?? calendar[0];
-    const last = calendar[calendar.length - 1];
-    if (first >= last) return null;
-    const curve = benchmarkCurve([first, last], calendar, idx.close);
-    return curve.length >= 2 ? periodReturnPct(curve) : null;
+    if (!idx) return null;
+    // 区间口径与「为什么可能是 null」都写在 samePeriodBenchmark 里
+    return samePeriodBenchmark(game.equity, calendar ?? [], idx.close);
   }, [snapshot, calendar, game.equity]);
 
   const gameResults = useMemo(() => {

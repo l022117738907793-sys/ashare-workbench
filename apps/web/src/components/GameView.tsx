@@ -346,6 +346,16 @@ export function GameView(props: GameViewProps) {
           <Metric k="成交笔数" v={`${account.trades.length} 笔`} />
           <Metric k="持仓只数" v={`${account.holdings.length} 只`} />
         </div>
+        {/*
+          基准没出来时要说清为什么，别只挂一个「—」——
+          玩家会以为坏了，或者更糟：以为自己和指数持平。
+        */}
+        {benchmarkReturnPct === null && (
+          <p className="field-hint">
+            还没有可比的区间：这一局刚开始，或者快照里没有{benchmarkName}的行情。
+            走过一个交易日之后，这里会显示同期涨跌和超额收益。
+          </p>
+        )}
       </Card>
 
       {away && onDismissAway && <AwayCard report={away} onDismiss={onDismissAway} />}

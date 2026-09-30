@@ -827,6 +827,18 @@ try {
     return m ? m[1].trim() : "";
   })()`;
   const coCash0 = await evaluate<string>(`return ${COEXIST_CASH};`);
+  /*
+   * 评审第 1 条：刚开局、没有交易，却显示「同期沪深300 −5.45%　超额收益 +5.45%」，
+   * 一进门就「获胜」。根因是基准的起点在拿不到净值起点时退回了快照第一天。
+   * 现在应该是「—」加一句说明。
+   */
+  const benchFresh = await evaluate<string>(`
+    const m = [...document.querySelectorAll(".metric")].find((d) => d.textContent.includes("超额收益"));
+    const v = m ? m.querySelector(".metric-v").textContent.trim() : "NO_METRIC";
+    return JSON.stringify({ v, hint: document.body.innerText.includes("还没有可比的区间") });
+  `);
+  const bf = JSON.parse(benchFresh) as { v: string; hint: boolean };
+  check("刚开局不算「跑赢基准」", bf.v === "—" && bf.hint, `${bf.v} / 说明 ${bf.hint}`);
   // 界面上没有千分位：可用资金显示成 100000
   check("新开局的可用资金就是本金", coCash0.includes("100000"), coCash0);
 

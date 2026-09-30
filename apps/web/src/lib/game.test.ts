@@ -10,6 +10,7 @@ import {
   parseGameState,
   positionPnl,
   pushEquity,
+  samePeriodBenchmark,
   serializeGameState,
   suggestedMaxShares,
   type GameState,
@@ -286,5 +287,70 @@ describe("新闻轮的节奏常量（放在这里是因为跨模块引用方便�
     // 界面有手动刷新按钮，自动刷新只需保持大致最新。
     // 若有人想改短，请先想清楚"用户被新闻刷屏"的代价。
     expect(DEFAULT_NEWS_INTERVAL_MS).toBe(10 * 60 * 1000);
+  });
+});
+
+describe("同期基准：必须和账户量同一段区间", () => {
+  /** 从某个周一开始、跳过周末，造一串真实可比的交易日 */
+  function tradingDays(n: number, from: string): string[] {
+    const out: string[] = [];
+    const d = new Date(`${from}T00:00:00Z`);
+    while (out.length < n) {
+      const w = d.getUTCDay();
+      if (w !== 0 && w !== 6) out.push(d.toISOString().slice(0, 10));
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+    return out;
+  }
+  const calendar = tradingDays(120, "2026-01-05");
+  const steady = (n: number, f: (i: number) => number) => Array.from({ length: n }, (_, i) => f(i));
+  // 指数从 4000 一路阴跌到 3780（−5.45%）—— 就是评审看到的那张图
+  const falling = steady(120, (i) => 4000 - i * (220 / 119));
+
+  it("净值曲线只有一个点时，不给基准（刚开局不能算「跑赢」）", () => {
+    const equity = [{ date: calendar[119], total: 200_000 }];
+    expect(samePeriodBenchmark(equity, calendar, falling)).toBeNull();
+  });
+
+  it("净值曲线为空时，不给基准", () => {
+    expect(samePeriodBenchmark([], calendar, falling)).toBeNull();
+  });
+
+  it("**回归**：指数这 120 天跌了 5.45%，但玩家昨天才开局 —— 不能算出 −5.45", () => {
+    // 这正是缺陷的样子：账户区间只有一天，基准却被算成整份快照的涨跌
+    const equity = [
+      { date: calendar[118], total: 200_000 },
+      { date: calendar[119], total: 200_000 },
+    ];
+    const pct = samePeriodBenchmark(equity, calendar, falling);
+    expect(pct).not.toBeNull();
+    // 一天的跌幅 = 总跌幅 / 119，绝不该是 −5.45
+    expect(Math.abs(pct as number)).toBeLessThan(0.1);
+  });
+
+  it("区间对得上时，基准就是同一段的指数涨跌", () => {
+    const rising = steady(120, (i) => 3000 + i * 10);
+    const equity = [
+      { date: calendar[0], total: 200_000 },
+      { date: calendar[9], total: 200_000 },
+    ];
+    // 第 0 天 3000 → 第 9 天 3090，共 +3%
+    expect(samePeriodBenchmark(equity, calendar, rising)).toBeCloseTo(3, 5);
+  });
+
+  it("净值起点晚于快照最后一天时，不给基准（今天的行情还没进来）", () => {
+    const equity = [
+      { date: "2026-09-30", total: 200_000 },
+      { date: "2026-10-01", total: 200_000 },
+    ];
+    expect(samePeriodBenchmark(equity, calendar, falling)).toBeNull();
+  });
+
+  it("日历为空时不抛错", () => {
+    const equity = [
+      { date: calendar[0], total: 200_000 },
+      { date: calendar[9], total: 200_000 },
+    ];
+    expect(samePeriodBenchmark(equity, [], falling)).toBeNull();
   });
 });

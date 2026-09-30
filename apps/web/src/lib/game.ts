@@ -6,6 +6,7 @@
  */
 import {
   createAccount,
+  periodReturnPct,
   type Account,
   type EquityPoint,
   type Trade,
@@ -236,6 +237,37 @@ export function benchmarkCurve(
     }
   }
   return out;
+}
+
+/**
+ * 基准：指数在「这一局开始到现在」这一段区间的涨跌幅。
+ *
+ * 起点只能来自账户自己的净值曲线。以前在拿不到起点时会退回 `calendar[0]`，
+ * 也就是快照的第一天（120 个交易日前）—— 于是刚开局什么都没做，界面就显示
+ * 「同期沪深300 −5.45%　超额收益 +5.45%」，玩家一进门就「获胜」了。
+ *
+ * 账户的收益率量的是「总资产 / 本金」，基准就必须量同一段日子。
+ * 没有可比区间时返回 null（界面显示「—」并说明原因），**绝不退回到别的起点**。
+ */
+export function samePeriodBenchmark(
+  equity: EquityPoint[],
+  calendar: string[],
+  indexClose: Array<number | null>,
+): number | null {
+  if (equity.length < 2 || calendar.length === 0) return null;
+  const from = equity[0]?.date;
+  const to = equity[equity.length - 1]?.date;
+  if (!from || !to || from >= to) return null;
+  /*
+   * 这一局开始得比最新指数行情还晚（今天刚开局，而快照停在昨天）——
+   * 此时 benchmarkCurve 会把起点也回退到最后一个交易日，算出 0%，
+   * 看起来像「指数原地不动」。没有数据就说没有数据。
+   */
+  if (from > calendar[calendar.length - 1]) return null;
+  const curve = benchmarkCurve([from, to], calendar, indexClose);
+  if (curve.length < 2) return null;
+  const pct = periodReturnPct(curve);
+  return Number.isFinite(pct) ? pct : null;
 }
 
 /**
