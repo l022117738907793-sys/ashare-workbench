@@ -149,8 +149,7 @@ export function ReplayView(props: ReplayViewProps) {
             {briefing.theme}
           </Notice>
           <p className="hint">
-            你知道后来发生了什么，但当时的人不知道。简报只写到进场那天为止——后面每一天的新闻和行情，
-            要自己走一天看一天。
+            你知道后来发生了什么，当时的人不知道。简报只写到进场那天。
           </p>
           {briefing.note ? <p className="hint">{briefing.note}</p> : null}
         </Card>

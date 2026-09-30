@@ -136,9 +136,7 @@ export function GameView(props: GameViewProps) {
 
         <Card title="开始一局" subtitle="这是实时模式：从现在开始，按现实规则结算">
           <p className="rule-body">
-            先选初始资金。金额决定了你能买什么 —— A 股一手 100 股，
-            10 万元买不起一手高价股（比如 2026-09 的茅台一手约 12.5 万）。
-            <strong>这个约束本身就是练习的一部分。</strong>
+            先选初始资金。A 股一手 100 股 —— 10 万块买不起一手高价股。
           </p>
 
           <div className="cash-options">
@@ -180,14 +178,12 @@ export function GameView(props: GameViewProps) {
           subtitle="把你放回真实的某一天，一天走一步"
         >
           <p className="rule-body">
-            上面的实时模式从今天开始，要等现实中的交易日慢慢过去。
-            历史推演换一种走法：从<strong>过去</strong>的某个交易日开局，你每点一次「走一天」就推进一步，
-            走的全是<strong>真实发生过的</strong>行情。
+            从<strong>过去</strong>的某个交易日开局，每点一次「走一天」推进一步，
+            走的全是真实发生过的行情。
           </p>
           <p className="rule-body">
-            两条关键规矩：① 今天下单，<strong>按次一交易日的开盘价成交</strong> ——
-            你看到的是一整天的完整走势，用当天收盘价成交就等于开了天眼；
-            ② 随机模式开局<strong>不告诉你这是哪一年哪一天</strong>，结算时才揭晓。
+            今天下单<strong>按次一交易日的开盘价成交</strong> ——
+            你看到的是一整天的完整走势。
           </p>
 
           <div className="kv-list">
@@ -212,9 +208,8 @@ export function GameView(props: GameViewProps) {
           )}
 
           <p className="field-hint">
-            两条路的区别只在开局那一步：<strong>传奇模式</strong>是十个特定的历史时刻，
-            显示完整日期，还会给你一份进场那天看得见的简报；<strong>随机模式</strong>不告诉你这是哪一年哪一天。
-            走起来用的是同一套引擎，结算时才揭晓。
+            <strong>传奇模式</strong>给完整日期和进场简报，<strong>随机模式</strong>不告诉你这是哪一年哪一天 ——
+            差别只在开局那一步。
           </p>
         </Card>
       </div>

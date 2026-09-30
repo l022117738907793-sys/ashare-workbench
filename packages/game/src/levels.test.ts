@@ -53,6 +53,23 @@ describe("传奇模式的关卡定义", () => {
   });
 
   /**
+   * 用户反馈「跟剧本杀一样，改简单点」之后补的上限。
+   *
+   * 这一页最容易失控：每关多写一句「当时的气氛」，十关加起来就是一篇散文。
+   * 上限比现状宽一点（现在最长一条 35 字、最长 theme 25 字），
+   * 目的是挡住慢慢变长，不是卡死改一个字都要改测试。
+   */
+  it("简报和思考题都要短：简报最多两条，每条一句话，theme 一句话", () => {
+    for (const l of LEVELS) {
+      expect(l.briefing.length, `${l.id} 简报条数`).toBeLessThanOrEqual(2);
+      for (const b of l.briefing) {
+        expect(b.length, `${l.id} 这条太长了：${b}`).toBeLessThanOrEqual(40);
+      }
+      expect(l.theme.length, `${l.id} theme 太长了：${l.theme}`).toBeLessThanOrEqual(30);
+    }
+  });
+
+  /**
    * 最重要的一条：**简报里不许出现后见之明**。
    * 写关卡文案时最容易犯的错就是顺手写「随后暴跌」，那句话在入场那天是不存在的。
    */

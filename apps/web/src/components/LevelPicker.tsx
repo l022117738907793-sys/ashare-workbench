@@ -63,9 +63,8 @@ export function LevelDetail(props: LevelDetailProps) {
         }
       >
         <Notice tone="info">
-          这是 <strong>{open.startDate}</strong> —— 真实的历史交易日。你会从这一天开始，
-          一天一天往前走 {open.days} 个交易日。日期是公开的：你知道后来发生了什么，
-          问题是在当时的信息下你会怎么做。
+          从 <strong>{open.startDate}</strong> 开始，往前走 {open.days} 个交易日。
+          日期是公开的 —— 问题是在当时的信息下你会怎么做。
         </Notice>
 
         <h4 className="briefing-h">进场那天能看到的</h4>
@@ -108,8 +107,7 @@ export function LevelDetail(props: LevelDetailProps) {
         )}
 
         <p className="hint">
-          价格用的是前复权价（用今天的复权因子回算），所以收益是连续的，
-          但和当年的盘面绝对价位不一样。这是为了让长期持有不会被除权缺口算成亏损。
+          价格用前复权（按今天的复权因子回算）：收益连续，但绝对价位和当年不一样。
         </p>
       </Card>
     </div>
@@ -155,9 +153,8 @@ export function LevelPicker(props: LevelPickerProps) {
         }
       >
         <Notice tone="info">
-          每一关都是 A 股真实发生过的一段日子。你会从事件发生**之前**的某一天进场，
-          一天一步往前走。日期照实显示 —— 这一关玩的是「当时的信息下你会怎么做」，
-          不是猜谜。
+          每一关都是真实发生过的一段日子。你从事件<strong>之前</strong>的某一天进场，
+          一天一步往前走。
         </Notice>
 
         {!ready ? (
@@ -182,8 +179,7 @@ export function LevelPicker(props: LevelPickerProps) {
         </ol>
 
         <p className="hint">
-          这些节点是按「当日或 5 日内出现大幅波动 / 成交异常」筛出来的，筛选规则写在
-          <code> docs/game-design.md</code>。它只筛出「有故事的日子」，不代表这些日子容易赚钱。
+          节点按「大幅波动或成交异常」筛出，不代表这些日子容易赚钱。
         </p>
       </Card>
     </div>

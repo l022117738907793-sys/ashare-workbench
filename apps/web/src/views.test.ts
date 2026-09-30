@@ -981,9 +981,11 @@ describe("模拟游戏开局界面", () => {
   });
 
   it("两条路的区别说清楚了：传奇给日期，随机不给", () => {
+    // 只断言「这个区别确实写在界面上」，不锁死具体措辞 —— 文案会改，区别不能丢
     const html = renderSetup(true);
-    expect(html).toContain("显示完整日期");
+    expect(html).toContain("给完整日期");
     expect(html).toContain("不告诉你这是哪一年哪一天");
+    expect(html).toContain("差别只在开局那一步");
   });
 
   it("快照没有开盘价时说明为什么做不了推演", () => {
@@ -1033,7 +1035,9 @@ describe("模拟游戏开局界面", () => {
   it("讲清了资金量对选股的限制", () => {
     const html = renderSetup();
     expect(html).toContain("一手 100 股");
-    expect(html).toContain("这个约束本身就是练习的一部分");
+    // 简化文案时把「为什么要有资金档位」压缩成了一句，但这个事实不能丢
+    expect(html).toContain("一手 100 股");
+    expect(html).toContain("买不起一手高价股");
   });
 });
 
