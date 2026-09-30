@@ -834,6 +834,32 @@ describe("模拟盘开局界面", () => {
     expect(html).not.toContain("没有开盘价");
   });
 
+  it("传奇模式排在随机前面，而且是主按钮", () => {
+    const html = renderSetup(true);
+    const legend = html.indexOf("传奇模式 · 10 个历史时刻");
+    const random = html.indexOf("随机开局（不显示日期）");
+    expect(legend).toBeGreaterThan(-1);
+    expect(random).toBeGreaterThan(-1);
+    expect(legend, "传奇应该排在随机之前").toBeLessThan(random);
+    // 主按钮是 btn-primary；两个按钮各自的那一段里检查
+    const legendTag = html.slice(html.lastIndexOf("<button", legend), legend);
+    const randomTag = html.slice(html.lastIndexOf("<button", random), random);
+    expect(legendTag).toContain("btn-primary");
+    expect(randomTag).not.toContain("btn-primary");
+  });
+
+  it("传奇模式已经做好了，页面上不该再出现「还没做」", () => {
+    // 这句是传奇模式建好之前留下的，上线后被用户看到才发现的
+    expect(renderSetup(true)).not.toContain("还没做");
+    expect(renderSetup(true)).not.toContain("随机模式是它的地基");
+  });
+
+  it("两条路的区别说清楚了：传奇给日期，随机不给", () => {
+    const html = renderSetup(true);
+    expect(html).toContain("显示完整日期");
+    expect(html).toContain("不告诉你这是哪一年哪一天");
+  });
+
   it("快照没有开盘价时说明为什么做不了推演", () => {
     const html = renderToStaticMarkup(
       createElement(GameView, {
@@ -949,6 +975,39 @@ describe("新闻面板渲染", () => {
   it("降级时显示提示", () => {
     const html = renderNews({ degradedReason: "已降级到 x" });
     expect(html).toContain("新闻获取异常");
+  });
+
+  it("有原文地址时给出可点的链接，并开在新标签页", () => {
+    const html = renderNews({
+      items: [
+        { ...mk("1", "央行开展逆回购操作"), url: "https://news.10jqka.com.cn/20260930/c680413883.shtml" },
+      ],
+    });
+    expect(html).toContain('href="https://news.10jqka.com.cn/20260930/c680413883.shtml"');
+    expect(html).toContain('target="_blank"');
+    // 站外链接必须带 noopener，否则对方页面能拿到 window.opener
+    expect(html).toContain("noopener");
+    expect(html).toContain("查看原文");
+  });
+
+  it("没有原文地址时不渲染空链接", () => {
+    // mk() 默认不带 url
+    const html = renderNews();
+    expect(html).not.toContain("查看原文");
+    expect(html).not.toContain('href="undefined"');
+      expect(html).not.toContain('href=""');
+  });
+
+  it("链接在 button 外面 —— a 套在 button 里是非法 HTML", () => {
+    const html = renderNews({
+      items: [{ ...mk("1", "带链接的新闻"), url: "https://example.com/a" }],
+    });
+    // 取每个 <button ...>…</button> 的内容，里面都不该有 <a>
+    const buttons = html.match(/<button[^>]*>[\s\S]*?<\/button>/g) ?? [];
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const b of buttons) {
+      expect(b.includes("<a "), `button 里出现了 <a>：${b.slice(0, 80)}`).toBe(false);
+    }
   });
 });
 

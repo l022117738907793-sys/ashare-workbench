@@ -12,12 +12,14 @@ import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { ReplayView } from "../apps/web/src/components/ReplayView";
 import { LevelDetail, LevelPicker } from "../apps/web/src/components/LevelPicker";
+import { NewsPanel } from "../apps/web/src/components/NewsPanel";
+import { GameView } from "../apps/web/src/components/GameView";
 import { LEVELS } from "../packages/game/src/levels";
 import { AwayCard } from "../apps/web/src/components/AwayCard";
 import { ReviewBlock } from "../apps/web/src/components/ReviewBlock";
 import { awayReport } from "../apps/web/src/lib/awayReport";
 import { reviewReport } from "../packages/game/src/review";
-import { CASH_OPTIONS, DEFAULT_INITIAL_CASH } from "../apps/web/src/lib/game";
+import { CASH_OPTIONS, DEFAULT_INITIAL_CASH, defaultGameState } from "../apps/web/src/lib/game";
 import { placeOrder, advanceDay, settleReplay, pendingFor } from "../packages/game/src/replay";
 import { startReplay } from "../apps/web/src/lib/replay";
 import type { Snapshot, StockData } from "../packages/core/src/engine";
@@ -188,6 +190,55 @@ const reviewHtml = renderToStaticMarkup(
 writeFileSync(`${dirOf}/game-away.html`, page("你不在的这段时间", awayHtml), "utf8");
 writeFileSync(`${dirOf}/game-review.html`, page("结算复盘报告", reviewHtml), "utf8");
 console.log(`已写出 ${dirOf}/game-away.html 与 game-review.html`);
+
+// 模拟盘开局页（看按钮主次）+ 新闻面板（看原文链接）
+const setupHtml = renderToStaticMarkup(
+  createElement(GameView, {
+    state: defaultGameState(),
+    prices: new Map(),
+    quotesByCode: new Map(),
+    stocks: [],
+    resultsByCode: new Map(),
+    onOrder: () => ({ ok: true }),
+    onStart: () => {},
+    onReset: () => {},
+    onSettle: () => null,
+    onOpenRules: () => {},
+    news: {
+      items: [
+        { id: "1", title: "北方长龙：控股股东及一致行动人询价转让已完成，减持1.32%",
+          digest: "北方长龙公告称，控股股东及一致行动人询价转让已完成，合计减持 1.32%。本次询价转让不涉及公司控制权变更。",
+          at: Date.now() - 600_000, source: "同花顺快讯", timeKnown: true,
+          url: "https://news.10jqka.com.cn/20260930/c680413883.shtml" },
+        { id: "2", title: "长光华芯：光芯片长期来看不排除有价格下降的可能",
+          digest: "", at: Date.now() - 1200_000, source: "同花顺快讯", timeKnown: true,
+          url: "https://news.10jqka.com.cn/20260930/c680413486.shtml" },
+        { id: "3", title: "这条没有原文地址，不该出现空链接",
+          digest: "东财某些条目拿不到 url，渲染时直接跳过。", at: Date.now() - 1800_000,
+          source: "东方财富 7x24", timeKnown: true },
+        { id: "4", title: "F5美股盘前涨超24%", digest: "", at: Date.now() - 2400_000,
+          source: "同花顺快讯", timeKnown: true,
+          url: "https://news.10jqka.com.cn/20260930/c680412328.shtml" },
+      ],
+      source: "同花顺快讯",
+      degradedReason: null,
+      updatedAt: Date.now(),
+      loading: false,
+      onRefresh: () => {},
+    },
+    sessionText: "已收盘",
+    isTradingNow: false,
+    benchmarkName: "沪深300",
+    benchmarkReturnPct: null,
+    totalAssets: 0,
+    holdingsValue: 0,
+    replayReady: true,
+    onStartReplay: () => {},
+    onOpenLegend: () => {},
+  }),
+);
+writeFileSync(`${dirOf}/game-setup.html`, page("模拟盘开局页", setupHtml), "utf8");
+console.log(`已写出 ${dirOf}/game-setup.html`);
 
 const settled = settleReplay(state);
 console.log(`已写出 ${out}`);

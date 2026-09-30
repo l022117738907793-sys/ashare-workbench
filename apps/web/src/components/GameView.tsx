@@ -198,11 +198,11 @@ export function GameView(props: GameViewProps) {
 
           {replayReady ? (
             <div className="btn-row">
-              <button type="button" className="btn btn-primary" onClick={() => onStartReplay(cashChoice)}>
-                随机开局（不显示日期）
-              </button>
-              <button type="button" className="btn btn-ghost" onClick={onOpenLegend}>
+              <button type="button" className="btn btn-primary" onClick={onOpenLegend}>
                 传奇模式 · 10 个历史时刻
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={() => onStartReplay(cashChoice)}>
+                随机开局（不显示日期）
               </button>
             </div>
           ) : (
@@ -211,10 +211,11 @@ export function GameView(props: GameViewProps) {
             </Notice>
           )}
 
-          <Notice tone="info">
-            传奇模式（10 个历史关键时刻）还没做。随机模式是它的地基：
-            两者共用同一套推演引擎，区别只在开局位置和要不要给剧情。
-          </Notice>
+          <p className="field-hint">
+            两条路的区别只在开局那一步：<strong>传奇模式</strong>是十个特定的历史时刻，
+            显示完整日期，还会给你一份进场那天看得见的简报；<strong>随机模式</strong>不告诉你这是哪一年哪一天。
+            走起来用的是同一套引擎，结算时才揭晓。
+          </p>
         </Card>
       </div>
     );

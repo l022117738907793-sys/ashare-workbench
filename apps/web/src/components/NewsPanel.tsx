@@ -13,6 +13,12 @@
  *
  * 3. **持仓相关单独一栏**，但只是**关键词匹配**（公司名/代码命中），
  *    不代表这条新闻真的影响该股 —— 所以文案要说"可能相关"而不是"利好"。
+ *
+ * 4. **能给原文链接就给。** 两个源都实测过：同花顺列表自带 url（50/50 条都有，
+ *    且页面标题与快讯标题逐条对得上）；东财列表不带 url，但 `code` 就是文章 id，
+ *    `finance.eastmoney.com/a/<code>.html` 实测 200 且标题一致。
+ *    拿不到 url 的条目不渲染空链接。
+ *    注意：链接**必须放在 button 外面** —— `<a>` 套在 `<button>` 里是非法 HTML。
  */
 import { useMemo, useState } from "react";
 import type { NewsItem } from "@aw/data";
@@ -47,6 +53,16 @@ function NewsRow({ item, related }: { item: NewsItem; related: boolean }) {
         {hasMore && <span className="news-toggle">{open ? "收起" : "展开"}</span>}
       </button>
       {open && hasMore && <p className="news-digest">{item.digest}</p>}
+      {item.url && (
+        <a
+          className="news-link"
+          href={item.url}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          查看原文 ↗
+        </a>
+      )}
     </li>
   );
 }

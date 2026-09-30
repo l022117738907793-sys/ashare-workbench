@@ -176,6 +176,12 @@ export const eastmoneyNewsProvider: NewsProvider = {
           digest: (it.digest || it.summary || "").trim(),
           at: at ?? 0,
           source: "东方财富 7x24",
+          /**
+           * 列表接口本身不带 url，但 `code` 就是文章 id，详情页地址是确定的。
+           * 实测 `https://finance.eastmoney.com/a/<code>.html` 返回 200，
+           * 且页面标题与快讯标题一致 —— 所以这里能拼就拼，拼不出来就不给链接。
+           */
+          url: it.code ? `https://finance.eastmoney.com/a/${it.code}.html` : undefined,
           /** 时间解析失败时标出来，UI 不要显示 "1970-01-01" */
           timeKnown: at !== null,
         };

@@ -1226,6 +1226,18 @@ code {
   color: var(--text-2);
 }
 
+/* 原文链接。刻意做得比标题轻 —— 它是出口，不是内容 */
+.news-link {
+  display: inline-block;
+  margin: -3px 0 9px;
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.news-link:hover {
+  text-decoration: underline;
+}
+
 /* ── 新闻列表限高 ────────────────────────────────────────────
    新闻是长列表，不限高会把页面撑得很长、把交易区挤到屏幕外。
    限高 + 内部滚动：既能看到足够多，又不侵占交易空间。 */
