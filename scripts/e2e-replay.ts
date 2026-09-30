@@ -396,7 +396,102 @@ try {
   check("还原的是同一关（能看到这一关的日期）", restored.includes(level.startDate));
   check("成交记录还在", restored.includes("开盘价") || restored.includes("推演日志"));
 
-  console.log("\n十、控制台没有报错");
+  console.log("\n十、回到模拟盘：你不在的这段时间");
+  // 回到模拟盘页（前面几节都在历史推演里）
+  await evaluate(`window.confirm = () => true; return true;`);
+  await evaluate(CLICK("退出推演"));
+  await sleep(600);
+  await evaluate(CLICK("模拟盘"));
+  await sleep(600);
+
+  /**
+   * 直接塞一份存档：有持仓、有净值点，而且 lastMark 是三天前的。
+   *
+   * 为什么不「先下单再等三天」：这个报告的前提就是时间流逝，
+   * 浏览器里没法等。塞存档是唯一能在一次运行里验到它的办法。
+   * 塞的是 App 真正读取的那个 key（aw.game.v1），走的是真实的解析路径。
+   */
+  const seeded = {
+    version: 1,
+    status: "playing",
+    startedAt: Date.now() - 5 * 86400_000,
+    account: {
+      initialCash: 200_000,
+      cash: 100_000,
+      holdings: [{ code: "600519.SH", name: "贵州茅台", shares: 100, sellable: 100, avgCost: 1000 }],
+      trades: [
+        {
+          id: "e2e-away-1", at: Date.now() - 5 * 86400_000, date: "2026-09-18",
+          code: "600519.SH", name: "贵州茅台", side: "buy",
+          price: 1000, shares: 100, amount: 100_000, fee: 30, typeAtTrade: "趋势观察",
+        },
+      ],
+      seasons: [],
+    },
+    equity: [
+      { date: "2026-09-18", total: 200_000 },
+      { date: "2026-09-22", total: 205_000 },
+    ],
+    lastMark: {
+      at: Date.now() - 3 * 86400_000,
+      cash: 100_000,
+      positions: [{ code: "600519.SH", name: "贵州茅台", shares: 100, price: 900 }],
+    },
+  };
+  await evaluate(
+    `localStorage.setItem("aw.game.v1", ${JSON.stringify(JSON.stringify(seeded))}); return true;`,
+  );
+  await send("Page.enable");
+  await send("Page.reload", { ignoreCache: true });
+  await sleep(1800);
+  await waitFor(`!document.body.innerText.includes("正在加载")`, "加载完成");
+  await evaluate(CLICK("模拟盘"));
+  await sleep(800);
+
+  const awayShown = await waitFor(
+    `document.body.innerText.includes("你不在的这段时间")`,
+    "离开报告出现",
+  );
+  check("三天前离开的持仓会报「你不在的这段时间」", awayShown);
+  const awayText = await evaluate<string>(`return document.body.innerText;`);
+  check("显示离开时长", /离开\s*3\s*天/.test(awayText), awayText.slice(0, 120));
+  check("逐条列出持仓的前后价格（900 → 现值）", awayText.includes("900"));
+  check("说清这是两次估值的差", awayText.includes("两次估值的差"));
+  check("点掉之后卡片消失", (await evaluate<string>(CLICK("知道了"))) === "OK");
+  await sleep(400);
+  check(
+    "点掉之后确实不再显示",
+    !(await evaluate<boolean>(`return document.body.innerText.includes("你不在的这段时间");`)),
+  );
+
+  console.log("\n十一、结算复盘报告");
+  const settleClick = await evaluate<string>(CLICK("结算本季"));
+  check("点得到「结算本季」", settleClick === "OK", settleClick);
+  await sleep(500);
+  const reviewShown = await waitFor(
+    `document.body.innerText.includes("别把这张表当成评分")`,
+    "复盘出现",
+  );
+  check("结算后出现复盘报告", reviewShown);
+  const reviewText = await evaluate<string>(`return document.body.innerText;`);
+  check("逐笔列出当时的分类", reviewText.includes("当时「趋势观察」"));
+  check("标出方向和分类对不对得上", reviewText.includes("与当时分类同向"));
+  check("成交后涨跌用的是结算时的价", reviewText.includes("成交后"));
+  check(
+    "必须写明引擎没有测出优势（否则会被当成「跟引擎一致才是玩对了」）",
+    reviewText.includes("没有测出优势"),
+  );
+  check("写明不是对错", reviewText.includes("不是对错"));
+  check(
+    "复盘里不出现褒贬词",
+    !["判断正确", "判断错误", "英明", "失误", "应该买", "应该卖"].some((w) => reviewText.includes(w)),
+  );
+  const reviewMeta = await evaluate<string>(
+    `return JSON.stringify([...document.querySelectorAll(".review-row")].length);`,
+  );
+  check("复盘里至少列出那一笔成交", Number(JSON.parse(reviewMeta)) >= 1, reviewMeta);
+
+  console.log("\n十二、控制台没有报错");
   const errs = await evaluate<string[]>(`
     return (window.__e2eErrors || []);
   `);

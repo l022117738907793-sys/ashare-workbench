@@ -1,11 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  fetchLatestNews,
-  matchNewsToStock,
-  tonghuashunNewsProvider,
-  type NewsItem,
-  type NewsProvider,
-} from "./news";
+import { dedupeNews, fetchLatestNews, matchNewsToStock, tonghuashunNewsProvider, type NewsItem, type NewsProvider } from "./news";
+
+/**
+ * 把 globalThis.fetch 换成固定返回，供所有 describe 复用。
+ *
+ * 提到顶层是因为「新闻获取链」和「新闻去重」两组都要用它 ——
+ * 原先定义在 describe 内部，外面那组够不到（曾经因此红过一次）。
+ */
+function withFetch(payload: unknown, fn: () => Promise<void>): Promise<void> {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    ({ ok: true, status: 200, json: async () => payload }) as Response) as typeof fetch;
+  return fn().finally(() => {
+    globalThis.fetch = original;
+  });
+}
 
 const item = (over: Partial<NewsItem> = {}): NewsItem => ({
   id: "n1",
@@ -210,15 +219,6 @@ describe("同花顺快讯 provider（离线，模拟其真实响应格式）", (
     },
   };
 
-  function withFetch(payload: unknown, fn: () => Promise<void>): Promise<void> {
-    const original = globalThis.fetch;
-    globalThis.fetch = (async () =>
-      ({ ok: true, status: 200, json: async () => payload }) as Response) as typeof fetch;
-    return fn().finally(() => {
-      globalThis.fetch = original;
-    });
-  }
-
   it("接受字符串形式的成功码 \"200\"", async () => {
     await withFetch(realShape, async () => {
       const items = await tonghuashunNewsProvider.fetchLatest(5);
@@ -272,5 +272,78 @@ describe("同花顺快讯 provider（离线，模拟其真实响应格式）", (
         expect(items[0].title).toBe("有标题");
       },
     );
+  });
+});
+
+describe("新闻去重", () => {
+  const mk = (id: string, title: string, at = 1_700_000_000_000) => ({
+    id,
+    title,
+    digest: "",
+    at,
+    source: "同花顺快讯",
+    timeKnown: true,
+  });
+
+  /**
+   * 先量后改：拿 1000 条真实快讯（20 页 × 50 条）数过，
+   * 标题完全相同的只有 2 组 4 条，同一 id 出现 0 次。
+   * 所以这些用例覆盖的是那 0.2%，不是「刷屏」。
+   */
+  it("标题一样的两条只留一条", () => {
+    const out = dedupeNews([mk("1", "欧洲主要股指开盘多数上涨"), mk("2", "欧洲主要股指开盘多数上涨")]);
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe("1"); // 保留先出现的（items 是新→旧）
+  });
+
+  it("只差空白和标点的标题算同一条", () => {
+    const out = dedupeNews([
+      mk("1", "央行：今日开展 5000 亿元逆回购操作"),
+      mk("2", "央行今日开展5000亿元逆回购操作。"),
+    ]);
+    expect(out).toHaveLength(1);
+  });
+
+  it("同一个 id 出现两次只留一条", () => {
+    const out = dedupeNews([mk("9", "标题甲"), mk("9", "标题完全不同的乙")]);
+    expect(out).toHaveLength(1);
+  });
+
+  /**
+   * 这条是**反例**：刻意不做的功能。
+   *
+   * 实测 1000 条里只有 1 对这种「一条包含另一条」的形状，
+   * 而且那一对是两条不同的新闻。合并等于凭空删掉一条真新闻。
+   */
+  it("标题互相包含但确实是两条新闻的，都要留下", () => {
+    const out = dedupeNews([
+      mk("1", "中国贸促会2026年APEC工商领导人峰会筹备工作进展顺利"),
+      mk("2", "2026年APEC工商领导人峰会筹备工作进展顺利"),
+    ]);
+    expect(out).toHaveLength(2);
+  });
+
+  it("标题是空的条目不参与标题去重（否则会被并成一条）", () => {
+    const out = dedupeNews([mk("1", ""), mk("2", "")]);
+    expect(out).toHaveLength(2);
+  });
+
+  it("不重复的列表原样返回，顺序不变", () => {
+    const items = [mk("1", "甲"), mk("2", "乙"), mk("3", "丙")];
+    expect(dedupeNews(items).map((i) => i.id)).toEqual(["1", "2", "3"]);
+  });
+
+  it("fetchLatestNews 出来的列表已经去过重，且张数够", async () => {
+    const list = [
+      { id: "1", title: "重复的标题", digest: "" },
+      { id: "2", title: "重复的标题", digest: "" },
+      { id: "3", title: "另一条", digest: "" },
+      { id: "4", title: "第三条", digest: "" },
+    ];
+    await withFetch({ code: "200", data: { list } }, async () => {
+      const r = await fetchLatestNews(3);
+      expect(r.items).toHaveLength(3); // 去掉一条重复后仍然够 3 条
+      expect(new Set(r.items.map((i) => i.title)).size).toBe(3);
+    });
   });
 });

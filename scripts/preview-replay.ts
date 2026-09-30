@@ -13,6 +13,10 @@ import { join } from "node:path";
 import { ReplayView } from "../apps/web/src/components/ReplayView";
 import { LevelDetail, LevelPicker } from "../apps/web/src/components/LevelPicker";
 import { LEVELS } from "../packages/game/src/levels";
+import { AwayCard } from "../apps/web/src/components/AwayCard";
+import { ReviewBlock } from "../apps/web/src/components/ReviewBlock";
+import { awayReport } from "../apps/web/src/lib/awayReport";
+import { reviewReport } from "../packages/game/src/review";
 import { CASH_OPTIONS, DEFAULT_INITIAL_CASH } from "../apps/web/src/lib/game";
 import { placeOrder, advanceDay, settleReplay, pendingFor } from "../packages/game/src/replay";
 import { startReplay } from "../apps/web/src/lib/replay";
@@ -122,6 +126,68 @@ const dirOf = out.slice(0, out.lastIndexOf("/"));
 writeFileSync(`${dirOf}/replay-levels.html`, page("关卡列表预览", listHtml), "utf8");
 writeFileSync(`${dirOf}/replay-brief.html`, page("开局简报预览", briefHtml), "utf8");
 console.log(`已写出 ${dirOf}/replay-levels.html 与 replay-brief.html`);
+
+// ── 离线持仓估值 + 结算复盘：这两块平时只有「离开一阵」和「点结算」才看得到，
+//    预览里直接喂构造好的数据，为的是用眼睛看一眼排版。
+const DAY = 86400_000;
+const thenMark = {
+  at: Date.now() - 3 * DAY,
+  cash: 100_000,
+  positions: [
+    { code: "600519.SH", name: "贵州茅台", shares: 100, price: 900 },
+    { code: "000725.SZ", name: "京东方A", shares: 2000, price: 4.1 },
+    { code: "601988.SH", name: "中国银行", shares: 5000, price: 5.5 },
+  ],
+};
+const awayHtml = renderToStaticMarkup(
+  createElement(AwayCard, {
+    report: awayReport(thenMark, {
+      at: Date.now(),
+      cash: 100_000,
+      positions: [
+        { code: "600519.SH", name: "贵州茅台", shares: 100, price: 1235.58 },
+        { code: "000725.SZ", name: "京东方A", shares: 2000, price: 3.92 },
+        { code: "601988.SH", name: "中国银行", shares: 5000, price: 6.01 },
+      ],
+    }, [
+      { id: "a", at: Date.now() - 2 * DAY, date: "2026-09-27", code: "600519.SH", name: "贵州茅台",
+        side: "buy", price: 1180, shares: 100, amount: 118_000, fee: 30, typeAtTrade: "趋势观察" },
+    ]),
+    onDismiss: () => {},
+  }),
+);
+
+const reviewHtml = renderToStaticMarkup(
+  createElement(ReviewBlock, {
+    report: reviewReport({
+      account: {
+        initialCash: 200_000,
+        cash: 40_000,
+        holdings: [
+          { code: "600519.SH", name: "贵州茅台", shares: 100, sellable: 100, avgCost: 1180 },
+          { code: "000725.SZ", name: "京东方A", shares: 2000, sellable: 2000, avgCost: 4.3 },
+        ],
+        trades: [
+          { id: "a", at: Date.now() - 6 * DAY, date: "2026-09-18", code: "600519.SH", name: "贵州茅台",
+            side: "buy", price: 1000, shares: 100, amount: 100_000, fee: 30, typeAtTrade: "趋势观察" },
+          { id: "b", at: Date.now() - 4 * DAY, date: "2026-09-22", code: "000725.SZ", name: "京东方A",
+            side: "buy", price: 4.3, shares: 2000, amount: 8_600, fee: 5, typeAtTrade: "回调观察" },
+          { id: "c", at: Date.now() - 2 * DAY, date: "2026-09-25", code: "601988.SH", name: "中国银行",
+            side: "sell", price: 5.8, shares: 3000, amount: 17_400, fee: 22, typeAtTrade: "高位观察" },
+          { id: "d", at: Date.now() - 1 * DAY, date: "2026-09-26", code: "600000.SH", name: "浦发银行",
+            side: "buy", price: 9.1, shares: 500, amount: 4_550, fee: 5 },
+        ],
+        seasons: [],
+      },
+      finalPrices: { "600519.SH": 1235.58, "000725.SZ": 3.92, "601988.SH": 6.01, "600000.SH": 9.02 },
+      season: "2026-09",
+      asOf: "2026-09-29",
+    }),
+  }),
+);
+writeFileSync(`${dirOf}/game-away.html`, page("你不在的这段时间", awayHtml), "utf8");
+writeFileSync(`${dirOf}/game-review.html`, page("结算复盘报告", reviewHtml), "utf8");
+console.log(`已写出 ${dirOf}/game-away.html 与 game-review.html`);
 
 const settled = settleReplay(state);
 console.log(`已写出 ${out}`);

@@ -1364,3 +1364,140 @@ code {
   font-size: 13.5px;
   line-height: 1.65;
 }
+
+/* 「你不在的这段时间」：持仓逐条对比 */
+.away-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+}
+
+.away-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.away-row:last-child {
+  border-bottom: none;
+}
+
+.away-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.away-code {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.away-nums {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 复盘报告 */
+.review-block {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.review-h {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.review-sub {
+  margin: 14px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.review-lead {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.review-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+}
+
+.review-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.review-row:last-child {
+  border-bottom: none;
+}
+
+.review-when {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.review-what {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.review-why {
+  flex: none;
+  color: var(--text-2);
+}
+
+.review-after {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tag-align-aligned,
+.tag-align-against,
+.tag-align-unknown {
+  margin-left: 6px;
+}
+
+.tag-align-aligned {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.tag-align-against {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.tag-align-unknown {
+  background: var(--border);
+  color: var(--muted);
+}
+
+.review-caveats {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.review-caveats li {
+  margin-bottom: 4px;
+}

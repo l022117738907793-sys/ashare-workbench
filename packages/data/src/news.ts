@@ -55,6 +55,14 @@ function parseBeijingTime(s: string | undefined): number | null {
  * 注意：返回字段里有 `nature` / `color`（疑似情绪标记）。
  * **本项目不使用它们** —— 新闻只作原文展示，不标利好利空。
  */
+/**
+ * 每个 provider 多要几条，留给上层的去重。
+ *
+ * 实测重复率只有 0.2%，所以 10 条余量已经远超需要 —— 它主要防的是
+ * 「碰巧撞上一条重复，列表就少一条」这种偶发，不是常态。
+ */
+const DEDUPE_HEADROOM = 10;
+
 const THS_PUSH =
   "https://news.10jqka.com.cn/tapp/news/push/stock/?page=1&tag=&track=website&pagesize=";
 
@@ -91,7 +99,10 @@ export const tonghuashunNewsProvider: NewsProvider = {
   },
 
   async fetchLatest(limit = 30): Promise<NewsItem[]> {
-    const url = `${THS_PUSH}${Math.max(1, Math.min(50, limit))}`;
+    // 多要一点：上层 fetchLatestNews 会先去重再裁到 limit，
+    // 正好要 limit 条的话，去掉一条重复就少一条
+    const want = limit + DEDUPE_HEADROOM;
+    const url = `${THS_PUSH}${Math.max(1, Math.min(50, want))}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`同花顺快讯 HTTP ${res.status}`);
 
@@ -131,7 +142,7 @@ export const tonghuashunNewsProvider: NewsProvider = {
       })
       .filter((x): x is NewsItem => x !== null)
       .sort((a, b) => b.at - a.at)
-      .slice(0, limit);
+      .slice(0, want);
   },
 };
 
@@ -143,7 +154,8 @@ export const eastmoneyNewsProvider: NewsProvider = {
   },
 
   async fetchLatest(limit = 30): Promise<NewsItem[]> {
-    const url = `${EM_724}&pageSize=${Math.max(1, Math.min(100, limit))}`;
+    const want = limit + DEDUPE_HEADROOM;
+    const url = `${EM_724}&pageSize=${Math.max(1, Math.min(100, want))}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`东财快讯 HTTP ${res.status}`);
 
@@ -170,7 +182,7 @@ export const eastmoneyNewsProvider: NewsProvider = {
       })
       .filter((x): x is NewsItem => x !== null)
       .sort((a, b) => b.at - a.at)
-      .slice(0, limit);
+      .slice(0, want);
   },
 };
 
@@ -189,6 +201,48 @@ export interface FetchNewsResult {
   source: string | null;
   /** 降级或失败原因；成功时为 null */
   degradedReason: string | null;
+}
+
+/**
+ * 标题归一化：去掉空白和标点，只留字和数字。
+ *
+ * 同一家媒体同一条稿子两次推送，标题不会差在标点上；差在标点上的那两条
+ * 往往是不同版本，不该合并。所以这里只抹掉那些**对意思没有贡献**的字符。
+ */
+function normTitle(title: string): string {
+  return title.replace(/[\s\u3000]/g, "").replace(/[，。！？；：、""''（）()【】\[\]·—…\-–,.!?;:'"]/g, "");
+}
+
+/**
+ * 去掉重复的新闻，保留每组里**最新的那一条**（`items` 约定为新→旧）。
+ *
+ * 先量后改：拿 1000 条真实快讯（20 页 × 50 条）数过 ——
+ * - 标题完全相同的：**2 组 4 条（0.2%）**
+ * - 同一 `id` 出现两次的：**0 次**
+ *
+ * 所以这个函数很小。它治的不是「刷屏」（刷屏并不存在），是那 0.2%，
+ * 以及让下游（面板、审计脚本、将来的任何消费者）不用各自再防一遍。
+ *
+ * **刻意不做「一条标题包含另一条就算重复」。** 实测 1000 条里只有 1 对这种形状，
+ * 而且那一对是两条不同的新闻：
+ *   「中国贸促会2026年APEC工商领导人峰会筹备工作进展顺利」
+ *   「2026年APEC工商领导人峰会筹备工作进展顺利」
+ * 合并它们等于凭空删掉一条真新闻 —— 风险远大于收益。
+ */
+export function dedupeNews(items: NewsItem[]): NewsItem[] {
+  const seenIds = new Set<string>();
+  const seenTitles = new Set<string>();
+  const out: NewsItem[] = [];
+  for (const it of items) {
+    const key = normTitle(it.title);
+    if (it.id && seenIds.has(it.id)) continue;
+    // 标题为空的不参与标题去重（否则所有空标题会被并成一条）
+    if (key && seenTitles.has(key)) continue;
+    if (it.id) seenIds.add(it.id);
+    if (key) seenTitles.add(key);
+    out.push(it);
+  }
+  return out;
 }
 
 /**
@@ -213,7 +267,9 @@ export async function fetchLatestNews(
         continue;
       }
       return {
-        items,
+        // 去重放在这里，所有消费者自动受益。
+        // provider 已经按 limit + DEDUPE_HEADROOM 多要过，所以裁完通常还是 limit 条
+        items: dedupeNews(items).slice(0, limit),
         source: p.name,
         degradedReason: failures.length > 0 ? `已降级到 ${p.name}：${failures.join("；")}` : null,
       };

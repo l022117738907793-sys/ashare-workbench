@@ -4,3 +4,4 @@ export * from "./settlement";
 export * from "./rules";
 export * from "./replay";
 export * from "./levels";
+export * from "./review";

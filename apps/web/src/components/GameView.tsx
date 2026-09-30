@@ -11,7 +11,7 @@
  *   3. 引擎分类只作客观依据展示，不转化为操作建议。
  */
 import { useMemo, useState } from "react";
-import { LOT_SIZE, type SeasonResult, type Side } from "@aw/game";
+import { LOT_SIZE, reviewReport, type ReviewReport, type SeasonResult, type Side } from "@aw/game";
 import type { StockData, StockResult } from "@aw/core";
 import { sourceLabel, type Quote } from "@aw/data";
 import {
@@ -25,6 +25,9 @@ import {
 import { fmtNum, fmtPct } from "../lib/helpers";
 import { Card, EmptyHint, KV, Notice, StateBadge } from "./common";
 import { NewsPanel } from "./NewsPanel";
+import { AwayCard } from "./AwayCard";
+import { ReviewBlock } from "./ReviewBlock";
+import type { AwayReport } from "../lib/awayReport";
 import type { LiveNewsState } from "../lib/useLiveNews";
 
 export interface GameViewProps {
@@ -56,6 +59,9 @@ export interface GameViewProps {
   onStartReplay: (initialCash: number) => void;
   /** 打开传奇模式（模式 2）的关卡列表 */
   onOpenLegend: () => void;
+  /** 「你不在的这段时间」报告。没有值得说的事时为 null */
+  away?: AwayReport | null;
+  onDismissAway?: () => void;
 }
 
 function Metric({ k, v, tone }: { k: string; v: string; tone?: "good" | "bad" | "muted" }) {
@@ -73,6 +79,7 @@ export function GameView(props: GameViewProps) {
     onOrder, onStart, onReset, onSettle, onOpenRules, news, sessionText, isTradingNow,
     benchmarkName, benchmarkReturnPct, totalAssets, holdingsValue,
     replayReady, onStartReplay, onOpenLegend,
+    away = null, onDismissAway,
   } = props;
 
   const { account, equity } = state;
@@ -82,6 +89,8 @@ export function GameView(props: GameViewProps) {
   const [sharesText, setSharesText] = useState("100");
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
   const [lastSeason, setLastSeason] = useState<SeasonResult | null>(null);
+  /** 结算后同时生成复盘报告；重置或重新开局时一起清掉 */
+  const [lastReview, setLastReview] = useState<ReviewReport | null>(null);
 
   const stockByCode = useMemo(() => new Map(stocks.map((s) => [s.code, s])), [stocks]);
   const picked = code ? stockByCode.get(code) : undefined;
@@ -229,6 +238,7 @@ export function GameView(props: GameViewProps) {
               if (confirm("结束本局并回到开局界面？当前持仓与成交记录将清空，不可恢复。")) {
                 onReset();
                 setLastSeason(null);
+                setLastReview(null);
                 setFeedback(null);
               }
             }}
@@ -251,6 +261,8 @@ export function GameView(props: GameViewProps) {
           <Metric k="持仓只数" v={`${account.holdings.length} 只`} />
         </div>
       </Card>
+
+      {away && onDismissAway && <AwayCard report={away} onDismiss={onDismissAway} />}
 
       <NewsPanel
         items={news.items}
@@ -453,7 +465,16 @@ export function GameView(props: GameViewProps) {
             onClick={() => {
               const r = onSettle();
               setLastSeason(r);
-              setFeedback(r === null ? { ok: false, msg: "净值点不足，无法结算。" } : null);
+              if (r === null) {
+                setLastReview(null);
+                setFeedback({ ok: false, msg: "净值点不足，无法结算。" });
+                return;
+              }
+              setFeedback(null);
+              // 复盘和结算共用同一份价格表，否则「成交后涨跌」会和上面的期末总资产对不上
+              const finalPrices: Record<string, number | null> = {};
+              for (const [code, price] of prices) finalPrices[code] = price;
+              setLastReview(reviewReport({ account, finalPrices, season: r.season, asOf: r.endDate }));
             }}
           >
             结算本季
@@ -465,6 +486,7 @@ export function GameView(props: GameViewProps) {
               if (confirm("确定重置模拟盘？所有持仓与成交记录将清空，不可恢复。")) {
                 onReset();
                 setLastSeason(null);
+                setLastReview(null);
                 setFeedback(null);
               }
             }}
@@ -488,6 +510,8 @@ export function GameView(props: GameViewProps) {
             <Metric k="成交笔数" v={`${lastSeason.tradeCount} 笔`} />
           </div>
         )}
+
+        {lastReview && <ReviewBlock report={lastReview} />}
 
         {account.seasons.length > 0 && (
           <ul className="stock-list">

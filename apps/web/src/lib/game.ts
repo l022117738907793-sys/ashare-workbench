@@ -10,6 +10,7 @@ import {
   type EquityPoint,
   type Trade,
 } from "@aw/game";
+import type { MarkSnapshot } from "./awayReport";
 
 export const LS_GAME = "aw.game.v1";
 export const GAME_STORE_VERSION = 1;
@@ -46,6 +47,13 @@ export interface GameState {
   account: Account;
   /** 净值曲线，用于结算时算收益与最大回撤 */
   equity: EquityPoint[];
+  /**
+   * 上一次「还在看盘」时的估值快照，用来回答「你不在的时候持仓怎么了」。
+   *
+   * 只在页面**可见**时更新，所以人一走它就冻住 —— 回来时拿它和现在比，
+   * 差出来的就是这段时间的变化。老存档没有这个字段，读成 null 即可。
+   */
+  lastMark: MarkSnapshot | null;
 }
 
 /** 空账户：未开局时用它占位，避免到处判空 */
@@ -58,6 +66,7 @@ export function defaultGameState(): GameState {
     version: GAME_STORE_VERSION,
     status: "idle",
     startedAt: null,
+    lastMark: null,
     account: emptyAccount(),
     equity: [],
   };
@@ -75,6 +84,7 @@ export function startGame(initialCash: number, at: number): GameState {
     startedAt: at,
     account: createAccount(cash),
     equity: [],
+    lastMark: null,
   };
 }
 
@@ -124,6 +134,27 @@ export function parseGameState(raw: string | null | undefined): GameState {
     const status: GameStatus = o.status === "idle" ? "idle" : "playing";
     const startedAt = typeof o.startedAt === "number" ? o.startedAt : null;
 
+    // lastMark 是「锦上添花」的数据：坏了就当没有，绝不能因此把整个账户判成损坏
+    const mark = o.lastMark as Partial<MarkSnapshot> | null | undefined;
+    const lastMark: MarkSnapshot | null =
+      mark && typeof mark === "object" && Number.isFinite(mark.at) && Array.isArray(mark.positions)
+        ? {
+            at: mark.at as number,
+            cash: Number.isFinite(mark.cash) ? (mark.cash as number) : 0,
+            positions: mark.positions
+              .filter(
+                (p) =>
+                  !!p &&
+                  typeof p.code === "string" &&
+                  Number.isFinite(p.shares) &&
+                  p.shares > 0 &&
+                  Number.isFinite(p.price) &&
+                  p.price > 0,
+              )
+              .map((p) => ({ code: p.code, name: p.name || p.code, shares: p.shares, price: p.price })),
+          }
+        : null;
+
     return {
       version: GAME_STORE_VERSION,
       status,
@@ -136,6 +167,7 @@ export function parseGameState(raw: string | null | undefined): GameState {
         seasons: Array.isArray(a.seasons) ? a.seasons : [],
       },
       equity,
+      lastMark,
     };
   } catch {
     return defaultGameState();

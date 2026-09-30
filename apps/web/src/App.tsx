@@ -53,6 +53,14 @@ import { SettingsView } from "./components/SettingsView";
 import { WorkbenchView } from "./components/WorkbenchView";
 import { ReplayView } from "./components/ReplayView";
 import { LevelPicker } from "./components/LevelPicker";
+import {
+  awayReport,
+  humanAway,
+  makeMark,
+  worthReporting,
+  type AwayReport,
+  type MarkSnapshot,
+} from "./lib/awayReport";
 import { Notice } from "./components/common";
 import {
   advanceDays,
@@ -156,6 +164,19 @@ export default function App() {
   // ── 模拟盘账户（纯本地，无后端）──────────────────────────────
   const [game, setGame] = useState<GameState>(() => parseGameState(readLS(LS_GAME)));
   useEffect(() => writeLS(LS_GAME, serializeGameState(game)), [game]);
+
+  /**
+   * 「你不在的这段时间」。
+   *
+   * `awayFromRef` 取的是**进页面那一刻**存档里的旧快照 —— 下面那个 effect 马上会把
+   * lastMark 覆盖成「现在」，所以必须先摘下来，否则永远只能比出「离开 0 分钟」。
+   */
+  const awayFromRef = useRef<MarkSnapshot | null>(game.lastMark);
+  const [away, setAway] = useState<AwayReport | null>(null);
+  /** 每次进页面只报一次；也是「可以先刷新 lastMark 了」的闸门 */
+  const awayChecked = useRef(false);
+  /** lastMark 的刷新间隔。太密没有意义，也会一直写 localStorage */
+  const MARK_INTERVAL_MS = 60_000;
 
   // ── 历史推演（模式 3：随机开局）─────────────────────────────
   // 存档里只有进度，行情每次从快照还原 —— 六十万个数字塞不进 localStorage。
@@ -503,6 +524,82 @@ export default function App() {
     () => calcTotalAssets(game.account, gamePricesObj),
     [game.account, gamePricesObj],
   );
+
+  /**
+   * 回来时对比一次：进页面第一次拿到行情后，拿旧快照和现在比。
+   *
+   * 闸门 `awayChecked` 卡在三件事上：① 只跑一次；② 等第一次行情**落定**
+   * （成功或失败都算落定，失败时用快照收盘价，不能永远不报）；
+   * ③ 跑完之后才允许下面的 effect 覆盖 lastMark，保证比的是「离开时」而不是「刚刚」。
+   */
+  useEffect(() => {
+    if (awayChecked.current) return;
+    if (!snapshot || game.status !== "playing") return;
+    const settled = live.updatedAt !== null || live.error !== null;
+    if (!settled) return;
+
+    awayChecked.current = true;
+    const then = awayFromRef.current;
+    if (!then) return;
+
+    const positions = game.account.holdings.map((h) => ({
+      code: h.code,
+      name: h.name,
+      shares: h.shares,
+      price: gamePricesObj[h.code] ?? null,
+    }));
+    const r = awayReport(then, { at: Date.now(), cash: game.account.cash, positions }, game.account.trades);
+    if (worthReporting(r)) setAway(r);
+  }, [snapshot, game, gamePricesObj, live.updatedAt, live.error]);
+
+  /**
+   * 页面可见时不断刷新 lastMark —— 人一走（切标签页/关掉）它就冻住，
+   * 这正是「你不在的这段时间」的起点。
+   */
+  useEffect(() => {
+    if (!awayChecked.current) return;
+    if (game.status !== "playing") return;
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    const at = Date.now();
+    const prev = game.lastMark;
+    if (prev && at - prev.at < MARK_INTERVAL_MS) return;
+    setGame((g) => ({
+      ...g,
+      lastMark: makeMark(
+        at,
+        g.account.cash,
+        g.account.holdings.map((h) => ({
+          code: h.code,
+          name: h.name,
+          shares: h.shares,
+          price: gamePricesObj[h.code] ?? null,
+        })),
+      ),
+    }));
+  }, [game.status, game.lastMark, game.account, gamePricesObj, MARK_INTERVAL_MS]);
+
+  /** 切回页面时立刻重新打一个点，避免「刚回来就被算成离开」 */
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== "visible" || game.status !== "playing") return;
+      const at = Date.now();
+      setGame((g) => ({
+        ...g,
+        lastMark: makeMark(
+          at,
+          g.account.cash,
+          g.account.holdings.map((h) => ({
+            code: h.code,
+            name: h.name,
+            shares: h.shares,
+            price: gamePricesObj[h.code] ?? null,
+          })),
+        ),
+      }));
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [game.status, gamePricesObj]);
 
   /** 每只股票最近一次建仓日，用于 T+1 解锁 */
   const gameLastBuy = useMemo(() => lastBuyDates(game.account.trades), [game.account.trades]);
@@ -924,6 +1021,8 @@ export default function App() {
             totalAssets={gameTotalAssets}
             holdingsValue={gameHoldingsValue}
             replayReady={snapshot ? replayAvailable(snapshot) : false}
+            away={away}
+            onDismissAway={() => setAway(null)}
             onStartReplay={handleStartReplay}
             onOpenLegend={() => setLegendOpen(true)}
           />

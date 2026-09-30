@@ -38,6 +38,9 @@ import { HistoryView } from "./components/HistoryView";
 import { SettingsView } from "./components/SettingsView";
 import { WorkbenchView } from "./components/WorkbenchView";
 import { CASH_OPTIONS, defaultGameState, GAME_DISCLAIMER, startGame, type GameState } from "./lib/game";
+import { awayReport, makeMark } from "./lib/awayReport";
+import { REVIEW_CAVEATS, type ReviewReport } from "@aw/game";
+import { ReviewBlock } from "./components/ReviewBlock";
 import { SIGNAL_BACKTEST_CAVEAT } from "./lib/helpers";
 import { SignalBadge, SignalCard, SignalSummary } from "./components/SignalCard";
 import { ReplayView } from "./components/ReplayView";
@@ -318,6 +321,16 @@ describe("模拟盘页渲染", () => {
    *   2. 不出现任何引导性/建议性文案；
    *   3. 取不到行情时显示"无行情"而不是编造盈亏。
    */
+  /**
+   * 复盘块单独渲染。
+   *
+   * 它挂在「结算本季」按钮的回调里（点击才 setLastReview），
+   * `renderToStaticMarkup` 点不了按钮，所以像 LevelDetail 那样直接渲染组件本身。
+   */
+  function renderReview(report: ReviewReport): string {
+    return renderToStaticMarkup(createElement(ReviewBlock, { report }));
+  }
+
   function renderGame(over: Partial<Parameters<typeof GameView>[0]> = {}): string {
     // 渲染测试需要一个「进行中」的状态
     const base = startGame(1_000_000, 0);
@@ -386,6 +399,204 @@ describe("模拟盘页渲染", () => {
     const html = renderGame();
     expect(html).toContain(GAME_DISCLAIMER);
     expect(html).toContain("不构成投资建议");
+  });
+
+  describe("结算复盘报告", () => {
+    const report = (over: Partial<ReviewReport> = {}): ReviewReport => ({
+      season: "2026-09",
+      asOf: "2026-09-23",
+      trades: [
+        {
+          id: "t1", date: "2026-09-23", code: "600519.SH", name: "贵州茅台",
+          side: "buy", price: 100, shares: 200, typeAtTrade: "趋势观察",
+          laterPct: 10, aligned: "aligned",
+        },
+        {
+          id: "t2", date: "2026-09-23", code: "000001.SZ", name: "平安银行",
+          side: "buy", price: 10, shares: 100, typeAtTrade: "高位观察",
+          laterPct: -5, aligned: "against",
+        },
+      ],
+      counts: { aligned: 1, against: 1, unknown: 0 },
+      alignedAvgPct: 10,
+      againstAvgPct: -5,
+      holdings: [
+        { code: "600519.SH", name: "贵州茅台", shares: 200, avgCost: 100, pnlPct: 10, traded: true },
+        { code: "000001.SZ", name: "平安银行", shares: 100, avgCost: 12, pnlPct: -16.67, traded: false },
+      ],
+      finalAssets: 1_012_000,
+      caveats: REVIEW_CAVEATS,
+      ...over,
+    });
+
+    it("结算前整块不出现 —— 它只在点过「结算本季」之后渲染", () => {
+      // GameView 里 lastReview 初始为 null，所以静态渲染的页面里没有复盘
+      expect(renderGame()).not.toContain("别把这张表当成评分");
+    });
+
+    it("逐笔列出日期、方向、成交价、当时分类与成交后涨跌", () => {
+      const html = renderReview(report());
+      expect(html).toContain("贵州茅台");
+      expect(html).toContain("2026-09-23 买入");
+      expect(html).toContain("当时「趋势观察」");
+      expect(html).toContain("与当时分类同向");
+      expect(html).toContain("与当时分类反向");
+      expect(html).toContain("10%");
+      expect(html).toContain("-5%");
+    });
+
+    it("两组平均各自带笔数", () => {
+      const html = renderReview(report());
+      expect(html).toContain("同向的那几笔");
+      expect(html).toContain("1 笔 · 之后平均 10%");
+      expect(html).toContain("1 笔 · 之后平均 -5%");
+    });
+
+    it("老记录没有当时分类时说「记录里没有」，不猜", () => {
+      const html = renderReview(
+        report({
+          trades: [
+            {
+              id: "old", date: "2026-09-01", code: "600519.SH", name: "贵州茅台",
+              side: "buy", price: 100, shares: 100, laterPct: null, aligned: "unknown",
+            },
+          ],
+          counts: { aligned: 0, against: 0, unknown: 1 },
+          alignedAvgPct: null,
+          againstAvgPct: null,
+        }),
+      );
+      expect(html).toContain("当时分类未记录");
+      expect(html).toContain("记录里没有分类");
+      expect(html).toContain("没法回答「有没有按依据做」");
+      // 取不到价时说「—」，不是编一个 0%
+      expect(html).toContain("—");
+    });
+
+    it("那几条提醒一条都不能少，尤其是「引擎没有测出优势」", () => {
+      const html = renderReview(report());
+      expect(html).toContain("没有测出优势");
+      expect(html).toContain("不是对错");
+      expect(html).toContain("别把这张表当成评分");
+      expect(html).toContain("没有因果关系");
+    });
+
+    it("持仓区分动过与没动过", () => {
+      const html = renderReview(report());
+      expect(html).toContain("本季动过");
+      expect(html).toContain("本季没动过");
+    });
+
+    it("复盘里不许出现褒贬与买卖建议", () => {
+      const html = renderReview(report());
+      for (const bad of [
+        "判断正确", "判断错误", "英明", "失误", "应该买", "应该卖",
+        "建议买入", "建议卖出", "必涨", "必跌", "稳赚", "目标价", "抄底",
+      ]) {
+        expect(html, `不该出现「${bad}」`).not.toContain(bad);
+      }
+    });
+  });
+
+  describe("你不在的这段时间", () => {
+    const HOUR = 3600_000;
+    const T0 = 1_700_000_000_000;
+
+    /** 走前记了一笔：茅台 100 元 */
+    const mark = makeMark(T0, 900_000, [
+      { code: "600519.SH", name: "贵州茅台", shares: 200, price: 100 },
+    ]);
+    const now = (price: number) =>
+      awayReport(
+        mark,
+        {
+          at: T0 + 20 * HOUR,
+          cash: 900_000,
+          positions: [{ code: "600519.SH", name: "贵州茅台", shares: 200, price }],
+        },
+        [],
+      );
+
+    it("没有报告时整张卡片都不出现", () => {
+      expect(renderGame()).not.toContain("你不在的这段时间");
+    });
+
+    it("有报告时显示时长、逐条对比与合计", () => {
+      const html = renderGame({ away: now(110), onDismissAway: () => {} });
+      expect(html).toContain("你不在的这段时间");
+      expect(html).toContain("离开 20 小时 0 分钟");
+      expect(html).toContain("贵州茅台");
+      // 金额格式沿用全站一致的 fmtNum（不带千分位）—— 单独在这里加分隔符
+      // 会让同一个数字在「账户总览」和这张卡片里长得不一样
+      expect(html).toContain("100 → 110");
+      expect(html).toContain("+2000");
+    });
+
+    it("下跌显示负数，不取绝对值", () => {
+      const html = renderGame({ away: now(90), onDismissAway: () => {} });
+      expect(html).toContain("-2000");
+      expect(html).toContain("-10%");
+    });
+
+    it("价格没动时明说「可能只是休市」，不渲染成结论", () => {
+      const html = renderGame({ away: now(100), onDismissAway: () => {} });
+      expect(html).toContain("可能只是这段时间休市");
+    });
+
+    it("必须说清这是两次估值的差，不是「不在时赚的钱」", () => {
+      const html = renderGame({ away: now(110), onDismissAway: () => {} });
+      expect(html).toContain("两次估值的差");
+      expect(html).toContain("不是「你不在时赚了多少钱」");
+    });
+
+    it("期间有成交时把成交笔数与「不能互相印证」的提醒一起显示", () => {
+      const r = awayReport(
+        mark,
+        {
+          at: T0 + 20 * HOUR,
+          cash: 900_000,
+          positions: [{ code: "600519.SH", name: "贵州茅台", shares: 200, price: 110 }],
+        },
+        [
+          {
+            id: "x", at: T0 + HOUR, date: "2026-01-01", code: "A", name: "甲",
+            side: "buy", price: 1, shares: 100, amount: 100, fee: 0,
+          },
+        ] as never,
+      );
+      const html = renderGame({ away: r, onDismissAway: () => {} });
+      expect(html).toContain("1 笔");
+      expect(html).toContain("不能互相印证");
+    });
+
+    it("取不到价的持仓被单独列出来，不静默丢掉", () => {
+      const r = awayReport(
+        makeMark(T0, 0, [
+          { code: "600519.SH", name: "贵州茅台", shares: 100, price: 100 },
+          { code: "999999.SH", name: "无行情股", shares: 100, price: 50 },
+        ]),
+        {
+          at: T0 + 20 * HOUR,
+          cash: 0,
+          positions: [
+            { code: "600519.SH", name: "贵州茅台", shares: 100, price: 110 },
+            { code: "999999.SH", name: "无行情股", shares: 100, price: null },
+          ],
+        },
+        [],
+      );
+      const html = renderGame({ away: r, onDismissAway: () => {} });
+      expect(html).toContain("没算进去");
+      expect(html).toContain("无行情股");
+      expect(html).toContain("宁可不算，也不编一个数");
+    });
+
+    it("这张卡片里不许出现买卖建议", () => {
+      const html = renderGame({ away: now(110), onDismissAway: () => {} });
+      for (const bad of ["建议买入", "建议卖出", "推荐买", "必涨", "必跌", "稳赚", "目标价", "抄底"]) {
+        expect(html, `不该出现「${bad}」`).not.toContain(bad);
+      }
+    });
   });
 
   it("不出现任何引导性/建议性文案", () => {
