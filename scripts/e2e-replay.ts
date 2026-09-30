@@ -8,7 +8,7 @@
  *   npx vite-node scripts/e2e-replay.ts
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { LEVELS } from "@aw/game";
 
@@ -21,6 +21,14 @@ const BASE = `http://127.0.0.1:${PORT}`;
 let pass = 0;
 let fail = 0;
 const failures: string[] = [];
+/** 最新一份快照目录名（`data/snapshot_YYYYMMDD`）。 */
+function latestSnapshotDir(): string {
+  const dirs = readdirSync(join(ROOT, "data")).filter((d) => /^snapshot_\d{8}$/.test(d)).sort();
+  const last = dirs.at(-1);
+  if (!last) throw new Error("data/ 下没有 snapshot_YYYYMMDD 目录");
+  return last;
+}
+
 function check(name: string, cond: boolean, detail = ""): void {
   if (cond) {
     pass += 1;
@@ -203,30 +211,45 @@ try {
   const before = await evaluate<string>(`return document.body.innerText;`);
   const cashBefore = Number((before.match(/可用现金\s*¥?([\d,]+(?:\.\d+)?)/) ?? [])[1]?.replace(/,/g, "") ?? NaN);
 
-  // 填股票代码与股数，再点挂单
-  const fill = await evaluate<string>(`
-    const codeInput = document.querySelector('input[list], input[placeholder*="代码"], input[placeholder*="名称"]');
+  // 填股票代码与股数，再点挂单。
+  //
+  // 这里**点榜单的第一行**来填，而不是直接往输入框塞代码 —— 选股清单就是为
+  // 「玩家不知道买什么」而做的，所以端到端就该从它那里走一遍。
+  const fillRaw = await evaluate<string>(`
+    const codeInput = document.querySelector('input[placeholder*="代码"], input[placeholder*="名称"]');
     if (!codeInput) return "NO_CODE_INPUT";
-    const first = document.querySelector('datalist option');
-    const code = first ? first.getAttribute("value") : null;
-    if (!code) return "NO_OPTION";
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-    setter.call(codeInput, code);
-    codeInput.dispatchEvent(new Event("input", { bubbles: true }));
-    const numInput = [...document.querySelectorAll('input[type="number"]')].pop();
-    if (!numInput) return "NO_QTY_INPUT";
-    setter.call(numInput, "100");
-    numInput.dispatchEvent(new Event("input", { bubbles: true }));
-    return code;
+    const row = document.querySelector('.pick-row');
+    if (!row) return "NO_PICK_ROW";
+    const name = row.innerText.split("\\n")[0].trim();
+    row.click();
+    // 点一下只是改 React state，输入框的值要等这次渲染落地；
+    // 同步读会读到空字符串，那是时机问题不是功能问题。
+    return new Promise((r) => setTimeout(() => {
+      const code = codeInput.value;
+      if (!code) return r("PICK_DID_NOT_FILL");
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      const numInput = [...document.querySelectorAll('input[type="number"]')].pop();
+      if (!numInput) return r("NO_QTY_INPUT");
+      setter.call(numInput, "100");
+      numInput.dispatchEvent(new Event("input", { bubbles: true }));
+      r("OK:" + code + ":" + name);
+    }, 250));
   `);
-  check("填得进标的与股数", !fill.startsWith("NO_"), fill);
+  check("填得进标的与股数", fillRaw.startsWith("OK:"), fillRaw);
+  // 待成交列表显示的是名字不是代码（见 ReplayView 的 pending 渲染）
+  const fillName = fillRaw.split(":")[2] ?? "";
+  const fillCode = fillRaw.split(":")[1] ?? "";
 
   const placed = await evaluate<string>(CLICK("挂单"));
   check("点得到「挂单」按钮", placed === "OK", placed);
   await sleep(400);
+  const pendingText = await evaluate<string>(`return document.body.innerText;`);
   check(
-    "委托出现在待成交列表里（挂单不等于成交）",
-    await evaluate<boolean>(`return document.body.innerText.includes("待成交委托") && document.body.innerText.includes(${JSON.stringify(fill)});`),
+    "委托挂在待成交列表里，还没有成交",
+    pendingText.includes("待成交委托") &&
+      pendingText.includes(fillName) &&
+      !new RegExp(`已成交[\\s\\S]{0,200}${fillName}`).test(pendingText),
+    `填的是 ${fillCode} ${fillName}`,
   );
 
   const step = await evaluate<string>(CLICK("走一天"));
@@ -336,37 +359,86 @@ try {
   /**
    * 股票池必须来自分片，不是当前快照。
    *
-   * 只能查 datalist：股票名不会出现在可见文字里（option 不进 innerText）。
-   * 读磁盘上那一关的分片，把「当年成交额居前」的代码拿出来对。
+   * 榜单只显示前 8 行，所以没法靠数 DOM 来核对整池。改用一个更强的办法：
+   * 拿一只**当前快照里有、但那一关的分片里没有**的票去搜，页面上必须说「没找到」。
+   * 如果池子错用了当前快照，这只票就会被搜出来，测试当场失败。
    */
   const shard = JSON.parse(
     readFileSync(join(ROOT, "data/history", `level-${level.id}.json`), "utf-8"),
-  ) as { instruments: Array<{ code: string }> };
-  const options = await evaluate<string[]>(`
-    return [...document.querySelectorAll('datalist option')].map(o => o.getAttribute("value"));
+  ) as { instruments: Array<{ code: string; name: string }> };
+  const shardCodes = new Set(shard.instruments.map((i) => i.code));
+  const snapshotStocks = JSON.parse(
+    readFileSync(join(ROOT, "data", latestSnapshotDir(), "stocks.json"), "utf-8"),
+  ) as Array<{ code: string; name: string }>;
+  const notYet = snapshotStocks.find((s) => !shardCodes.has(s.code));
+
+  const pickCount = await evaluate<number>(`return document.querySelectorAll('.pick-row').length;`);
+  check("下单卡里列出了候选股票（不是让人对着空白框发呆）", pickCount > 0, `${pickCount} 行`);
+
+  if (notYet) {
+    const searched = await evaluate<string>(`
+      const input = document.querySelector('input[placeholder*="代码"]');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      setter.call(input, ${JSON.stringify(notYet.name)});
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      return new Promise(r => setTimeout(() => r(document.body.innerText), 200));
+    `);
+    check(
+      `当前快照里的 ${notYet.name}（${notYet.code}）在这一关搜不到`,
+      searched.includes("没找到这只票"),
+      notYet.code,
+    );
+  } else {
+    check("能在当前快照里找到一只当时还没上市的票", false, "快照与分片完全重合，样本无效");
+  }
+
+  await evaluate<string>(`
+    const input = document.querySelector('input[placeholder*="代码"]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    return "OK";
   `);
+  /**
+   * 榜单上的每一只都必须在那一关的分片里。
+   *
+   * 界面上只显示 6 位代码（后缀在榜单里是噪音），所以拿数字前缀去对。
+   */
+  const shownCodes = await evaluate<string[]>(`
+    return [...document.querySelectorAll('.pick-code')].map(e => e.textContent.trim());
+  `);
+  const shardPrefixes = new Set(shard.instruments.map((i) => i.code.split(".")[0]));
+  const stray = shownCodes.filter((c) => !shardPrefixes.has(c));
   check(
-    "datalist 里的标的数量与分片一致（不是当前快照那 600 多只）",
-    options.length === shard.instruments.length,
-    `页面 ${options.length} 只，分片 ${shard.instruments.length} 只`,
+    "榜单上的每一只都来自这一关的分片",
+    shownCodes.length > 0 && stray.length === 0,
+    `页面 ${shownCodes.join(", ")}；不在分片里的：${stray.join(", ")}`,
   );
-  const want = shard.instruments.slice(0, 5).map((i) => i.code);
-  check(
-    "当年成交额居前的票在页面上下得出来",
-    want.every((c) => options.includes(c)),
-    `期望 ${want.join(", ")}；页面 ${options.slice(0, 5).join(", ")}`,
-  );
+
+  // 当年成交额居前的那几只，逐个搜名字都应该搜得到
+  const want = shard.instruments.slice(0, 3);
+  for (const w of want) {
+    const found = await evaluate<string>(`
+      const input = document.querySelector('input[placeholder*="代码"]');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      setter.call(input, ${JSON.stringify(w.name)});
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      return new Promise(r => setTimeout(() => r(document.body.innerText), 200));
+    `);
+    check(`搜得到「${w.name}」`, found.includes(w.name), w.code);
+  }
 
   console.log("\n八、在关卡里下单并推进一步");
   const lvCode = await evaluate<string>(`
-    const codeInput = document.querySelector('input[list], input[placeholder*="代码"], input[placeholder*="名称"]');
+    const codeInput = document.querySelector('input[placeholder*="代码"], input[placeholder*="名称"]');
     if (!codeInput) return "NO_CODE_INPUT";
-    const first = document.querySelector('datalist option');
-    const code = first ? first.getAttribute("value") : null;
+    // 点榜单第一行来填：走的是玩家真正会走的那条路
+    const row = document.querySelector('.pick-row');
+    if (!row) return "NO_PICK_ROW";
+    row.click();
+    const code = codeInput.value;
     if (!code) return "NO_OPTION";
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-    setter.call(codeInput, code);
-    codeInput.dispatchEvent(new Event("input", { bubbles: true }));
     const numInput = [...document.querySelectorAll('input[type="number"]')].pop();
     if (!numInput) return "NO_QTY_INPUT";
     setter.call(numInput, "100");
@@ -463,6 +535,35 @@ try {
     "点掉之后确实不再显示",
     !(await evaluate<boolean>(`return document.body.innerText.includes("你不在的这段时间");`)),
   );
+
+  /**
+   * 实时模式的下单卡也要有候选榜单。
+   *
+   * 这一条的由来：用户看线上时说「你有一个折叠符号，但是没有给出股票，
+   * 玩家很茫然，不知道买什么」—— 那个「折叠符号」就是 `<datalist>` 的箭头，
+   * 而它在 iOS Safari 上根本不弹。所以这里盯的是**页面上真的有票**。
+   */
+  console.log("\n十之二、实时模式的下单候选榜单");
+  const livePicks = await evaluate<string>(`
+    const rows = [...document.querySelectorAll('.pick-row')];
+    return JSON.stringify({ n: rows.length, first: rows[0] ? rows[0].innerText : "" });
+  `);
+  const livePicksObj = JSON.parse(livePicks) as { n: number; first: string };
+  check("实时模式下单卡列出了候选股票", livePicksObj.n > 0, `${livePicksObj.n} 行`);
+  check("每一行都带板块和涨跌幅", /[\u4e00-\u9fa5]/.test(livePicksObj.first) && /%/.test(livePicksObj.first), livePicksObj.first.replace(/\n/g, " | "));
+  check(
+    "榜单下面写明了不是推荐",
+    await evaluate<boolean>(`return document.body.innerText.includes("不是推荐");`),
+  );
+
+  const clickPick = await evaluate<string>(`
+    const row = document.querySelector('.pick-row');
+    if (!row) return "NO_ROW";
+    row.click();
+    const input = document.querySelector('input[placeholder*="代码"]');
+    return new Promise(r => setTimeout(() => r(input && input.value ? "OK:" + input.value : "EMPTY"), 200));
+  `);
+  check("点一行就把代码填进输入框（不直接下单）", clickPick.startsWith("OK:"), clickPick);
 
   console.log("\n十一、结算复盘报告");
   const settleClick = await evaluate<string>(CLICK("结算本季"));
@@ -611,6 +712,75 @@ try {
   await sleep(400);
   const h3 = await evaluate<number>(`return document.body.scrollHeight;`);
   check(`展开后恢复原长（${h3}）`, Math.abs(h3 - h0) < 50);
+
+  console.log("\n十三之二、从个股分析空状态点「去筛选」：滚到个股列表并闪一下");
+
+  /**
+   * 个股分析页在没选中个股时有个「去筛选」按钮。
+   *
+   * 只切标签页的话，屏幕上还是原来那张筛选页 —— 用户不知道要往下滚到第三层，
+   * 看着像按钮没反应。所以它必须滚过去、闪一下，折着的话还要展开。
+   *
+   * 空状态只有清空本地数据之后才到得了（选中过的股票不会自己消失），
+   * 所以这一节放在最后，前面的存档不再需要了。
+   *
+   * 这里一律用 waitFor 而不是固定 sleep：清空之后快照要重新拉一遍，
+   * 拉多久取决于机器，写死 2500ms 在慢的一次上就会假失败。
+   */
+  const FLASHING = `(function () {
+    const c = document.getElementById("layer-stocks");
+    return !!c && c.className.includes("card-flash");
+  })()`;
+  // 折叠 class 在卡片里的 <header> 上，不在 <section> 上
+  const FOLDED = `(function () {
+    const c = document.getElementById("layer-stocks");
+    return !!c && !!c.querySelector(".card-head-folded");
+  })()`;
+
+  await evaluate(CLICK("设置"));
+  await waitFor(`document.body.innerText.includes("清空本地数据")`, "设置页打开");
+  await evaluate(CLICK("清空本地数据"));
+  await waitFor(`document.body.innerText.includes("① 大盘环境")`, "清空后回到筛选页", 60);
+  await sleep(1500); // 快照会重新加载
+
+  await evaluate(CLICK("个股分析"));
+  check(
+    "清空之后个股分析页是空状态",
+    await waitFor(`document.body.innerText.includes("还没有选中个股")`, "个股分析空状态", 60),
+  );
+
+  const scrollBefore = await evaluate<number>(`return window.scrollY;`);
+  await evaluate(CLICK("去筛选"));
+  check("点了「去筛选」之后卡片闪起来", await waitFor(FLASHING, "卡片闪起来"));
+  const afterJump = await evaluate<string>(`
+    const card = document.getElementById("layer-stocks");
+    return JSON.stringify({
+      y: window.scrollY,
+      onWorkbench: document.body.innerText.includes("① 大盘环境"),
+      hasCard: !!card,
+    });
+  `);
+  const j = JSON.parse(afterJump) as { y: number; onWorkbench: boolean; hasCard: boolean };
+  check("已经切回筛选页", j.onWorkbench && j.hasCard);
+  check("页面滚到了个股列表", j.y > scrollBefore + 100, `之前 ${scrollBefore}，现在 ${j.y}`);
+
+  check("闪一下就停，不会一直闪下去", await waitFor(`!(${FLASHING})`, "闪完收起"));
+
+  // 折着的时候跳过去要先展开，否则到了那里一眼看不到任何可选的东西
+  // 页面上有两个「收起 ▴」（第二层和第三层各一个），得点第三层里那个
+  await evaluate(`
+    const c = document.getElementById("layer-stocks");
+    const b = c && c.querySelector(".card-fold");
+    if (!b) return "NOT_FOUND";
+    b.click();
+    return "OK";
+  `);
+  check("先折起个股分类", await waitFor(FOLDED, "第三层折起来"));
+  await evaluate(CLICK("个股分析"));
+  await waitFor(`document.body.innerText.includes("还没有选中个股")`, "再次进入个股分析空状态", 60);
+  await evaluate(CLICK("去筛选"));
+  check("折着跳过去会自动展开，并照常闪", await waitFor(FLASHING, "展开了并且在闪"));
+  check("展开之后不再是折着的", !(await evaluate<boolean>(`return ${FOLDED};`)));
 
   console.log("\n十四、控制台没有报错");
   const errs = await evaluate<string[]>(`

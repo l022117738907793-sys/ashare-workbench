@@ -56,6 +56,28 @@ if (!existsSync(CACHE)) {
 const perLevel = argValue("--per-level", 150);
 const onlyLevel = argString("--level");
 
+/**
+ * code → 申万一级行业名，取自最新快照。
+ *
+ * 为什么要抄进分片：分片本身只有行情，可「模拟下单」要给不懂股票的玩家一份
+ * 「各板块涨得最猛的几只」候选清单 —— 没有行业名就只能铺一个 150 只的大列表。
+ * 行业名是**今天**的分类，拿它标注 2016 年的股票不算失真：行业归属本来就极少变。
+ */
+function loadIndustryMap(): Map<string, string> {
+  const map = new Map<string, string>();
+  const dataDir = join(ROOT, "data");
+  if (!existsSync(dataDir)) return map;
+  const latest = readdirSync(dataDir).filter((d) => /^snapshot_\d{8}$/.test(d)).sort().at(-1);
+  if (!latest) return map;
+  const path = join(dataDir, latest, "stocks.json");
+  if (!existsSync(path)) return map;
+  const list = JSON.parse(readFileSync(path, "utf8")) as Array<{ code?: string; industry?: string }>;
+  for (const s of list) if (s.code && s.industry) map.set(s.code, s.industry);
+  return map;
+}
+
+const industryOf = loadIndustryMap();
+
 // ── 主日历与基准：用沪深300 的交易日 ─────────────────────────
 const benchPath = join(CACHE, `${BENCHMARK_CODE}.json`);
 if (!existsSync(benchPath)) {
@@ -146,8 +168,15 @@ for (const file of files) {
     }
     if (n === 0) continue;
 
+    // 窗口第一天没有「前一天」可比，可玩家进场那天就想看到当天的涨跌幅。
+    // 缓存里有整段历史，顺手把窗口前一天的前复权收盘价也带上 ——
+    // 一个数字，十个分片加起来几百字节。
+    const firstIdx = idx[0] ?? -1;
+    const prevClose = firstIdx > 0 ? (raw.close[firstIdx - 1] ?? null) : null;
+
     buckets.get(w.level.id)!.push({
       series: raw,
+      prevClose,
       sliced: {
         code: raw.code,
         name: raw.name,
@@ -188,6 +217,9 @@ for (const w of windows) {
       code: p.sliced.code,
       name: p.sliced.name,
       isST: (p.series as unknown as { isST?: boolean }).isST ?? p.sliced.name.includes("ST"),
+      industry: industryOf.get(p.sliced.code) ?? "",
+      /** 窗口前一天的收盘价，只有第一天用得上 */
+      prevClose: p.prevClose,
       open: p.sliced.open,
       close: p.sliced.close,
       high: p.sliced.high,

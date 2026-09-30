@@ -19,6 +19,8 @@ import {
 import { displayDate, maskDate, maskDatesIn, replayPrices, settleReplay } from "../lib/replay";
 import { fmtNum, fmtPct } from "../lib/helpers";
 import { Card, EmptyHint, KV, Notice } from "./common";
+import { StockPicker } from "./StockPicker";
+import { amountOf, changePctOf, type PickStock } from "../lib/picks";
 import { GAME_DISCLAIMER } from "../lib/game";
 
 export interface ReplayViewProps {
@@ -34,7 +36,24 @@ export interface ReplayViewProps {
    * 随机模式是当前快照，传奇模式是那一关的历史分片。用当前快照去下单 2016 年的关卡，
    * 玩家会搜到当时根本还没上市的票，然后每一笔委托都提示「没有行情」。
    */
-  stocks: Array<{ code: string; name: string }>;
+  stocks: Array<{
+    code: string;
+    name: string;
+    /** 申万一级行业，用于候选清单分组。老分片没有这一列 */
+    industry?: string;
+    /** 与日历对齐的收盘价，算当日涨跌幅用 */
+    close?: Array<number | null>;
+    /** 与日历对齐的成交量，算当日成交额用 */
+    volume?: Array<number | null>;
+    /**
+     * 窗口**前一天**的收盘价。
+     *
+     * 开局第一天（`dayIndex === 0`）`close[-1]` 不存在，没有它那一天所有股票的
+     * 涨跌幅都算不出来，候选榜单会整个空掉 —— 而第一天恰恰是玩家最需要
+     * 有人告诉他「有什么可买」的时候。
+     */
+    prevClose?: number | null;
+  }>;
   benchmarkName: string;
   /**
    * 传奇模式（模式 2）的开局简报。
@@ -53,6 +72,11 @@ export interface ReplayViewProps {
 
 /** 快进速度：1.5 秒一天（用户指定）。快进期间照常可以下单。 */
 export const FAST_FORWARD_MS = 1500;
+
+/** 序列里的第 i 项，不是有限数就当没有（分片里可能是 null）。 */
+function numOrNull(v: number | null | undefined): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
 
 function Metric({ k, v, tone }: { k: string; v: string; tone?: "good" | "bad" | "muted" }) {
   return (
@@ -83,6 +107,30 @@ export function ReplayView(props: ReplayViewProps) {
   const totalDays = calendar.length - startIndex;
 
   const prices = useMemo(() => replayPrices(state), [state]);
+
+  /**
+   * 「不知道买什么」那份榜单的数据来源。
+   *
+   * 涨跌幅取的是**当天的收盘对前一天收盘** —— 推演里一天已经走完，
+   * 这个数就是玩家在这一步看到的那根 K 线的涨跌，和界面上其他地方一致。
+   */
+  const pickRows = useMemo<PickStock[]>(() => {
+    const day = state.dayIndex;
+    return stocks.map((s) => {
+      const close = s.close ?? [];
+      const price = numOrNull(close[day]);
+      // 第一天没有「昨天」，用分片带进来的窗口前一天收盘价顶替
+      const prev = day > 0 ? numOrNull(close[day - 1]) : numOrNull(s.prevClose);
+      return {
+        code: s.code,
+        name: s.name,
+        sector: s.industry ?? "",
+        price,
+        changePct: changePctOf(price, prev),
+        amount: amountOf(price, numOrNull((s.volume ?? [])[day])),
+      };
+    });
+  }, [stocks, state.dayIndex]);
   const stockByCode = useMemo(() => new Map(stocks.map((s) => [s.code, s])), [stocks]);
   const picked = code ? stockByCode.get(code) : undefined;
   const holding = account.holdings.find((h) => h.code === code);
@@ -294,8 +342,7 @@ export function ReplayView(props: ReplayViewProps) {
           <input
             id="replay-code"
             className="text-input"
-            list="replay-stock-list"
-            placeholder="输入代码或名称，如 600519.SH"
+            placeholder="输入代码或名称，也可以直接从下面挑"
             value={code}
             onChange={(e) => {
               const v = e.target.value.trim();
@@ -304,11 +351,15 @@ export function ReplayView(props: ReplayViewProps) {
               setFeedback(null);
             }}
           />
-          <datalist id="replay-stock-list">
-            {stocks.slice(0, 300).map((s) => (
-              <option key={s.code} value={s.code}>{`${s.code} ${s.name}`}</option>
-            ))}
-          </datalist>
+          <StockPicker
+            rows={pickRows}
+            query={code}
+            activeCode={picked ? code : undefined}
+            onPick={(c) => {
+              setCode(c);
+              setFeedback(null);
+            }}
+          />
         </div>
 
         <div className="field">

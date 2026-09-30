@@ -247,6 +247,12 @@ export default function App() {
 
   const [sectorCode, setSectorCode] = useState<string | null>(null);
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
+  /**
+   * 「去筛选」的跳转信号：每加一，筛选页就滚到「③ 个股分类」并闪一下。
+   *
+   * 用计数器不用布尔量 —— 连着点两次要闪两次，布尔量第二次点就没反应了。
+   */
+  const [focusStocks, setFocusStocks] = useState(0);
   const [query, setQuery] = useState("");
 
   const baseSectors: SectorResult[] = useMemo(() => {
@@ -927,6 +933,7 @@ export default function App() {
             filteredStocks={filteredStocks.length}
             mainIndexText={mainIndexText}
             signals={liveSignals}
+            focusStocks={focusStocks}
           />
         )}
 
@@ -955,7 +962,14 @@ export default function App() {
           <div className="view">
             <Notice tone="info">
               还没有选中个股。到「筛选」页点开任意一只个股，或从「历史」里重新打开。
-              <button type="button" className="btn btn-ghost" onClick={() => setTab("workbench")}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setTab("workbench");
+                  setFocusStocks((n) => n + 1);
+                }}
+              >
                 去筛选
               </button>
             </Notice>

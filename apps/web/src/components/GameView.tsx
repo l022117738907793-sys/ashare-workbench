@@ -14,6 +14,8 @@ import { useMemo, useState } from "react";
 import { LOT_SIZE, reviewReport, type ReviewReport, type SeasonResult, type Side } from "@aw/game";
 import type { StockData, StockResult } from "@aw/core";
 import { sourceLabel, type Quote } from "@aw/data";
+import { StockPicker } from "./StockPicker";
+import { amountOf, changePctOf, type PickStock } from "../lib/picks";
 import {
   CASH_OPTIONS,
   DEFAULT_INITIAL_CASH,
@@ -64,6 +66,11 @@ export interface GameViewProps {
   onDismissAway?: () => void;
 }
 
+/** 序列里的第 i 项，不是有限数就当没有（快照里可能是 null）。 */
+function numOrNull(v: number | null | undefined): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
 function Metric({ k, v, tone }: { k: string; v: string; tone?: "good" | "bad" | "muted" }) {
   return (
     <div className="metric">
@@ -93,6 +100,37 @@ export function GameView(props: GameViewProps) {
   const [lastReview, setLastReview] = useState<ReviewReport | null>(null);
 
   const stockByCode = useMemo(() => new Map(stocks.map((s) => [s.code, s])), [stocks]);
+
+  /**
+   * 「不知道买什么」那份榜单的数据来源。
+   *
+   * 涨跌幅的算法要分两种情况，弄反了会显示成 0：
+   * - `quotesByCode` 里有这只票 → 说明取到了实时价，快照的最后一根就是**昨收**；
+   * - 没有 → 快照的最后一根本身就是最新的收盘价，昨收取倒数第二根。
+   *
+   * 实时行情只覆盖持仓（见 App.tsx 的 visibleCodes），所以大多数票走的是第二条路 ——
+   * 显示的是「最近一个交易日」的涨跌，这一点在榜单下面写着。
+   */
+  const pickRows = useMemo<PickStock[]>(() => {
+    return stocks.map((s) => {
+      const q = quotesByCode.get(s.code);
+      const n = s.close.length;
+      const snapLast = n > 0 ? numOrNull(s.close[n - 1]) : null;
+      const snapPrev = n > 1 ? numOrNull(s.close[n - 2]) : null;
+      const price = prices.get(s.code) ?? snapLast;
+      const isLive = q?.price !== null && q?.price !== undefined;
+      const prevClose = isLive ? snapLast : snapPrev;
+      return {
+        code: s.code,
+        name: s.name,
+        sector: s.industry,
+        price,
+        changePct: q?.changePct ?? changePctOf(price, prevClose),
+        amount: q?.amount ?? amountOf(price, n > 0 ? numOrNull(s.volume[n - 1]) : null),
+        signal: resultsByCode.get(s.code)?.type ?? null,
+      };
+    });
+  }, [stocks, prices, quotesByCode, resultsByCode]);
   const picked = code ? stockByCode.get(code) : undefined;
   const pickedPrice = code ? (prices.get(code) ?? null) : null;
   const pickedQuote = code ? quotesByCode.get(code) : undefined;
@@ -303,21 +341,25 @@ export function GameView(props: GameViewProps) {
           <input
             id="game-code"
             className="text-input"
-            list="game-stock-list"
-            placeholder="输入代码或名称，如 600519.SH"
+            placeholder="输入代码或名称，也可以直接从下面挑"
             value={code}
             onChange={(e) => {
               const v = e.target.value.trim();
+              // 打完完整代码或名字时立刻认出来（下面那一列只是候选，允许直接输入）
               const hit = stocks.find((s) => s.code === v || s.name === v);
               setCode(hit ? hit.code : v);
               setFeedback(null);
             }}
           />
-          <datalist id="game-stock-list">
-            {stocks.slice(0, 300).map((s) => (
-              <option key={s.code} value={s.code}>{`${s.code} ${s.name}`}</option>
-            ))}
-          </datalist>
+          <StockPicker
+            rows={pickRows}
+            query={code}
+            activeCode={picked ? code : undefined}
+            onPick={(c) => {
+              setCode(c);
+              setFeedback(null);
+            }}
+          />
         </div>
 
         <div className="field">

@@ -30,6 +30,19 @@ export interface ReplayInstrument {
   code: string;
   name: string;
   isST: boolean;
+  /**
+   * 申万一级行业名。用来给「模拟下单」的候选清单按板块分组。
+   *
+   * 可选：老分片里没有这一列，缺了就不分组（而不是把一堆股票塞进「未知」）。
+   */
+  industry?: string;
+  /**
+   * 窗口**前一天**的收盘价。
+   *
+   * 只在下单第一天用得上：那一天 `close[dayIndex - 1]` 不存在，没有它就算不出
+   * 当天的涨跌幅 —— 候选榜单在开局第一天会整个空掉，玩家又回到「不知道买什么」。
+   */
+  prevClose?: number | null;
   open: Array<number | null>;
   close: Array<number | null>;
   high: Array<number | null>;

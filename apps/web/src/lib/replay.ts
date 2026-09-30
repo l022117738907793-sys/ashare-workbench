@@ -105,6 +105,7 @@ export function toInstruments(stocks: CoreStock[]): ReplayInstrument[] {
     high: [...s.high],
     low: [...s.low],
     volume: [...s.volume],
+    industry: s.industry,
   }));
 }
 

@@ -178,6 +178,39 @@ textarea {
   padding-bottom: 12px;
 }
 
+/*
+ * 跳转过去之后闪一下。
+ *
+ * 只滚屏是不够的：页面上东西很多，滚过去之后目光未必落在对的那张卡上。
+ * 从一圈淡色描边收到正常样子，一次就够，不循环 —— 循环会变成干扰。
+ * 时长要和 WorkbenchView 的 FLASH_MS 对齐（那边到点摘掉这个 class）。
+ */
+@keyframes card-flash {
+  0% {
+    box-shadow: 0 0 0 0 var(--accent-soft);
+    border-color: var(--accent);
+  }
+  30% {
+    box-shadow: 0 0 0 4px var(--accent-soft);
+    border-color: var(--accent);
+  }
+  100% {
+    box-shadow: var(--shadow);
+    border-color: var(--border);
+  }
+}
+.card-flash {
+  animation: card-flash 1500ms ease-out 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* 关掉动画的人也得知道「看这张」——换成一段静态描边 */
+  .card-flash {
+    animation: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+}
+
 .card-fold {
   flex: none;
   border: 1px solid var(--border);
@@ -1539,4 +1572,116 @@ code {
 
 .review-caveats li {
   margin-bottom: 4px;
+}
+
+/* ── 模拟下单的选股清单（StockPicker） ─────────────────────────
+   替换掉原来那个在 iOS 上根本不弹的 <datalist>。整块做成一个带边框的盒子，
+   榜单最多 6 行高、超出滚动 —— 下单卡本来就不该比持仓表还长。 */
+.pick-box {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.pick-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.pick-title {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.pick-keys {
+  display: flex;
+  gap: 4px;
+}
+.chip-tiny {
+  font-size: 11px;
+  padding: 3px 8px;
+}
+.pick-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 264px;
+  overflow-y: auto;
+}
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pick-row:last-child {
+  border-bottom: 0;
+}
+.pick-row:hover,
+.pick-row-on {
+  background: var(--accent-soft);
+}
+.pick-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pick-code {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.pick-mid {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+.pick-sector {
+  font-size: 11px;
+  color: var(--text-2);
+}
+.pick-amount {
+  font-size: 10px;
+  color: var(--muted);
+}
+.pick-num {
+  flex: 0 0 auto;
+  width: 74px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  font-variant-numeric: tabular-nums;
+}
+.pick-price {
+  font-size: 13px;
+}
+.pick-chg {
+  font-size: 11px;
+}
+.chg-up {
+  color: var(--good);
+}
+.chg-down {
+  color: var(--bad);
+}
+.pick-caveat {
+  margin: 6px 0 0;
 }

@@ -1,5 +1,5 @@
 /** 第一层～第三层：大盘环境 → 板块强弱 → 个股分类（漏斗）。 */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MarketResult, SectorResult, StockMetrics } from "@aw/core";
 import { sourceLabel, type Quote } from "@aw/data";
 import {
@@ -33,6 +33,14 @@ export interface WorkbenchProps {
   mainIndexText: string | null;
   /** 全池交易信号，按强度降序 */
   signals: TradeSignal[];
+  /**
+   * 「去筛选」信号：数字每加一，就滚到「③ 个股分类」并闪一下。
+   *
+   * 个股分析页在没选中个股时会给出这个按钮，但只切标签页是不够的 ——
+   * 第三层在板块下面好几屏，切过去屏幕上什么都没变，看着像没点上。
+   * 用计数器而不是布尔量：连着点两次要闪两次。
+   */
+  focusStocks?: number;
 }
 
 export function WorkbenchView(props: WorkbenchProps) {
@@ -52,6 +60,7 @@ export function WorkbenchView(props: WorkbenchProps) {
     filteredStocks,
     mainIndexText,
     signals,
+    focusStocks = 0,
   } = props;
 
   const firstNonEmpty = groups.findIndex((g) => g.items.length > 0);
@@ -65,6 +74,14 @@ export function WorkbenchView(props: WorkbenchProps) {
    * 但选择会记住（localStorage），折过一次之后每次打开都是折着的。
    */
   const [folds, setFolds] = useState<Folds>(() => parseFolds(readLS(FOLD_KEY)));
+  /**
+   * 折叠状态的最新值。
+   *
+   * 跳转 effect 只在 `focusStocks` 变化时跑，不能把 `folds` 写进依赖数组 ——
+   * 那样每折一次卡都会重新滚一遍屏。用 ref 读当下值。
+   */
+  const foldsRef = useRef(folds);
+  foldsRef.current = folds;
   function toggleFold(key: keyof Folds): void {
     setFolds((f) => {
       const next: Folds = { ...f, [key]: !f[key] };
@@ -72,6 +89,24 @@ export function WorkbenchView(props: WorkbenchProps) {
       return next;
     });
   }
+
+  /** 「③ 个股分类」正在闪。跳过去之后把它点亮一下，人就找得到该看哪儿了。 */
+  const [flashStocks, setFlashStocks] = useState(false);
+  const flashTimer = useRef<number | null>(null);
+  const flashStockCard = useCallback(() => {
+    if (typeof window === "undefined") return;
+    // 先落到 false 再在下一帧打开，否则连点两次时 class 没变、动画不会重播
+    setFlashStocks(false);
+    window.requestAnimationFrame(() => setFlashStocks(true));
+    if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setFlashStocks(false), FLASH_MS);
+  }, []);
+  useEffect(
+    () => () => {
+      if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+    },
+    [],
+  );
 
   /**
    * 选中板块后跳到第三层。
@@ -89,7 +124,23 @@ export function WorkbenchView(props: WorkbenchProps) {
     if (jumpedTo.current === sectorCode) return;
     jumpedTo.current = sectorCode;
     scrollBelowHeader(document.getElementById(STOCK_LAYER_ID));
-  }, [sectorCode]);
+    flashStockCard();
+  }, [sectorCode, flashStockCard]);
+
+  /**
+   * 从个股分析页的「去筛选」进来。
+   *
+   * 只切标签页的话，屏幕上还是原来那张筛选页 —— 得自己一路滚到第三层才知道
+   * 该干什么。所以滚过去、闪一下，顺手把折叠展开（折着的话跳过去也没用，
+   * 一眼看不到任何可选的东西）。
+   */
+  useEffect(() => {
+    if (!focusStocks) return;
+    scrollBelowHeader(document.getElementById(STOCK_LAYER_ID));
+    if (foldsRef.current.stocks) toggleFold("stocks");
+    flashStockCard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusStocks]);
   const isOpen = (type: string, idx: number) =>
     closed[type] === undefined ? idx === firstNonEmpty : !closed[type];
   const toggle = (type: string, idx: number) =>
@@ -172,6 +223,7 @@ export function WorkbenchView(props: WorkbenchProps) {
 
       <Card
         id={STOCK_LAYER_ID}
+        flash={flashStocks}
         folded={folds.stocks}
         onToggleFold={() => toggleFold("stocks")}
         title="③ 个股分类"
@@ -307,6 +359,8 @@ export function WorkbenchView(props: WorkbenchProps) {
  * 改这里要同步改 e2e 里的断言。
  */
 const STOCK_LAYER_ID = "layer-stocks";
+/** 闪一下的时长，要和 styles.css 里 `.card-flash` 的 animation-duration 对齐 */
+const FLASH_MS = 1500;
 const SECTOR_LAYER_ID = "layer-sectors";
 
 /**

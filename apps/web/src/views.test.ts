@@ -37,6 +37,8 @@ import { LevelDetail, LevelPicker } from "./components/LevelPicker";
 import { HistoryView } from "./components/HistoryView";
 import { SettingsView } from "./components/SettingsView";
 import { Card } from "./components/common";
+import { StockPicker } from "./components/StockPicker";
+import type { PickStock } from "./lib/picks";
 import { WorkbenchView, parseFolds } from "./components/WorkbenchView";
 import { CASH_OPTIONS, defaultGameState, GAME_DISCLAIMER, startGame, type GameState } from "./lib/game";
 import { awayReport, makeMark } from "./lib/awayReport";
@@ -170,6 +172,40 @@ describe("卡片可折叠", () => {
       children: createElement("p", null, "x"),
     });
     expect(html).toContain("清除板块筛选");
+  });
+});
+
+/**
+ * 跳转过去之后闪一下。
+ *
+ * 加这个是因为「滚过去」还不够 —— 页面上东西很多，滚过去之后目光未必落
+ * 在对的那张卡上。动画本身在 e2e 里看，这里只盯 class 有没有接上。
+ */
+describe("卡片闪一下（跳转的落点提示）", () => {
+  it("默认不闪", () => {
+    const html = renderCard({ title: "③ 个股分类", children: createElement("p", null, "x") });
+    expect(html).not.toContain("card-flash");
+  });
+
+  it("flash 打开时带上 card-flash", () => {
+    const html = renderCard({
+      title: "③ 个股分类",
+      flash: true,
+      children: createElement("p", null, "x"),
+    });
+    expect(html).toContain("card-flash");
+  });
+
+  it("闪的同时还能是折叠的，两个 class 各管各的", () => {
+    const html = renderCard({
+      title: "③ 个股分类",
+      flash: true,
+      folded: true,
+      onToggleFold: () => {},
+      children: createElement("p", null, "x"),
+    });
+    expect(html).toContain("card-flash");
+    expect(html).toContain("card-head-folded");
   });
 });
 
@@ -1332,5 +1368,91 @@ describe("传奇模式：关卡列表与开局简报", () => {
   it("所有关卡页面都带免责声明", () => {
     for (const l of LEVELS) expect(renderDetail(l.id)).toContain("不构成投资建议");
     expect(renderList()).toContain("不构成投资建议");
+  });
+});
+
+/**
+ * 「模拟下单」里的选股清单。
+ *
+ * 这一块是为了修一个真实的可用性问题：原来只有一个空输入框 + `<datalist>`，
+ * 而 datalist 在 iOS Safari 上根本不弹 —— 玩家盯着空白框不知道买什么。
+ * 所以下面几条断言盯的都是「界面上到底有没有把票列出来」。
+ */
+describe("选股清单：玩家不必自己知道买哪只", () => {
+  const rows: PickStock[] = [
+    { code: "600519.SH", name: "贵州茅台", sector: "食品饮料", price: 1235.58, changePct: 2.31, amount: 4.2e9 },
+    { code: "002714.SZ", name: "牧原股份", sector: "农林牧渔", price: 42.29, changePct: -1.5, amount: 1.1e9 },
+    { code: "601988.SH", name: "中国银行", sector: "银行", price: 5.1, changePct: 0.2, amount: 8.8e8 },
+  ];
+
+  function renderPicker(over: Partial<Parameters<typeof StockPicker>[0]> = {}): string {
+    return renderToStaticMarkup(
+      createElement(StockPicker, { rows, query: "", onPick: () => {}, ...over }),
+    );
+  }
+
+  it("默认就把票列出来，不是等人输入", () => {
+    const html = renderPicker();
+    expect(html).toContain("贵州茅台");
+    expect(html).toContain("牧原股份");
+  });
+
+  it("每行带板块和涨跌幅，玩家才有判断依据", () => {
+    const html = renderPicker();
+    expect(html).toContain("食品饮料");
+    expect(html).toContain("2.31%");
+    expect(html).toContain("-1.5%");
+  });
+
+  it("涨跌幅按红涨绿跌上色", () => {
+    const html = renderPicker();
+    expect(html).toContain("chg-up");
+    expect(html).toContain("chg-down");
+  });
+
+  it("三行都是按钮 —— 点一下只是把代码填进输入框，不直接下单", () => {
+    const html = renderPicker();
+    expect(html.match(/class="pick-row/g)?.length).toBe(3);
+    expect(html).toContain("<button");
+  });
+
+  it("三种问法都在：涨得最猛 / 跌得最狠 / 成交最热", () => {
+    const html = renderPicker();
+    expect(html).toContain("涨得最猛");
+    expect(html).toContain("跌得最狠");
+    expect(html).toContain("成交最热");
+  });
+
+  it("写了「不知道买什么」，直接对着不会选股的人说话", () => {
+    expect(renderPicker()).toContain("不知道买什么");
+  });
+
+  it("榜单下面必须写明不是推荐，这一条是模拟游戏和分析引擎的分界线", () => {
+    expect(renderPicker()).toContain("不是推荐");
+  });
+
+  it("输入了就换成搜索结果，并说清楚匹配到几只", () => {
+    const html = renderPicker({ query: "茅台" });
+    expect(html).toContain("匹配到 1 只");
+    expect(html).toContain("贵州茅台");
+    expect(html).not.toContain("牧原股份");
+  });
+
+  it("没匹配上时说清楚原因，并提醒历史推演只有当时已上市的票", () => {
+    const html = renderPicker({ query: "特斯拉" });
+    expect(html).toContain("没找到这只票");
+    expect(html).toContain("当时已经上市");
+  });
+
+  it("搜索时不再显示排序按钮（这时候用不上）", () => {
+    expect(renderPicker({ query: "茅台" })).not.toContain("涨得最猛");
+  });
+
+  it("池子是空的就说没有行情，而不是显示一个空盒子", () => {
+    expect(renderPicker({ rows: [] })).toContain("还没有可下单的行情");
+  });
+
+  it("没有查询词时不显示「没找到」", () => {
+    expect(renderPicker()).not.toContain("没找到这只票");
   });
 });

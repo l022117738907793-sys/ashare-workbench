@@ -18,13 +18,20 @@ export function Card(props: {
    */
   folded?: boolean;
   onToggleFold?: () => void;
+  /**
+   * 闪一下。
+   *
+   * 跳转功能只滚屏是不够的 —— 屏幕上东西很多，滚过去之后目光未必落在对的地方。
+   * 闪一下是明确告诉人「你要找的是这张卡」。动画定义见 styles.css 的 `card-flash`。
+   */
+  flash?: boolean;
   children: ReactNode;
 }) {
-  const { title, subtitle, right, tone = "default", id, folded = false, onToggleFold, children } = props;
+  const { title, subtitle, right, tone = "default", id, folded = false, onToggleFold, flash = false, children } = props;
   const foldable = typeof onToggleFold === "function";
   const bodyId = id ? `${id}-body` : undefined;
   return (
-    <section id={id} className={`card${tone === "quiet" ? " card-quiet" : ""}`}>
+    <section id={id} className={`card${tone === "quiet" ? " card-quiet" : ""}${flash ? " card-flash" : ""}`}>
       {(title || right || foldable) && (
         <header className={`card-head${folded ? " card-head-folded" : ""}`}>
           <div className="card-head-text">
