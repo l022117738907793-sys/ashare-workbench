@@ -15,7 +15,8 @@
     "verify:replay": "vite-node scripts/verify-replay.ts",
     "e2e:replay": "vite-node scripts/e2e-replay.ts",
     "preview:replay": "vite-node scripts/preview-replay.ts",
-    "audit:news": "vite-node scripts/audit-news-match.ts"
+    "audit:news": "vite-node scripts/audit-news-match.ts",
+    "e2e:live": "vite-node scripts/e2e-live-legend.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
