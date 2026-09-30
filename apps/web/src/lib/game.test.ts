@@ -3,6 +3,7 @@ import {
   benchmarkCurve,
   CASH_OPTIONS,
   defaultGameState,
+  gameWatchCodes,
   isValidInitialCash,
   startGame,
   DEFAULT_INITIAL_CASH,
@@ -352,5 +353,37 @@ describe("同期基准：必须和账户量同一段区间", () => {
       { date: calendar[9], total: 200_000 },
     ];
     expect(samePeriodBenchmark(equity, [], falling)).toBeNull();
+  });
+});
+
+/**
+ * 用户反馈的「买入后行情才更新」就出在这里。
+ *
+ * 模拟游戏原来只请求持仓的行情 —— 想买的票在成交前不是持仓，于是下单卡显示的是
+ * 快照昨收，成交也按这个价；一买入它变成持仓、立刻拿到实时价，账户立刻浮盈。
+ * 那不是赚了，是显示价与成交价来自两个时刻。选中标的后必须一起拉行情。
+ */
+describe("模拟游戏拉行情的范围：持仓 + 正在下的那一单", () => {
+  it("只有持仓时就是持仓本身", () => {
+    expect(gameWatchCodes(["600519.SH", "000001.SZ"], null)).toEqual(["600519.SH", "000001.SZ"]);
+  });
+
+  it("选中的标的即便还没成交也要拉行情", () => {
+    expect(gameWatchCodes([], "601318.SH")).toEqual(["601318.SH"]);
+    expect(gameWatchCodes(["600519.SH"], "601318.SH")).toEqual(["600519.SH", "601318.SH"]);
+  });
+
+  it("已经在持仓里的标的不重复加", () => {
+    expect(gameWatchCodes(["600519.SH"], "600519.SH")).toEqual(["600519.SH"]);
+  });
+
+  it("清空输入就不再拉那只票的行情", () => {
+    expect(gameWatchCodes(["600519.SH"], null)).toEqual(["600519.SH"]);
+  });
+
+  it("不改入参", () => {
+    const held = ["600519.SH"];
+    gameWatchCodes(held, "601318.SH");
+    expect(held).toEqual(["600519.SH"]);
   });
 });

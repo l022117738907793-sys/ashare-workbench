@@ -290,6 +290,23 @@ export function positionPnl(
   };
 }
 
+/**
+ * 模拟游戏页要请求行情的代码：**持仓 + 正在下的那一单**。
+ *
+ * 只盯持仓会出岔子。想买的票在成交之前还不是持仓，拿不到实时价，下单卡显示的
+ * 是快照最后一根收盘价（往往是昨收）；一买入它变成持仓、立刻拿到实时价，
+ * 账户瞬间多出一笔浮盈 —— 那不是赚了，是两笔价来自两个时刻。用户看到的
+ * 「52.50 买入、买入后行情跳到 53.29」就是这么来的。
+ *
+ * 所以选中/输入标的时也要把它拉进来。清空输入时 `pick` 传 null，免得停在
+ * 一只不看的票上一直拉行情。
+ */
+export function gameWatchCodes(holdingCodes: string[], pick: string | null): string[] {
+  const out = [...holdingCodes];
+  if (pick && !out.includes(pick)) out.push(pick);
+  return out;
+}
+
 /** 每笔委托允许的股数上限（按可用资金或可卖数量估算），仅用于输入框提示 */
 export function suggestedMaxShares(
   side: "buy" | "sell",

@@ -179,17 +179,38 @@ export function nextTradeId(prefix = "t"): string {
 }
 
 /**
+ * 「这一单大概会成交成什么样」——下单前的预览。
+ *
+ * 存在的理由是让**预览和真实成交共用同一段算式**：以前滑点只写在规则页里，
+ * 下单的人看到「现价 52.50、成交 52.55」会以为系统算错了。现在界面上的预计
+ * 成交价就是这个函数算的，executeOrder 也调它，两边不可能对不上。
+ *
+ * 它**不做校验**（资金够不够、能不能卖是 validateOrder 的事），只回答价格和钱。
+ */
+export function previewOrder(
+  rawPrice: number,
+  side: "buy" | "sell",
+  shares: number,
+  date?: string,
+): { price: number; amount: number; fee: FeeBreakdown } {
+  const price = round2(side === "buy" ? rawPrice * (1 + DEFAULT_SLIPPAGE) : rawPrice * (1 - DEFAULT_SLIPPAGE));
+  const amount = round2(price * shares);
+  return { price, amount, fee: calcFee(side, amount, date) };
+}
+
+/**
  * 执行下单。返回新的 Account 与成交记录；校验不通过时返回原因，账户不变。
  */
 export function executeOrder(account: Account, req: OrderRequest): OrderResult {
   const invalid = validateOrder(account, req);
   if (invalid !== null) return { ok: false, reason: invalid };
 
-  const rawPrice = req.quote.price as number;
-  const slip = DEFAULT_SLIPPAGE;
-  const execPrice = round2(req.side === "buy" ? rawPrice * (1 + slip) : rawPrice * (1 - slip));
-  const amount = round2(execPrice * req.shares);
-  const fee = calcFee(req.side, amount, req.date);
+  const { price: execPrice, amount, fee } = previewOrder(
+    req.quote.price as number,
+    req.side,
+    req.shares,
+    req.date,
+  );
 
   const note = req.isTradingNow
     ? undefined

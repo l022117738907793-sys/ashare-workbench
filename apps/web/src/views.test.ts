@@ -44,6 +44,7 @@ import { WorkbenchView, parseFolds } from "./components/WorkbenchView";
 import { CASH_OPTIONS, defaultGameState, GAME_DISCLAIMER, startGame, type GameState } from "./lib/game";
 import { awayReport, makeMark } from "./lib/awayReport";
 import { REVIEW_CAVEATS, type ReviewReport } from "@aw/game";
+import { OrderPreview } from "./components/OrderPreview";
 import { ReviewBlock } from "./components/ReviewBlock";
 import { SIGNAL_BACKTEST_CAVEAT } from "./lib/helpers";
 import { SignalBadge, SignalCard, SignalSummary } from "./components/SignalCard";
@@ -673,6 +674,71 @@ function stubNews(over: Partial<LiveNewsState> = {}): LiveNewsState {
 
 // ── 模拟游戏渲染 ───────────────────────────────────────────────
 
+/**
+ * 下单预览：显示价就是成交价。
+ *
+ * 用户反馈原话：「中国平安下单前显示本地快照 52.50 元，成交价 52.55 元；买入后
+ * 行情才更新到 53.29 元，账户立刻出现浮盈。」那 5 分钱是滑点，但界面上没说过，
+ * 看着就像算错了。这个组件存在的唯一目的就是把这段差摆在明处。
+ *
+ * 单独渲染它，是因为它只在「选了标的」之后出现，而那个选择是 GameView 的内部
+ * 状态 —— 静态渲染整张下单卡点不出来（同 LevelDetail / ReviewBlock 的处理）。
+ */
+describe("下单预览：显示价就是成交价", () => {
+  function renderPreview(over: Partial<Parameters<typeof OrderPreview>[0]> = {}): string {
+    return renderToStaticMarkup(
+      createElement(OrderPreview, {
+        price: 52.5,
+        side: "buy",
+        shares: 100,
+        cash: 200_000,
+        sellable: 0,
+        today: "2026-09-30",
+        ...over,
+      }),
+    );
+  }
+
+  it("买入：参考价 52.50 → 预计成交价 52.55，并把滑点写清楚", () => {
+    const html = renderPreview();
+    expect(html).toContain("预计成交价");
+    expect(html).toContain("52.55");
+    expect(html).toContain("参考价 52.5");
+    expect(html).toContain("加 0.1% 滑点");
+  });
+
+  it("买入：预计金额含手续费和可用资金", () => {
+    const html = renderPreview();
+    expect(html).toContain("预计金额");
+    expect(html).toContain("5255"); // 52.55 × 100
+    expect(html).toContain("手续费 5.05"); // max(5255×0.00025, 5)
+    expect(html).toContain("可用 200000 元");
+  });
+
+  it("卖出：减滑点，并给出可卖数量", () => {
+    const html = renderPreview({ price: 20, side: "sell", shares: 100, sellable: 300 });
+    expect(html).toContain("19.98"); // 20 × (1 − 0.001)
+    expect(html).toContain("减 0.1% 滑点");
+    expect(html).toContain("可卖 300 股");
+  });
+
+  it("印花税改档前后，卖出的手续费不一样（2023-08-28）", () => {
+    const before = renderPreview({ price: 10, side: "sell", shares: 1000, today: "2023-08-25" });
+    const after = renderPreview({ price: 10, side: "sell", shares: 1000, today: "2023-08-28" });
+    expect(before).not.toBe(after);
+  });
+
+  it("没有行情就什么都不显示（不能报一个凭空的成交价）", () => {
+    expect(renderPreview({ price: null })).toBe("");
+  });
+
+  it("股数没填或填成 0 也不显示", () => {
+    expect(renderPreview({ shares: 0 })).toBe("");
+    expect(renderPreview({ shares: -100 })).toBe("");
+    expect(renderPreview({ shares: Number.NaN })).toBe("");
+  });
+});
+
 describe("模拟游戏页渲染", () => {
   /**
    * 注意：模拟游戏**允许**出现「买入/卖出」——那是用户的操作标签，不是程序的建议。
@@ -743,6 +809,7 @@ describe("模拟游戏页渲染", () => {
         news: stubNews(),
         sessionText: "已收盘",
         isTradingNow: false,
+        today: "2026-09-30",
         benchmarkName: "沪深300",
         benchmarkReturnPct: 1.5,
         totalAssets: 1_012_000,
@@ -1207,6 +1274,7 @@ describe("模拟游戏开局界面", () => {
         news: stubNews(),
         sessionText: "已收盘",
         isTradingNow: false,
+        today: "2026-09-30",
         benchmarkName: "沪深300",
         benchmarkReturnPct: null,
         totalAssets: 0,
@@ -1276,6 +1344,7 @@ describe("模拟游戏开局界面", () => {
         news: stubNews(),
         sessionText: "已收盘",
         isTradingNow: false,
+        today: "2026-09-30",
         benchmarkName: "沪深300",
         benchmarkReturnPct: null,
         totalAssets: 0,

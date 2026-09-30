@@ -6,6 +6,7 @@ import {
   findHolding,
   maxDrawdownPct,
   periodReturnPct,
+  previewOrder,
   priceLimitPct,
   realizedTrades,
   rolloverTradingDay,
@@ -313,6 +314,59 @@ describe("成交与记账", () => {
     expect(res.ok).toBe(false);
     expect(acc.cash).toBe(100);
     expect(acc.trades).toHaveLength(0);
+  });
+});
+
+/**
+ * 下单预览必须和真实成交同价。
+ *
+ * 这条是用户反馈换来的：「中国平安下单前显示 52.50，成交价 52.55，买入后行情
+ * 才更新到 53.29，账户立刻出现浮盈」。52.50→52.55 那 5 分钱是滑点，不是算错，
+ * 但当时界面上没有任何地方说过它 —— 预览存在的意义就是把这段差摆在明处。
+ * 如果哪天有人把 previewOrder 和 executeOrder 的算式改分家，这里必须红。
+ */
+describe("下单预览与真实成交一致", () => {
+  it("买入：预览价就是成交价（含 0.1% 滑点）", () => {
+    const acct = createAccount(1_000_000);
+    const req = REQ({ quote: QUOTE({ price: 52.5, prevClose: 52.5 }) });
+    const next = mustOk(acct, req);
+    const t = next.trades[0];
+    const p = previewOrder(52.5, "buy", 100, req.date);
+    expect(p.price).toBe(t.price);
+    expect(p.amount).toBe(t.amount);
+    expect(p.fee.total).toBe(t.fee);
+    // 52.50 × 1.001 = 52.5525 → 52.55，正是用户看到的那 5 分钱
+    expect(p.price).toBe(52.55);
+  });
+
+  it("卖出：预览价减去滑点，费用含印花税", () => {
+    // 买入当天不能卖（T+1），先走一个交易日解锁
+    const acct = rolloverTradingDay(
+      mustOk(createAccount(1_000_000), REQ({ shares: 200, quote: QUOTE({ price: 10 }) })),
+      "2026-09-24",
+      { "600519.SH": "2026-09-23" },
+    );
+    const req = REQ({ side: "sell", shares: 100, quote: QUOTE({ price: 20 }), date: "2026-09-24" });
+    const next = mustOk(acct, req);
+    const t = next.trades[next.trades.length - 1];
+    const p = previewOrder(20, "sell", 100, req.date);
+    expect(p.price).toBe(t.price);
+    expect(p.amount).toBe(t.amount);
+    expect(p.fee.total).toBe(t.fee);
+    expect(p.price).toBe(19.98);
+    expect(p.fee.stampDuty).toBeGreaterThan(0);
+  });
+
+  it("印花税改档（2023-08-28）之后，卖出预览跟着变", () => {
+    const before = previewOrder(10, "sell", 1000, "2023-08-25");
+    const after = previewOrder(10, "sell", 1000, "2023-08-28");
+    expect(before.fee.stampDuty).toBeGreaterThan(after.fee.stampDuty);
+    expect(before.fee.total).toBeGreaterThan(after.fee.total);
+  });
+
+  it("预览不校验、不改账户 —— 钱不够也会照算", () => {
+    const p = previewOrder(100, "buy", 100_000, "2026-09-23");
+    expect(p.amount).toBeGreaterThan(1_000_000);
   });
 });
 

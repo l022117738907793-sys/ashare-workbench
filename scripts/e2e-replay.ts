@@ -998,8 +998,57 @@ try {
     }, 250));
   `);
   check("实时模式下得单（点榜单填代码与股数）", ghFill.startsWith("OK:"), ghFill);
+
+  /**
+   * 用户反馈过：「下单前显示本地快照 52.50 元，成交价 52.55 元；买入后行情才更新
+   * 到 53.29 元，账户立刻出现浮盈。」那 5 分钱是滑点，但界面上没说过。
+   *
+   * 这里断言两件事：① 下单前就把「预计成交价」摆出来，而且写明了滑点；
+   * ② 它是拿**参考价**算出来的，不是凭空一个数。
+   * 至于这个价和真实成交价是否一致，由 `previewOrder` 的单测兜着（同一段算式）。
+   */
+  const ghPreview = await evaluate<{ text: string; price: string }>(`
+    const list = document.querySelector(".kv-list");
+    if (!list) return { text: "NO_KV_LIST", price: "" };
+    const text = list.innerText;
+    const priceInput = document.querySelector('input[placeholder*="代码"], input[placeholder*="名称"]');
+    return { text, price: priceInput ? priceInput.value : "" };
+  `);
+  check(
+    "下单前先给出预计成交价，并写明滑点",
+    ghPreview.text.includes("预计成交价") && ghPreview.text.includes("滑点"),
+    ghPreview.text.replace(/\n/g, " | ").slice(0, 160),
+  );
+  check(
+    "预计成交价旁边标着参考价（不是凭空一个数）",
+    ghPreview.text.includes("参考价"),
+    ghPreview.text,
+  );
+
   await evaluate(CLICK("提交委托"));
   await sleep(500);
+
+  /**
+   * 成交回执要报**真实成交价**，而且和下单前预览的是同一个数。
+   * 之前只报「已成交 100 股」，用户只能自己去成交记录里翻，才会觉得「怎么贵了 5 分」。
+   */
+  const ghReceipt = await evaluate<string>(`
+    const n = [...document.querySelectorAll(".notice")].map((e) => e.innerText).join(" | ");
+    return n;
+  `);
+  check(
+    "成交回执写明成交价与参考价，并说明差在滑点上",
+    ghReceipt.includes("成交价") && ghReceipt.includes("滑点"),
+    ghReceipt.slice(0, 200),
+  );
+  check(
+    "回执里的参考价就是下单前预览的参考价",
+    (() => {
+      const m = ghReceipt.match(/参考价 ([\d.]+)/);
+      return m !== null && ghPreview.text.includes(`参考价 ${m[1]}`);
+    })(),
+    ghReceipt.slice(0, 200),
+  );
 
   // 推演那边也下一单（挂单 → 走一天才成交）
   await evaluate(CLICK("历史推演"));

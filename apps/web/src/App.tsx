@@ -42,6 +42,7 @@ import {
   type ReplayLevel,
   type SeasonResult,
   type Side,
+  type Trade,
 } from "@aw/game";
 import { AnalysisView } from "./components/AnalysisView";
 import { GameRulesView } from "./components/GameRulesView";
@@ -92,6 +93,7 @@ import {
   type GameState,
 
   samePeriodBenchmark,
+  gameWatchCodes,
 } from "./lib/game";
 import {
   beijingClock,
@@ -167,6 +169,14 @@ export default function App() {
   // ── 模拟游戏账户（纯本地，无后端）──────────────────────────────
   const [game, setGame] = useState<GameState>(() => parseGameState(readLS(LS_GAME)));
   useEffect(() => writeLS(LS_GAME, serializeGameState(game)), [game]);
+
+  /**
+   * 下单卡里当前选中的标的（由 GameView 上报）。
+   *
+   * 只为了一件事：把它加进 `visibleCodes`，好在成交之前就拿到实时价。
+   * 见下面 `visibleCodes` 的 game 分支 —— 没有它，显示价与成交价会是两个时刻的。
+   */
+  const [gamePick, setGamePick] = useState<string | null>(null);
 
   /**
    * 「你不在的这段时间」。
@@ -330,16 +340,23 @@ export default function App() {
       });
     }
     if (tab === "game") {
-      // 模拟游戏要盯的是自己的持仓；没有持仓就不请求行情
+      /*
+       * 模拟游戏要盯的是自己的持仓，**外加正在下的那一单**。
+       *
+       * 只盯持仓会出岔子：想买的票在买之前没有实时价，下单卡显示的是快照
+       * 收盘价（往往是昨收），成交也按这个价；一买入它变成持仓、立刻拿到
+       * 实时价，账户瞬间多出一笔浮盈。那不是赚了，是两套价混用。
+       * 选中的标的由 GameView 上报（onPickCode），一起进轮询集合。
+       */
       return selectPollCodes({
         selectedStock: null,
         sectorMemberNames: [],
-        funnelTop: game.account.holdings.map((h) => h.code),
+        funnelTop: gameWatchCodes(game.account.holdings.map((h) => h.code), gamePick),
         codeByName,
       });
     }
     return []; // 历史 / 设置页没有行情要看，就不请求
-  }, [snapshot, tab, selectedCode, analysisSectorBase, selectedSectorBase, baseGroups, codeByName, game.account.holdings]);
+  }, [snapshot, tab, selectedCode, analysisSectorBase, selectedSectorBase, baseGroups, codeByName, game.account.holdings, gamePick]);
 
   const live = useLiveQuotes(visibleCodes, {
     intervalMs: settings.refreshMs,
@@ -649,41 +666,57 @@ export default function App() {
   }, [liveStocks]);
 
   const handleOrder = useCallback(
-    (code: string, side: Side, shares: number): { ok: boolean; reason?: string } => {
+    (
+      code: string,
+      side: Side,
+      shares: number,
+    ): { ok: boolean; reason?: string; trade?: Trade } => {
       const stock = stockByCode.get(code);
       if (!stock) return { ok: false, reason: `快照股票池里没有 ${code}，无法模拟交易` };
 
       const price = gamePricesObj[code] ?? null;
-      let outcome: { ok: boolean; reason?: string } = { ok: true };
 
-      setGame((g) => {
-        // 进入新的交易日时先解锁此前建仓的股份（T+1）
-        const account = rolloverTradingDay(g.account, live.today, lastBuyDates(g.account.trades));
-        const res = executeOrder(account, {
-          code,
-          name: stock.name,
-          side,
-          shares,
-          // 昨收取快照最后一根收盘价，用于涨跌停判断
-          quote: { code, name: stock.name, price, prevClose: lastClose(stock.close) },
-          date: live.today,
-          at: Date.now(),
-          isTradingNow,
-          isST: stock.isST,
-          // 创业板 300xxx / 科创板 688xxx 涨跌停 20%
-          isGrowthBoard: code.startsWith("300") || code.startsWith("688"),
-          typeAtTrade: gameResults.get(code)?.type,
-        });
-        if (!res.ok) {
-          outcome = { ok: false, reason: res.reason };
-          return account === g.account ? g : { ...g, account };
-        }
-        return { ...g, account: res.account };
+      /*
+       * 先算完再提交，而不是在 setGame 的更新函数里算。
+       *
+       * 两个原因：① 成交回执要报**真实成交价**（含滑点、含手续费），而更新函数
+       * 是延迟执行的，里面算出来的东西拿不出来；② 更新函数必须是纯的 ——
+       * 在里面写外部变量虽然在 React 的急切求值下「碰巧能用」，那是实现细节。
+       *
+       * 并发安全靠下面那句恒等判断：提交时状态已经变了就整笔作废，宁可让人
+       * 再点一次，也不能拿旧账户覆盖新账户。
+       */
+      // 进入新的交易日时先解锁此前建仓的股份（T+1）
+      const account = rolloverTradingDay(game.account, live.today, lastBuyDates(game.account.trades));
+      const res = executeOrder(account, {
+        code,
+        name: stock.name,
+        side,
+        shares,
+        // 昨收取快照最后一根收盘价，用于涨跌停判断
+        quote: { code, name: stock.name, price, prevClose: lastClose(stock.close) },
+        date: live.today,
+        at: Date.now(),
+        isTradingNow,
+        isST: stock.isST,
+        // 创业板 300xxx / 科创板 688xxx 涨跌停 20%
+        isGrowthBoard: code.startsWith("300") || code.startsWith("688"),
+        typeAtTrade: gameResults.get(code)?.type,
       });
 
-      return outcome;
+      if (!res.ok) {
+        // T+1 解锁这种「顺带发生的事」也要落盘，哪怕下单本身被拒了
+        if (account !== game.account) {
+          setGame((g) => (g.account === game.account ? { ...g, account } : g));
+        }
+        return { ok: false, reason: res.reason };
+      }
+
+      const committed = res.account;
+      setGame((g) => (g.account === game.account ? { ...g, account: committed } : g));
+      return { ok: true, trade: res.trade };
     },
-    [stockByCode, gamePricesObj, live.today, isTradingNow, gameResults],
+    [game.account, stockByCode, gamePricesObj, live.today, isTradingNow, gameResults],
   );
 
   const handleStartGame = useCallback((initialCash: number) => {
@@ -1131,6 +1164,7 @@ export default function App() {
             stocks={snapshot?.stocks ?? []}
             resultsByCode={gameResults}
             onOrder={handleOrder}
+            onPickCode={setGamePick}
             onStart={handleStartGame}
             onReset={handleResetGame}
             onSettle={handleSettle}
@@ -1138,6 +1172,7 @@ export default function App() {
             news={news}
             sessionText={sessionText}
             isTradingNow={isTradingNow}
+            today={live.today}
             benchmarkName={benchmarkName}
             benchmarkReturnPct={benchmarkReturnPct}
             totalAssets={gameTotalAssets}

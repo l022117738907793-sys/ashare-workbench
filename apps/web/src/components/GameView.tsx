@@ -10,11 +10,20 @@
  *   2. 不出现任何引导性文案（不为用户判断方向、不作推荐）；
  *   3. 引擎分类只作客观依据展示，不转化为操作建议。
  */
-import { useMemo, useState } from "react";
-import { LOT_SIZE, reviewReport, type ReviewReport, type SeasonResult, type Side } from "@aw/game";
+import { useEffect, useMemo, useState } from "react";
+import {
+  DEFAULT_SLIPPAGE,
+  LOT_SIZE,
+  reviewReport,
+  type ReviewReport,
+  type SeasonResult,
+  type Side,
+  type Trade,
+} from "@aw/game";
 import type { StockData, StockResult } from "@aw/core";
 import { sourceLabel, type Quote } from "@aw/data";
 import { StockPicker } from "./StockPicker";
+import { OrderPreview } from "./OrderPreview";
 import { amountOf, changePctOf, type PickStock } from "../lib/picks";
 import {
   CASH_OPTIONS,
@@ -40,7 +49,21 @@ export interface GameViewProps {
   stocks: StockData[];
   /** 引擎分类，作为客观依据展示（不是操作建议） */
   resultsByCode: Map<string, StockResult>;
-  onOrder: (code: string, side: Side, shares: number) => { ok: boolean; reason?: string };
+  onOrder: (
+    code: string,
+    side: Side,
+    shares: number,
+  ) => { ok: boolean; reason?: string; trade?: Trade };
+  /**
+   * 下单卡里当前选中的标的，选中/清空时上报。
+   *
+   * 为什么需要这个：行情只给「屏幕上看得见的东西」请求（见 App.tsx 的
+   * visibleCodes），而模拟游戏原来只盯**持仓**。于是想买的票在买之前没有实时价，
+   * 界面显示的是快照收盘价（往往是昨收），成交也按这个价；一买入它变成持仓、
+   * 立刻拿到实时价，账户瞬间多出一笔浮盈 —— 那不是赚了，是两套价混用。
+   * 上报之后，选中的标的一起进轮询集合，显示的价和成交的价就是同一个。
+   */
+  onPickCode?: (code: string | null) => void;
   /** 开局：按选定资金建立新账户 */
   onStart: (initialCash: number) => void;
   onReset: () => void;
@@ -51,6 +74,13 @@ export interface GameViewProps {
   news: LiveNewsState;
   sessionText: string;
   isTradingNow: boolean;
+  /**
+   * 当前交易日（北京时间日期）。
+   *
+   * 下单预览要用它算手续费 —— 卖出印花税 2023-08-28 起从 0.1% 降到 0.05%，
+   * 拿错日期会把费用报错。提交订单时 App 用的也是这个值，所以两处不会分家。
+   */
+  today: string;
   benchmarkName: string;
   benchmarkReturnPct: number | null;
   totalAssets: number;
@@ -164,11 +194,12 @@ function ReplayEntryCard(props: {
 export function GameView(props: GameViewProps) {
   const {
     state, prices, quotesByCode, stocks, resultsByCode,
-    onOrder, onStart, onReset, onSettle, onOpenRules, news, sessionText, isTradingNow,
+    onOrder, onStart, onReset, onSettle, onOpenRules, news, sessionText, isTradingNow, today,
     benchmarkName, benchmarkReturnPct, totalAssets, holdingsValue,
     replayReady, onStartReplay, onOpenLegend,
     replayInProgress = false, onResumeReplay,
     away = null, onDismissAway,
+    onPickCode,
   } = props;
 
   const { account, equity } = state;
@@ -218,6 +249,20 @@ export function GameView(props: GameViewProps) {
   const pickedQuote = code ? quotesByCode.get(code) : undefined;
   const pickedResult = code ? resultsByCode.get(code) : undefined;
 
+  /*
+   * 把当前选中的标的报上去，好让它进轮询集合。
+   *
+   * 放在这个组件里而不是 App：输入框是这里的局部状态，为了一个报价把它提到
+   * App 去会让每次敲键都重渲染整棵树。
+   *
+   * 只报**能对上号**的代码 —— 输入框允许边打边看，打到一半的「60」不是股票代码，
+   * 报上去会白发一次行情请求。清空时也要报一次 null，否则会停在一只已经不看的
+   * 票上一直拉行情。
+   */
+  useEffect(() => {
+    onPickCode?.(picked ? code : null);
+  }, [code, picked, onPickCode]);
+
   const holding = account.holdings.find((h) => h.code === code);
   const shares = Number(sharesText);
   const maxShares = suggestedMaxShares(side, pickedPrice, account.cash, holding?.sellable ?? 0);
@@ -234,11 +279,17 @@ export function GameView(props: GameViewProps) {
     }
     const res = onOrder(code, side, shares);
     if (res.ok) {
+      const slipText = `含 ${(DEFAULT_SLIPPAGE * 100).toFixed(1)}% 滑点`;
+      const fill = res.trade
+        ? `成交价 ${fmtNum(res.trade.price)}（参考价 ${
+            pickedPrice === null ? "—" : fmtNum(pickedPrice)
+          }，${slipText}）· 金额 ${fmtNum(res.trade.amount)} · 手续费 ${fmtNum(res.trade.fee)} 元`
+        : "";
       setFeedback({
         ok: true,
         msg: isTradingNow
-          ? `已成交 ${shares} 股。`
-          : `已成交 ${shares} 股（当前「${sessionText}」，按最近收盘价成交，非实时价）。`,
+          ? `已成交 ${shares} 股。${fill}`
+          : `已成交 ${shares} 股（当前「${sessionText}」，按最近收盘价成交，非实时价）。${fill}`,
       });
       setSharesText("100");
     } else {
@@ -464,6 +515,14 @@ export function GameView(props: GameViewProps) {
             {holding && (
               <KV k="当前持仓" v={`${holding.shares} 股 · 可卖 ${holding.sellable} 股 · 成本 ${fmtNum(holding.avgCost)}`} />
             )}
+            <OrderPreview
+              price={pickedPrice}
+              side={side}
+              shares={shares}
+              cash={account.cash}
+              sellable={holding?.sellable ?? 0}
+              today={today}
+            />
             {pickedResult && (
               <KV
                 k="引擎分类"
@@ -478,6 +537,19 @@ export function GameView(props: GameViewProps) {
               />
             )}
           </div>
+        )}
+
+        {/*
+          还没拿到实时报价时明说一句。
+          这正是用户踩过的坑：下单卡显示的是快照昨收，成交也按它，等实时行情到了
+          价格一跳到今天的价，账户立刻多出一笔浮盈。说清楚「这是昨天的价、还会变」，
+          比让人自己猜好。
+        */}
+        {picked && pickedPrice !== null && !pickedQuote && (
+          <p className="field-hint">
+            现在这个是快照里的最近收盘价（通常是昨收），实时报价还没到。
+            选中的标的已经加进行情请求，几秒后会换成实时价。
+          </p>
         )}
 
         {!isTradingNow && (
