@@ -1277,6 +1277,28 @@ try {
     `),
   );
 
+  /**
+   * 术语高亮把专业词都换成了 `<button>`。只要这个按钮落在另一个按钮或链接
+   * 里面，就是非法的嵌套可交互元素 —— 浏览器会把结构拆开，表现是「点了没反应」。
+   * 单测已经盯住了文案最多的规则页和说明页，这里再对**真实渲染出来的整页**
+   * 兜一遍：跑完一路的点击之后，页面上不该存在任何嵌套。
+   */
+  const nested = await evaluate<string[]>(`
+    const bad = [];
+    for (const b of document.querySelectorAll("button")) {
+      if (b.querySelector("button") || b.querySelector("a")) bad.push("button: " + b.innerText.slice(0, 40));
+    }
+    for (const a of document.querySelectorAll("a")) {
+      if (a.querySelector("a") || a.querySelector("button")) bad.push("a: " + a.innerText.slice(0, 40));
+    }
+    return bad;
+  `);
+  check(
+    "整页没有嵌套的可交互元素（术语按钮没被塞进别的按钮里）",
+    nested.length === 0,
+    JSON.stringify(nested).slice(0, 240),
+  );
+
   console.log("\n十四、控制台没有报错");
   const errs = await evaluate<string[]>(`
     return (window.__e2eErrors || []);
