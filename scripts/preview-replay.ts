@@ -11,6 +11,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { ReplayView } from "../apps/web/src/components/ReplayView";
+import { LevelDetail, LevelPicker } from "../apps/web/src/components/LevelPicker";
+import { LEVELS } from "../packages/game/src/levels";
+import { CASH_OPTIONS, DEFAULT_INITIAL_CASH } from "../apps/web/src/lib/game";
 import { placeOrder, advanceDay, settleReplay, pendingFor } from "../packages/game/src/replay";
 import { startReplay } from "../apps/web/src/lib/replay";
 import type { Snapshot, StockData } from "../packages/core/src/engine";
@@ -67,7 +70,7 @@ const html = renderToStaticMarkup(
     state,
     hideDate,
     label: "随机开局",
-    stocks,
+    stocks: state.config.instruments,
     benchmarkName: "沪深300",
     onOrder: () => ({ ok: true }),
     onCancel: () => {},
@@ -79,16 +82,46 @@ const html = renderToStaticMarkup(
 const cssFile = readdirSync(join(ROOT, "apps/web/dist/assets")).find((f) => f.endsWith(".css"));
 const css = cssFile ? readFileSync(join(ROOT, "apps/web/dist/assets", cssFile), "utf8") : "";
 
-writeFileSync(
-  out,
-  `<!doctype html>
+function page(title: string, body: string): string {
+  return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>历史推演预览</title>
+<title>${title}</title>
 <style>${css}</style>
-</head><body><div class="app"><main class="app-main">${html}</main></div></body></html>`,
-  "utf8",
+</head><body><div class="app"><main class="app-main">${body}</main></div></body></html>`;
+}
+
+writeFileSync(out, page("历史推演预览", html), "utf8");
+
+// 顺手把传奇模式的两页也渲染出来（排版问题只有看得见才算发现）
+const listHtml = renderToStaticMarkup(
+  createElement(LevelPicker, {
+    ready: true,
+    loadingId: null,
+    error: null,
+    onStart: () => {},
+    onBack: () => {},
+    cashOptions: CASH_OPTIONS,
+    defaultCash: DEFAULT_INITIAL_CASH,
+  }),
 );
+const briefHtml = renderToStaticMarkup(
+  createElement(LevelDetail, {
+    level: LEVELS[3]!,
+    ready: true,
+    loading: false,
+    error: null,
+    cash: DEFAULT_INITIAL_CASH,
+    cashOptions: CASH_OPTIONS,
+    onCash: () => {},
+    onStart: () => {},
+    onBack: () => {},
+  }),
+);
+const dirOf = out.slice(0, out.lastIndexOf("/"));
+writeFileSync(`${dirOf}/replay-levels.html`, page("关卡列表预览", listHtml), "utf8");
+writeFileSync(`${dirOf}/replay-brief.html`, page("开局简报预览", briefHtml), "utf8");
+console.log(`已写出 ${dirOf}/replay-levels.html 与 replay-brief.html`);
 
 const settled = settleReplay(state);
 console.log(`已写出 ${out}`);

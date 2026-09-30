@@ -25,7 +25,7 @@ import {
   type Snapshot,
   type StockData,
 } from "@aw/core";
-import { advanceDay, createReplay, placeOrder } from "@aw/game";
+import { advanceDay, createReplay, LEVELS, placeOrder } from "@aw/game";
 import { AnalysisView } from "./components/AnalysisView";
 import type { NewsItem } from "@aw/data";
 import { GameRulesView } from "./components/GameRulesView";
@@ -33,6 +33,7 @@ import { NewsPanel } from "./components/NewsPanel";
 import type { LiveNewsState } from "./lib/useLiveNews";
 import { GuideView } from "./components/GuideView";
 import { GameView } from "./components/GameView";
+import { LevelDetail, LevelPicker } from "./components/LevelPicker";
 import { HistoryView } from "./components/HistoryView";
 import { SettingsView } from "./components/SettingsView";
 import { WorkbenchView } from "./components/WorkbenchView";
@@ -375,6 +376,7 @@ describe("模拟盘页渲染", () => {
         holdingsValue: 122_000,
         replayReady: false,
         onStartReplay: () => {},
+        onOpenLegend: () => {},
         ...over,
       }),
     );
@@ -604,6 +606,7 @@ describe("模拟盘开局界面", () => {
         holdingsValue: 0,
         replayReady,
         onStartReplay: () => {},
+        onOpenLegend: () => {},
       }),
     );
   }
@@ -642,6 +645,7 @@ describe("模拟盘开局界面", () => {
         holdingsValue: 0,
         replayReady: false,
         onStartReplay: () => {},
+        onOpenLegend: () => {},
       }),
     );
     expect(html).toContain("没有开盘价");
@@ -831,5 +835,102 @@ describe("历史推演视图（ReplayView）", () => {
     for (const word of ["必涨", "必跌", "稳赚", "包赚"]) {
       expect(html).not.toContain(word);
     }
+  });
+});
+
+describe("传奇模式：关卡列表与开局简报", () => {
+  const cashOptions = [100_000, 150_000, 200_000, 250_000, 300_000];
+
+  function renderList(ready = true): string {
+    return renderToStaticMarkup(
+      createElement(LevelPicker, {
+        ready,
+        loadingId: null,
+        error: null,
+        onStart: () => {},
+        onBack: () => {},
+        cashOptions,
+        defaultCash: 200_000,
+      }),
+    );
+  }
+
+  function renderDetail(levelId: string, ready = true): string {
+    const level = LEVELS.find((l) => l.id === levelId)!;
+    return renderToStaticMarkup(
+      createElement(LevelDetail, {
+        level,
+        ready,
+        loading: false,
+        error: null,
+        cash: 200_000,
+        cashOptions,
+        onCash: () => {},
+        onStart: () => {},
+        onBack: () => {},
+      }),
+    );
+  }
+
+  it("列出全部 10 关，每关都带上真实日期", () => {
+    const html = renderList();
+    expect(LEVELS).toHaveLength(10);
+    for (const l of LEVELS) {
+      expect(html, `缺了 ${l.title}`).toContain(l.title);
+      expect(html, `缺了 ${l.startDate}`).toContain(l.startDate);
+    }
+  });
+
+  it("没有关卡数据时说明原因，而不是给一个点不动的按钮", () => {
+    const html = renderList(false);
+    expect(html).toContain("还没有关卡数据");
+    expect(html).not.toContain("进入 20");
+  });
+
+  /**
+   * 传奇模式的规则是**日期照实显示**（用户定的：纪念性复盘，不是猜谜）。
+   * 所以这里断言日期必须在，和随机模式那条「不许出现日期」正好相反。
+   */
+  it("简报页显示进场日期，不是藏着", () => {
+    const html = renderDetail("2020-02-03");
+    expect(html).toContain("2020-01-14"); // 入场日
+    expect(html).toContain("春节之后");
+    expect(html).toContain("进场那天能看到的");
+  });
+
+  it("简报页把简报的每一条都渲染出来", () => {
+    const level = LEVELS.find((l) => l.id === "2020-02-03")!;
+    const html = renderDetail("2020-02-03");
+    for (const line of level.briefing) expect(html).toContain(line);
+    expect(html).toContain(level.theme);
+  });
+
+  /**
+   * 组件不解析 markdown，所以文案里不能有 `**`。
+   * packages/game 那边也有一条同样的用例；这里再测一次渲染结果，
+   * 是因为真正会难看的地方是页面，不是数据。
+   */
+  it("渲染出来的简报里不该出现 markdown 星号", () => {
+    for (const l of LEVELS) {
+      const html = renderDetail(l.id);
+      expect(html, `关卡 ${l.id} 的页面里有 ** 星号`).not.toContain("**");
+    }
+  });
+
+  /**
+   * 和其它所有页面一样，红线扫一遍。
+   * 关卡文案是这轮新写的，最容易顺手写出「该买入了」这类话。
+   */
+  it("关卡列表和每一关的简报都不出现买卖建议字样", () => {
+    const banned = ["建议买入", "建议卖出", "推荐买", "必涨", "必跌", "稳赚", "目标价", "抄底", "满仓干"];
+    const pages = [renderList(), renderList(false), ...LEVELS.map((l) => renderDetail(l.id))];
+    for (const html of pages) {
+      for (const w of banned) expect(html, `页面里出现了「${w}」`).not.toContain(w);
+    }
+  });
+
+  it("所有关卡页面都带免责声明", () => {
+    for (const l of LEVELS) expect(renderDetail(l.id)).toContain("不构成投资建议");
+    expect(renderList()).toContain("不构成投资建议");
   });
 });

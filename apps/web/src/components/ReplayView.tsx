@@ -16,7 +16,6 @@ import {
   type SeasonResult,
   type Side,
 } from "@aw/game";
-import type { StockData } from "@aw/core";
 import { displayDate, maskDate, maskDatesIn, replayPrices, settleReplay } from "../lib/replay";
 import { fmtNum, fmtPct } from "../lib/helpers";
 import { Card, EmptyHint, KV, Notice } from "./common";
@@ -27,8 +26,23 @@ export interface ReplayViewProps {
   hideDate: boolean;
   /** 模式 2（传奇）的节点名 */
   label: string;
-  stocks: StockData[];
+  /**
+   * 可下单的标的清单。
+   *
+   * **只能来自这一局自己的标的池**（`state.config.instruments`）：
+   * 随机模式是当前快照，传奇模式是那一关的历史分片。用当前快照去下单 2016 年的关卡，
+   * 玩家会搜到当时根本还没上市的票，然后每一笔委托都提示「没有行情」。
+   */
+  stocks: Array<{ code: string; name: string }>;
   benchmarkName: string;
+  /**
+   * 传奇模式（模式 2）的开局简报。
+   *
+   * 随机模式不传——那一局的规则就是「不告诉你这是哪一天」；
+   * 传奇模式的规则相反：「这是哪一天、当时公开的信息有哪些」全都摊开给你看，
+   * 因为你本来就知道后来发生了什么，装不知道才是不诚实的。
+   */
+  briefing?: { startDate: string; theme: string; lines: string[]; note?: string } | undefined;
   onOrder: (code: string, side: Side, shares: number) => { ok: boolean; reason?: string };
   onCancel: (orderId: string) => void;
   /** 推进 n 个交易日 */
@@ -49,7 +63,7 @@ function Metric({ k, v, tone }: { k: string; v: string; tone?: "good" | "bad" | 
 }
 
 export function ReplayView(props: ReplayViewProps) {
-  const { state, hideDate, label, stocks, benchmarkName, onOrder, onCancel, onAdvance, onExit } = props;
+  const { state, hideDate, label, stocks, benchmarkName, briefing, onOrder, onCancel, onAdvance, onExit } = props;
 
   const [side, setSide] = useState<Side>("buy");
   const [code, setCode] = useState("");
@@ -121,6 +135,25 @@ export function ReplayView(props: ReplayViewProps) {
       <p className="game-disclaimer" role="note">
         ⚠️ 模拟盘 · 虚拟资金 · 不构成投资建议
       </p>
+
+      {briefing ? (
+        <Card title="开局简报" subtitle={`你进场的那一天：${briefing.startDate} · 当时能看到的只有这些`}>
+          <ul className="briefing-list">
+            {briefing.lines.map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ul>
+          <Notice tone="info">
+            <strong>这一局要想清楚的是：</strong>
+            {briefing.theme}
+          </Notice>
+          <p className="hint">
+            你知道后来发生了什么，但当时的人不知道。简报只写到进场那天为止——后面每一天的新闻和行情，
+            要自己走一天看一天。
+          </p>
+          {briefing.note ? <p className="hint">{briefing.note}</p> : null}
+        </Card>
+      ) : null}
 
       <Card
         title={label}

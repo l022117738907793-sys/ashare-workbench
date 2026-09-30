@@ -15,5 +15,12 @@ data/cache/
 # 曾经被误提交过，于是仓库里常年躺着两三兆的重复数据，而且会随每日快照一起长。
 apps/web/public/data/
 
+# 同上：也是 sync_web_data.mjs 生成的，源在 data/history/
+apps/web/public/history/
+
 # 回测用的深历史快照（体积大，本地生成即可）
 data/_deep_*/
+
+# 历史推演的中间产物：619 只股票 × 9 年日线，几十兆。
+# data/history/（切好的关卡分片）才是要进仓库的发布产物。
+data/history-cache/

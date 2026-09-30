@@ -8,8 +8,9 @@
  *   npx vite-node scripts/e2e-replay.ts
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { LEVELS } from "@aw/game";
 
 const ROOT = process.cwd();
 const DIST = join(ROOT, "apps/web/dist");
@@ -281,7 +282,121 @@ try {
     !["必涨", "必跌", "稳赚", "包赚"].some((w) => settled.includes(w)),
   );
 
-  console.log("\n七、控制台没有报错");
+  console.log("\n七、传奇模式：选一关 → 开局简报 → 带日期推演");
+  // 「退出推演」会弹 confirm；无头浏览器默认返回 false，先把它改掉
+  await evaluate(`window.confirm = () => true; return "OK";`);
+  const exited = await evaluate<string>(CLICK("退出推演"));
+  check("点得到「退出推演」", exited === "OK", exited);
+  await sleep(700);
+  check(
+    "退出后回到开局界面",
+    await waitFor(`document.body.innerText.includes("另一种玩法") || document.body.innerText.includes("传奇模式")`, "回到开局"),
+  );
+
+  const openLegend = await evaluate<string>(CLICK("传奇模式"));
+  check("点得到「传奇模式」入口", openLegend === "OK", openLegend);
+  check(
+    "关卡列表出来了",
+    await waitFor(`document.body.innerText.includes("2016-11-01")`, "关卡列表"),
+  );
+  const listText = await evaluate<string>(`return document.body.innerText;`);
+  // 十关的入场日都应该在列表上（传奇模式恰恰要把日期亮出来）
+  const missing = LEVELS.filter((l) => !listText.includes(l.startDate));
+  check("十关的入场日期全部列出来", missing.length === 0, missing.map((l) => l.startDate).join(", "));
+
+  // 第 4 关：2020 年春节那一关
+  const level = LEVELS.find((l) => l.id === "2020-02-03")!;
+  const openLevel = await evaluate<string>(CLICK(level.title));
+  check(`点得到第 ${level.order} 关「${level.title}」`, openLevel === "OK", openLevel);
+  await sleep(500);
+  const brief = await evaluate<string>(`return document.body.innerText;`);
+  check("简报页显示进场日期（传奇模式不藏）", brief.includes(level.startDate), level.startDate);
+  check("简报页有「进场那天能看到的」", brief.includes("进场那天能看到的"));
+  check("简报每一条都渲染出来了", level.briefing.every((line) => brief.includes(line)));
+  check("思考题也渲染出来了", brief.includes(level.theme.slice(0, 12)));
+
+  const enter = await evaluate<string>(CLICK(`进入 ${level.startDate}`));
+  check("点得到「进入」按钮", enter === "OK", enter);
+  const inLevel = await waitFor(
+    `document.body.innerText.includes("待成交委托") && document.body.innerText.includes("走一天")`,
+    "关卡载入",
+  );
+  check("载入了这一关的行情并进入推演", inLevel);
+
+  const levelText = await evaluate<string>(`return document.body.innerText;`);
+  check(
+    "这一关的日历起点与关卡定义一致",
+    levelText.includes(level.startDate),
+    (levelText.match(/20\d\d-\d\d-\d\d/g) ?? []).slice(0, 4).join(", "),
+  );
+  check(
+    "开局简报也带在推演页上",
+    levelText.includes("进场那天能看到的") || levelText.includes(level.theme.slice(0, 12)),
+  );
+  /**
+   * 股票池必须来自分片，不是当前快照。
+   *
+   * 只能查 datalist：股票名不会出现在可见文字里（option 不进 innerText）。
+   * 读磁盘上那一关的分片，把「当年成交额居前」的代码拿出来对。
+   */
+  const shard = JSON.parse(
+    readFileSync(join(ROOT, "data/history", `level-${level.id}.json`), "utf-8"),
+  ) as { instruments: Array<{ code: string }> };
+  const options = await evaluate<string[]>(`
+    return [...document.querySelectorAll('datalist option')].map(o => o.getAttribute("value"));
+  `);
+  check(
+    "datalist 里的标的数量与分片一致（不是当前快照那 600 多只）",
+    options.length === shard.instruments.length,
+    `页面 ${options.length} 只，分片 ${shard.instruments.length} 只`,
+  );
+  const want = shard.instruments.slice(0, 5).map((i) => i.code);
+  check(
+    "当年成交额居前的票在页面上下得出来",
+    want.every((c) => options.includes(c)),
+    `期望 ${want.join(", ")}；页面 ${options.slice(0, 5).join(", ")}`,
+  );
+
+  console.log("\n八、在关卡里下单并推进一步");
+  const lvCode = await evaluate<string>(`
+    const codeInput = document.querySelector('input[list], input[placeholder*="代码"], input[placeholder*="名称"]');
+    if (!codeInput) return "NO_CODE_INPUT";
+    const first = document.querySelector('datalist option');
+    const code = first ? first.getAttribute("value") : null;
+    if (!code) return "NO_OPTION";
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(codeInput, code);
+    codeInput.dispatchEvent(new Event("input", { bubbles: true }));
+    const numInput = [...document.querySelectorAll('input[type="number"]')].pop();
+    if (!numInput) return "NO_QTY_INPUT";
+    setter.call(numInput, "100");
+    numInput.dispatchEvent(new Event("input", { bubbles: true }));
+    return code;
+  `);
+  check("关卡里填得进标的与股数", !lvCode.startsWith("NO_"), lvCode);
+  await evaluate(CLICK("挂单"));
+  await sleep(400);
+  await evaluate(CLICK("走一天"));
+  await sleep(700);
+  const lvAfter = await evaluate<string>(`return document.body.innerText;`);
+  check("走一天后成交，并注明价格来自开盘价", lvAfter.includes("开盘价"), lvAfter.slice(0, 100));
+
+  console.log("\n九、刷新后回到同一关（存档里存了 levelId）");
+  await send("Page.enable");
+  await send("Page.reload", { ignoreCache: true });
+  await sleep(2000);
+  await waitFor(`document.body.innerText.includes("A 股趋势筛选工作台")`, "重新加载");
+  await evaluate(CLICK("模拟盘"));
+  await sleep(800);
+  check(
+    "刷新后还在推演里，没有退回关卡列表",
+    await waitFor(`document.body.innerText.includes("走一天")`, "关卡被还原"),
+  );
+  const restored = await evaluate<string>(`return document.body.innerText;`);
+  check("还原的是同一关（能看到这一关的日期）", restored.includes(level.startDate));
+  check("成交记录还在", restored.includes("开盘价") || restored.includes("推演日志"));
+
+  console.log("\n十、控制台没有报错");
   const errs = await evaluate<string[]>(`
     return (window.__e2eErrors || []);
   `);

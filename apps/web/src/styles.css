@@ -1250,3 +1250,117 @@ code {
   background: var(--border);
   border-radius: 2px;
 }
+
+/* ── 传奇模式：关卡列表与开局简报 ─────────────────────────── */
+
+/* 通用小字提示。之前几处已经用了 className="hint" 但一直没有对应样式 */
+.hint {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.hint code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+
+.level-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.level-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.level-item:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.level-order {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.level-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.level-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.level-sub {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.level-date {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.briefing-h {
+  margin: 16px 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+
+.briefing-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.briefing-list li {
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
+.briefing-theme {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--accent-soft);
+  font-size: 13.5px;
+  line-height: 1.65;
+}

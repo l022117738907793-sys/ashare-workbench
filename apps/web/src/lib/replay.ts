@@ -47,6 +47,13 @@ export interface ReplaySave {
   initialCash: number;
   /** 参与标的的代码；空数组表示快照里的全部股票 */
   codes: string[];
+  /**
+   * 传奇模式（模式 2）的关卡 id。
+   *
+   * 传奇模式的行情**不来自快照**，而是来自 `history/level-<id>.json` 这份离线分片，
+   * 所以还原这一局时必须知道是哪一关。null / 缺省 = 随机模式（模式 3），走快照还原。
+   */
+  levelId: string | null;
   label: string;
   dayIndex: number;
   account: Account;
@@ -71,6 +78,13 @@ export interface ReplaySession {
   /** 参与标的，用于重建配置 */
   codes: string[];
   label: string;
+  /**
+   * 传奇模式是哪一关（`LEVELS` 里的 id），随机模式为 null。
+   *
+   * 开局简报不单独存：它就是 `levelById(levelId)`，从 id 现查即可，
+   * 存两份反而会出现「简报改了、存档里还是老的」。
+   */
+  levelId: string | null;
 }
 
 /** 沪深300 在本快照里的收盘价序列 */
@@ -141,7 +155,7 @@ export function startReplay(
 /** 把进度的「参数部分」与「状态部分」一起存下来 */
 export function toSave(
   state: ReplayState,
-  meta: { mode: "random" | "legend"; hideDate: boolean; codes?: string[] },
+  meta: { mode: "random" | "legend"; hideDate: boolean; codes?: string[]; levelId?: string | null },
 ): ReplaySave {
   return {
     version: 1,
@@ -150,6 +164,7 @@ export function toSave(
     startIndex: state.config.startIndex,
     initialCash: state.config.initialCash,
     codes: meta.codes ?? state.config.instruments.map((i) => i.code),
+    levelId: meta.levelId ?? null,
     label: state.config.label ?? "",
     dayIndex: state.dayIndex,
     account: state.account,
@@ -173,6 +188,7 @@ export function parseReplaySave(raw: unknown): ReplaySave | null {
     startIndex: s.startIndex,
     initialCash: s.initialCash ?? s.account.initialCash,
     codes: s.codes,
+    levelId: typeof s.levelId === "string" ? s.levelId : null,
     label: s.label ?? "",
     dayIndex: s.dayIndex,
     account: s.account,
@@ -208,6 +224,18 @@ export function restoreReplay(snapshot: Snapshot, calendar: string[], save: Repl
     codes: save.codes,
     label: save.label,
   });
+  return applySave(config, calendar, save);
+}
+
+/**
+ * 把存档里的「进度」盖回一个刚建好的空局上。
+ *
+ * 两件事必须小心：
+ * 1. 快照/分片换了一版时日历长度可能对不上——把 dayIndex 夹回合法范围，
+ *    而不是丢弃存档：玩家的成交记录比日历对齐重要得多。
+ * 2. 账户、委托、日志、seq 全部原样搬过来，一行都不能重算——重算等于作弊。
+ */
+function applySave(config: ReplayConfig, calendar: string[], save: ReplaySave): ReplayState {
   const base = createReplay(config);
   const dayIndex = Math.min(Math.max(save.dayIndex, config.startIndex), Math.max(0, calendar.length - 1));
   const date = calendar[dayIndex] ?? "";
@@ -252,6 +280,103 @@ export function maskDate(state: ReplayState, date: string, hideDate: boolean): s
 export function maskDatesIn(state: ReplayState, text: string, hideDate: boolean): string {
   if (!hideDate) return text;
   return text.replace(/\d{4}-\d{2}-\d{2}/g, (d) => maskDate(state, d, true));
+}
+
+// ── 传奇模式（模式 2）：关卡 ────────────────────────────────
+//
+// 和随机模式的根本区别：**行情不来自当前快照**。
+// 关卡跑在 2016–2024 年，而快照只有最近 120 天，所以每关备好一份离线分片
+// （`data/history/level-<id>.json`，由 scripts/build-history-shards.ts 生成，
+// 部署时同步到站点的 `history/` 目录）。
+
+/** 关卡分片放在站点根目录的 `history/`（构建产物，不随 dataBase 设置变） */
+export const DEFAULT_HISTORY_BASE = "./history";
+
+/** 关卡分片的结构，与 scripts/build-history-shards.ts 的输出一一对应 */
+export interface LevelShard {
+  levelId: string;
+  startDate: string;
+  days: number;
+  calendar: string[];
+  benchmark: { code: string; name: string; close: Array<number | null> };
+  instruments: ReplayInstrument[];
+  note: string;
+  generatedAt?: string;
+}
+
+/** 分片合不合法。宁可当场说「没有这一关」，也不要拿半截数据开局。 */
+export function isLevelShard(raw: unknown): raw is LevelShard {
+  if (typeof raw !== "object" || raw === null) return false;
+  const s = raw as Partial<LevelShard>;
+  if (typeof s.levelId !== "string" || !Array.isArray(s.calendar) || s.calendar.length === 0) return false;
+  if (!Array.isArray(s.instruments) || s.instruments.length === 0) return false;
+  const n = s.calendar.length;
+  // 每一列都必须与日历等长——引擎靠这个长度对齐，对不上会被当成「没有开盘价」
+  return s.instruments.every(
+    (i) => Array.isArray(i.open) && i.open.length === n && Array.isArray(i.close) && i.close.length === n,
+  );
+}
+
+/**
+ * 站点里发布了哪几关。
+ *
+ * `history/index.json` 是 build-history-shards.ts 写的一份清单。有了它，
+ * 前端不用「试拉一关、失败了算是没有」——那会白白下载几百 KB。
+ * 清单本身不存在（还没跑过构建脚本）就返回空数组，不算错误。
+ */
+export async function loadLevelIndex(
+  opts: { base?: string; fetchImpl?: typeof fetch } = {},
+): Promise<string[]> {
+  const base = (opts.base ?? DEFAULT_HISTORY_BASE).replace(/\/+$/, "");
+  const f = opts.fetchImpl ?? fetch;
+  try {
+    const res = await f(`${base}/index.json`);
+    if (!res.ok) return [];
+    const raw: unknown = await res.json();
+    const levels = (raw as { levels?: unknown }).levels;
+    return Array.isArray(levels) ? levels.filter((v): v is string => typeof v === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function loadLevelShard(
+  levelId: string,
+  opts: { base?: string; fetchImpl?: typeof fetch } = {},
+): Promise<LevelShard> {
+  const base = (opts.base ?? DEFAULT_HISTORY_BASE).replace(/\/+$/, "");
+  const f = opts.fetchImpl ?? fetch;
+  const url = `${base}/level-${levelId}.json`;
+  const res = await f(url);
+  if (!res.ok) throw new Error(`读取 ${url} 失败：HTTP ${res.status}`);
+  const raw: unknown = await res.json();
+  if (!isLevelShard(raw)) throw new Error(`${url} 不是一份完整的关卡数据`);
+  return raw;
+}
+
+/** 用一份关卡分片开局。玩家总是从这一关的第 1 天进场，所以 startIndex 恒为 0。 */
+export function startLevelReplay(shard: LevelShard, initialCash: number, label?: string): ReplayState {
+  return createReplay({
+    calendar: [...shard.calendar],
+    startIndex: 0,
+    initialCash,
+    instruments: shard.instruments,
+    benchmarkClose: shard.benchmark?.close,
+    label: label ?? shard.levelId,
+  });
+}
+
+/** 用分片还原一局传奇模式。分片没变的话，日历一定对得上。 */
+export function restoreLevelReplay(shard: LevelShard, save: ReplaySave): ReplayState {
+  const config: ReplayConfig = {
+    calendar: [...shard.calendar],
+    startIndex: 0,
+    initialCash: save.initialCash,
+    instruments: shard.instruments,
+    benchmarkClose: shard.benchmark?.close,
+    label: save.label,
+  };
+  return applySave(config, shard.calendar, save);
 }
 
 export { advanceDay, advanceDays, cancelOrder, jumpTo, placeOrder, replayDate, replayPrices, settleReplay };

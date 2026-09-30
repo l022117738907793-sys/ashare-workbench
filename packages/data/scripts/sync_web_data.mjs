@@ -78,9 +78,13 @@ if (!noTrim && trimDays > 0) {
     const kept = calendar.slice(keepFrom);
     writeFileSync(calPath, JSON.stringify(kept));
 
+    // 注意：**每一个按天对齐的字段都要跟着裁**。漏掉哪个，哪个字段的长度就会
+    // 和 calendar 对不上 —— `open` 就是这么差点被漏掉的：历史推演要按开盘价撮合，
+    // 裁剪后长度对不上，整列会被当成"没有开盘价"，每一笔委托都作废。
     const cutSeries = (arr) =>
       arr.map((s) => ({
         ...s,
+        ...(Array.isArray(s.open) ? { open: s.open.slice(keepFrom) } : {}),
         close: s.close.slice(keepFrom),
         high: s.high.slice(keepFrom),
         low: s.low.slice(keepFrom),
@@ -128,3 +132,22 @@ if (keep > 0) {
 }
 
 console.log(`同步快照 ${latest} -> apps/web/public/data`);
+
+// ── 历史推演的关卡分片 ────────────────────────────────────────
+// 传奇模式的行情来自 data/history/（由 scripts/build-history-shards.ts 从
+// data/history-cache/ 切出来）。分片是**发布产物**，所以进仓库；
+// 缓存是中间产物（600 多个文件、几十兆），不进仓库。
+const HISTORY_SRC = join(DATA_DIR, "history");
+const HISTORY_DEST = join(ROOT, "apps", "web", "public", "history");
+if (existsSync(HISTORY_SRC)) {
+  const shards = readdirSync(HISTORY_SRC).filter((f) => f.endsWith(".json"));
+  if (shards.length > 0) {
+    rmSync(HISTORY_DEST, { recursive: true, force: true });
+    mkdirSync(HISTORY_DEST, { recursive: true });
+    for (const f of shards) cpSync(join(HISTORY_SRC, f), join(HISTORY_DEST, f));
+    const bytes = shards.reduce((n, f) => n + statSync(join(HISTORY_SRC, f)).size, 0);
+    console.log(`同步历史关卡分片 ${shards.length} 个 -> apps/web/public/history（${(bytes / 1024).toFixed(0)} KB）`);
+  }
+} else {
+  console.log("（没有 data/history，跳过历史关卡分片；跑 scripts/build-history-shards.ts 生成）");
+}

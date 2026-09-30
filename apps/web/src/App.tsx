@@ -38,7 +38,9 @@ import {
   rolloverTradingDay,
   settleSeason,
   totalAssets as calcTotalAssets,
+  levelById,
   type EquityPoint,
+  type ReplayLevel,
   type SeasonResult,
   type Side,
 } from "@aw/game";
@@ -50,11 +52,16 @@ import { HistoryView } from "./components/HistoryView";
 import { SettingsView } from "./components/SettingsView";
 import { WorkbenchView } from "./components/WorkbenchView";
 import { ReplayView } from "./components/ReplayView";
+import { LevelPicker } from "./components/LevelPicker";
 import { Notice } from "./components/common";
 import {
   advanceDays,
   cancelOrder,
   placeOrder,
+  loadLevelIndex,
+  loadLevelShard,
+  startLevelReplay,
+  restoreLevelReplay,
   startReplay,
   toSave,
   restoreReplay,
@@ -65,6 +72,8 @@ import {
 } from "./lib/replay";
 import {
   benchmarkCurve,
+  CASH_OPTIONS,
+  DEFAULT_INITIAL_CASH,
   defaultGameState,
   startGame,
   lastBuyDates,
@@ -152,12 +161,19 @@ export default function App() {
   // 存档里只有进度，行情每次从快照还原 —— 六十万个数字塞不进 localStorage。
   const [replay, setReplay] = useState<ReplaySession | null>(null);
   const replayRestored = useRef(false);
+  // 传奇模式（模式 2）的关卡选择：只在没开局时出现
+  const [legendOpen, setLegendOpen] = useState(false);
+  const [legendLoading, setLegendLoading] = useState<string | null>(null);
+  const [legendError, setLegendError] = useState<string | null>(null);
+  // 站点里发布了哪几关（读 history/index.json）。null = 还没问过。
+  const [legendIds, setLegendIds] = useState<string[] | null>(null);
   useEffect(() => {
     if (!replay) return;
     writeLS(LS_REPLAY, JSON.stringify(toSave(replay.state, {
       mode: replay.mode,
       hideDate: replay.hideDate,
       codes: replay.codes,
+      levelId: replay.levelId,
     })));
   }, [replay]);
 
@@ -587,7 +603,31 @@ export default function App() {
     if (replayRestored.current || replay || !snapshot || !calendar) return;
     const save = readReplaySave(readLS(LS_REPLAY));
     if (!save) return;
+    // 先立旗再 await：下面要发网络请求，中间可能重新进来一次
     replayRestored.current = true;
+
+    if (save.levelId) {
+      // 传奇模式的行情不在快照里，得把那一关的分片拉下来才能还原
+      const levelId = save.levelId;
+      void loadLevelShard(levelId)
+        .then((shard) => {
+          setReplay({
+            state: restoreLevelReplay(shard, save),
+            mode: "legend",
+            hideDate: false,
+            codes: save.codes,
+            label: save.label || levelId,
+            levelId,
+          });
+        })
+        .catch((e: unknown) => {
+          // 分片没了（换版本、网络不通）时不要静默丢掉玩家的存档，明说一句
+          setLegendError(`这一局的关卡数据没读到：${e instanceof Error ? e.message : String(e)}`);
+          removeLS(LS_REPLAY);
+        });
+      return;
+    }
+
     const restored = restoreReplay(snapshot, calendar, save);
     if (restored) {
       setReplay({
@@ -596,6 +636,7 @@ export default function App() {
         hideDate: save.hideDate,
         codes: save.codes,
         label: save.label || "历史推演",
+        levelId: null,
       });
     }
   }, [snapshot, calendar, replay]);
@@ -611,9 +652,46 @@ export default function App() {
         hideDate: true,
         codes: state.config.instruments.map((i) => i.code),
         label: "随机开局",
+        levelId: null,
       });
     },
     [snapshot, calendar],
+  );
+
+  // 关卡清单只在页面加载时问一次
+  useEffect(() => {
+    void loadLevelIndex().then(setLegendIds);
+  }, []);
+
+  /** 当前这一局是哪一关（随机模式为 null）。简报就是从这里现查的，不另存一份。 */
+  const replayLegend = replay?.levelId ? (levelById(replay.levelId) ?? null) : null;
+  const legendReady = (legendIds?.length ?? 0) > 0;
+
+  /** 进入某一关：先把分片拉下来，再开局。分片是几百 KB 的静态文件。 */
+  const handleStartLevel = useCallback(
+    (level: ReplayLevel, initialCash: number) => {
+      setLegendError(null);
+      setLegendLoading(level.id);
+      void loadLevelShard(level.id)
+        .then((shard) => {
+          const state = startLevelReplay(shard, initialCash, `${level.order}. ${level.title}`);
+          setReplay({
+            state,
+            mode: "legend",
+            // 用户定的规则：传奇模式是纪念性复盘，日期照实显示
+            hideDate: false,
+            codes: state.config.instruments.map((i) => i.code),
+            label: `${level.order}. ${level.title}`,
+            levelId: level.id,
+          });
+          setLegendOpen(false);
+        })
+        .catch((e: unknown) => {
+          setLegendError(e instanceof Error ? e.message : String(e));
+        })
+        .finally(() => setLegendLoading(null));
+    },
+    [],
   );
 
   const handleReplayOrder = useCallback(
@@ -637,6 +715,8 @@ export default function App() {
 
   const handleReplayExit = useCallback(() => {
     setReplay(null);
+    setLegendOpen(false);
+    setLegendError(null);
     removeLS(LS_REPLAY);
   }, []);
 
@@ -790,8 +870,18 @@ export default function App() {
             state={replay.state}
             hideDate={replay.hideDate}
             label={replay.label}
-            stocks={snapshot?.stocks ?? []}
+            // 用这一局自己的池子：传奇模式的票在历史分片里，不在当前快照里
+            stocks={replay.state.config.instruments}
             benchmarkName={benchmarkName}
+            briefing={
+              replayLegend
+                ? {
+                    startDate: replayLegend.startDate,
+                    theme: replayLegend.theme,
+                    lines: replayLegend.briefing,
+                  }
+                : undefined
+            }
             onOrder={handleReplayOrder}
             onCancel={handleReplayCancel}
             onAdvance={handleReplayAdvance}
@@ -799,7 +889,22 @@ export default function App() {
           />
         )}
 
-        {!loading && tab === "game" && !replay && (
+        {!loading && tab === "game" && !replay && legendOpen && (
+          <LevelPicker
+            ready={legendReady}
+            loadingId={legendLoading}
+            error={legendError}
+            onStart={handleStartLevel}
+            onBack={() => {
+              setLegendOpen(false);
+              setLegendError(null);
+            }}
+            cashOptions={[...CASH_OPTIONS]}
+            defaultCash={DEFAULT_INITIAL_CASH}
+          />
+        )}
+
+        {!loading && tab === "game" && !replay && !legendOpen && (
           <GameView
             state={game}
             prices={gamePrices}
@@ -820,6 +925,7 @@ export default function App() {
             holdingsValue={gameHoldingsValue}
             replayReady={snapshot ? replayAvailable(snapshot) : false}
             onStartReplay={handleStartReplay}
+            onOpenLegend={() => setLegendOpen(true)}
           />
         )}
 

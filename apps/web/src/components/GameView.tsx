@@ -54,6 +54,8 @@ export interface GameViewProps {
   replayReady: boolean;
   /** 用随机开局进入历史推演模式 */
   onStartReplay: (initialCash: number) => void;
+  /** 打开传奇模式（模式 2）的关卡列表 */
+  onOpenLegend: () => void;
 }
 
 function Metric({ k, v, tone }: { k: string; v: string; tone?: "good" | "bad" | "muted" }) {
@@ -70,7 +72,7 @@ export function GameView(props: GameViewProps) {
     state, prices, quotesByCode, stocks, resultsByCode,
     onOrder, onStart, onReset, onSettle, onOpenRules, news, sessionText, isTradingNow,
     benchmarkName, benchmarkReturnPct, totalAssets, holdingsValue,
-    replayReady, onStartReplay,
+    replayReady, onStartReplay, onOpenLegend,
   } = props;
 
   const { account, equity } = state;
@@ -170,8 +172,8 @@ export function GameView(props: GameViewProps) {
         >
           <p className="rule-body">
             上面的实时模式从今天开始，要等现实中的交易日慢慢过去。
-            历史推演换一种走法：从**过去**的某个交易日开局，你每点一次「走一天」就推进一步，
-            走的全是**真实发生过的**行情。
+            历史推演换一种走法：从<strong>过去</strong>的某个交易日开局，你每点一次「走一天」就推进一步，
+            走的全是<strong>真实发生过的</strong>行情。
           </p>
           <p className="rule-body">
             两条关键规矩：① 今天下单，<strong>按次一交易日的开盘价成交</strong> ——
@@ -189,6 +191,9 @@ export function GameView(props: GameViewProps) {
             <div className="btn-row">
               <button type="button" className="btn btn-primary" onClick={() => onStartReplay(cashChoice)}>
                 随机开局（不显示日期）
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={onOpenLegend}>
+                传奇模式 · 10 个历史时刻
               </button>
             </div>
           ) : (
