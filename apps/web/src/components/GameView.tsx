@@ -290,13 +290,20 @@ export function GameView(props: GameViewProps) {
   const holding = account.holdings.find((h) => h.code === code);
   const shares = Number(sharesText);
   /*
-   * 每手股数。A 股统一 100；**港股的「一手」各股不同（腾讯 100、建行 1000…），
-   * 快照里没有这份数据**，所以港股这边按 1 股步长走，只当输入提示，不做整手校验
-   * ——`validateOrder` 本来也不校验手数。
+   * 每手股数（只当输入提示，`validateOrder` 本来也不校验手数）。
+   *
+   * - A 股：统一 100（科创板的 200 股起步这里没细分，与 `LOT_SIZE` 的老行为一致）
+   * - 日股：**100 股，这是真规矩**（単元株）。丰田一手约 29 万日元、Fast Retailing
+   *   一手要 500 万日元上下，10–30 万本金的局根本买不起 —— 那是日本散户的真实约束
+   * - 韩股：1 股起，随便填
+   * - 港股：**「一手」各股不同**（腾讯 100、友邦 200、汇丰 400…），快照里没有这份
+   *   数据，所以按 1 股步长走，不假装知道
    */
   const pickedMarket: MarketGroup = picked ? marketGroupOf(picked.code) : "CN";
-  const lot = pickedMarket === "CN" ? LOT_SIZE : 1;
+  const lot = pickedMarket === "JP" ? 100 : pickedMarket === "CN" ? LOT_SIZE : 1;
   const isHk = pickedMarket === "HK";
+  const isJp = pickedMarket === "JP";
+  const isKr = pickedMarket === "KR";
   const maxShares = suggestedMaxShares(side, pickedPrice, account.cash, holding?.sellable ?? 0, lot);
 
   const totalReturnPct = account.initialCash > 0 ? (totalAssets / account.initialCash - 1) * 100 : 0;
@@ -463,7 +470,11 @@ export function GameView(props: GameViewProps) {
         subtitle={
           isHk
             ? "港股 T+0：当日买入即可卖出 · 每手股数各股不同，按股填写"
-            : `一手 ${LOT_SIZE} 股 · T+1：当日买入次日才可卖`
+            : isJp
+              ? "日股 T+0：当日买入即可卖出 · 一手 100 股（単元株）"
+              : isKr
+                ? "韩股 T+0：当日买入即可卖出 · 1 股起，卖出收 0.20% 证券交易税"
+                : `一手 ${LOT_SIZE} 股 · T+1：当日买入次日才可卖`
         }
         right={
           <button type="button" className="btn btn-ghost btn-tiny" onClick={onOpenRules}>
@@ -550,7 +561,11 @@ export function GameView(props: GameViewProps) {
           <p className="field-hint">
             {isHk
               ? "港股每手股数各股不同（快照里没有这份数据），这里不强制整手，按股填写即可"
-              : `${side === "buy" ? "买入" : "卖出"}需为 ${LOT_SIZE} 股整数倍`}
+              : isJp
+                ? "日股买入需为 100 股整数倍（単元株）—— 高价股一手可能就超出本金"
+                : isKr
+                  ? "韩股 1 股起，没有整手要求"
+                  : `${side === "buy" ? "买入" : "卖出"}需为 ${LOT_SIZE} 股整数倍`}
             {side === "sell" && holding ? `，或一次性卖出全部 ${holding.shares} 股` : ""}
             {maxShares > 0 ? ` · 最多约 ${maxShares} 股` : ""}
           </p>

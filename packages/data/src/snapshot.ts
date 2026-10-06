@@ -7,7 +7,7 @@
  */
 import type { Currency, MarketGroup, SeriesData, Snapshot } from "@aw/core";
 import { currencyOf } from "./codes";
-import { isCalendarFresh } from "./session";
+import { isCalendarFresh, type SessionMarket } from "./session";
 import type { Quote } from "./types";
 
 export interface SnapshotBundle {
@@ -84,18 +84,24 @@ export type FxRates = Partial<Record<Currency, number>>;
 /**
  * 从快照的 `meta` 里读汇率。
  *
- * `fetch_snapshot.py` 把当天中行折算价写在 `meta.hk.fx = {pair, date, rate}`
- * （`rate` 是"1 港币值多少人民币"）。读不到就返回空表，由调用方决定怎么办。
+ * `fetch_snapshot.py` 把当天中行折算价写在 `meta.<市场>.fx = {pair, date, rate}`
+ * （`rate` 是"1 单位该币种值多少人民币"），港股 `hk`、日股 `jp`、韩股 `kr` 同构。
+ * 读不到就返回空表，由调用方决定怎么办 —— **绝不兜底成 1:1**。
  */
 export function fxRatesOfMeta(meta: Record<string, unknown>): FxRates {
   const out: FxRates = {};
-  const hk = meta?.hk;
-  if (hk && typeof hk === "object") {
-    const fx = (hk as { fx?: unknown }).fx;
-    if (fx && typeof fx === "object") {
-      const rate = (fx as { rate?: unknown }).rate;
-      if (typeof rate === "number" && Number.isFinite(rate) && rate > 0) out.HKD = rate;
-    }
+  const blocks: Array<[string, Currency]> = [
+    ["hk", "HKD"],
+    ["jp", "JPY"],
+    ["kr", "KRW"],
+  ];
+  for (const [key, currency] of blocks) {
+    const block = meta?.[key];
+    if (!block || typeof block !== "object") continue;
+    const fx = (block as { fx?: unknown }).fx;
+    if (!fx || typeof fx !== "object") continue;
+    const rate = (fx as { rate?: unknown }).rate;
+    if (typeof rate === "number" && Number.isFinite(rate) && rate > 0) out[currency] = rate;
   }
   return out;
 }
@@ -162,14 +168,16 @@ export interface ApplyLiveOptions {
   /** 是否允许在没有今日 bar 时追加一根新 bar（默认 true） */
   append?: boolean;
   /**
-   * 港股交易日历。给了才能按港股自己的交易日判断。
+   * 各市场的交易日历，按市场键给（`{HK: [...], JP: [...], KR: [...]}`）。
    *
-   * 为什么需要：A 股与港股放假不同（国庆那一周 A 股全休、港股照常开市，
+   * 为什么需要：A 股与境外放假不同（国庆那一周 A 股全休、港股照常开市，
    * 反过来佛诞与回归纪念日港股休、A 股开）。不区分就会出现两种错：
    * - 国庆期间拉到港股实时价，却给 A 股也追一根 bar（A 股那天根本没开市）
    * - 港股放假那天把上一场的港股价当成今天的价写进去
+   *
+   * CN 不用放进来 —— 它用的是 bundle 自带的 `calendar`。
    */
-  hkCalendar?: string[];
+  calendars?: Partial<Record<SessionMarket, string[]>>;
   /**
    * 汇率表。快照已被 `convertSnapshotToCny` 折成人民币、而实时报价仍是本币时
    * **必须传**：否则港股会被「用港币价覆盖人民币收盘价」—— 腾讯 431 港币
@@ -215,7 +223,9 @@ export function applyLivePrices(
    * 也不要假装全市场休市、把实时价整片丢掉。
    */
   const marketTradesToday = (market: MarketGroup): boolean => {
-    const cal = market === "HK" ? options.hkCalendar : calendar;
+    // CN 用 bundle 自带的 A 股日历；美股没有时段表（SessionMarket 不含 US），也就没有独立日历
+    const cal: string[] | undefined =
+      market === "CN" ? calendar : market === "US" ? undefined : options.calendars?.[market];
     const isWeekend = () => {
       const dow = new Date(`${options.today}T12:00:00Z`).getUTCDay();
       return dow === 0 || dow === 6;

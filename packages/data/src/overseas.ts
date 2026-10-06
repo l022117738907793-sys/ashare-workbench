@@ -252,6 +252,8 @@ export const MARKET_LABEL: Record<Market, string> = {
   BJ: "北交所",
   HK: "港股",
   US: "美股",
+  JP: "日股",
+  KR: "韩股",
 };
 
 /** 币种符号 */
@@ -259,4 +261,6 @@ export const CURRENCY_SYMBOL: Record<Currency, string> = {
   CNY: "¥",
   HKD: "HK$",
   USD: "$",
+  JPY: "¥",
+  KRW: "₩",
 };

@@ -11,7 +11,7 @@ import {
   toTencentSymbol,
 } from "./codes";
 import { fetchQuotes } from "./quotes";
-import { beijingTime, isCalendarFresh, isTradingNow, msUntilNextOpen, sessionState } from "./session";
+import { beijingTime, isCalendarFresh, isTradingNow, marketTime, msUntilNextOpen, sessionState } from "./session";
 import {
   applyLivePrices,
   convertSnapshotToCny,
@@ -125,6 +125,49 @@ describe("境外代码（港股 / 美股）", () => {
   });
 });
 
+describe("日韩代码（东京 / 首尔）", () => {
+  it("日股 4 位、韩股 6 位，都不带交易所后缀", () => {
+    expect(parseCode("7203.JP")).toEqual({ num: "7203", market: "JP" });
+    expect(parseCode("6758.JP")).toEqual({ num: "6758", market: "JP" });
+    expect(parseCode("005930.KR")).toEqual({ num: "005930", market: "KR" });
+    // 腾讯给的是 005930.KS / 247540.KQ，**内部一律不带交易所后缀** ——
+    // KOSPI 与 KOSDAQ 的证券交易税已经趋同，手数也一样是 1 股起
+    expect(parseCode("005930.KS")).toBeNull();
+    expect(parseCode("247540.KQ")).toBeNull();
+    expect(parseCode("7203.T")).toBeNull();
+    // 位数不能串：日股是 4 位、港股是 4–5 位，靠后缀区分
+    expect(parseCode("7203.KR")).toBeNull();
+    expect(parseCode("00593.KR")).toBeNull();
+  });
+
+  it("转腾讯 symbol 并往返一致（jp7203 / kr005930）", () => {
+    expect(toTencentSymbol("7203.JP")).toBe("jp7203");
+    expect(toTencentSymbol("005930.KR")).toBe("kr005930");
+    for (const c of ["7203.JP", "6758.JP", "005930.KR", "000660.KR"]) {
+      expect(fromTencentSymbol(toTencentSymbol(c)!)).toBe(c);
+    }
+  });
+
+  it("转东方财富 secid：日股 176、韩股 177（MktNum 是搜索接口确认过的）", () => {
+    expect(toEastmoneySecid("7203.JP")).toBe("176.7203");
+    expect(toEastmoneySecid("005930.KR")).toBe("177.005930");
+  });
+
+  it("东财 f13 还原：176 是日股、177 是韩股", () => {
+    expect(fromEastmoney("7203", 176)).toBe("7203.JP");
+    expect(fromEastmoney("005930", 177)).toBe("005930.KR");
+  });
+
+  it("规则分组与币种", () => {
+    expect(groupOfCode("7203.JP")).toBe("JP");
+    expect(groupOfCode("005930.KR")).toBe("KR");
+    expect(currencyOf("7203.JP")).toBe("JPY");
+    expect(currencyOf("005930.KR")).toBe("KRW");
+    expect(marketGroupOf("JP")).toBe("JP");
+    expect(marketGroupOf("KR")).toBe("KR");
+  });
+});
+
 describe("交易时段（北京时间，不受本机时区影响）", () => {
   it("换算北京时间", () => {
     const t = beijingTime(bj("2026-09-23", 10, 30));
@@ -194,6 +237,68 @@ describe("交易时段（北京时间，不受本机时区影响）", () => {
     const until = msUntilNextOpen(bj("2026-09-24", 20, 0), stale);
     expect(until).toBeGreaterThan(0);
     expect(until).toBeLessThan(24 * 3600_000);
+  });
+});
+
+describe("日韩交易时段（东京/首尔 UTC+9，北京 UTC+8）", () => {
+  it("marketTime 按市场自己的时区换算，别混用北京口径", () => {
+    // 北京 2026-10-06 08:00 = 东京/首尔 09:00
+    const t = marketTime(bj("2026-10-06", 8, 0), 9 * 60);
+    expect(t.iso).toBe("2026-10-06");
+    expect(t.h).toBe(9);
+    expect(t.mi).toBe(0);
+    // 同一个瞬间，北京口径是 08:00 —— 差一小时，用错就会把时段判错一整格
+    expect(beijingTime(bj("2026-10-06", 8, 0)).h).toBe(8);
+  });
+
+  it("日股 09:00–11:30 / 12:30–15:30 JST（北京 08:00–10:30 / 11:30–14:30）", () => {
+    expect(sessionState(bj("2026-10-06", 7, 59), undefined, "JP")).toBe("pre");
+    expect(sessionState(bj("2026-10-06", 8, 0), undefined, "JP")).toBe("open");
+    expect(sessionState(bj("2026-10-06", 10, 30), undefined, "JP")).toBe("open");
+    expect(sessionState(bj("2026-10-06", 10, 31), undefined, "JP")).toBe("lunch");
+    expect(sessionState(bj("2026-10-06", 11, 29), undefined, "JP")).toBe("lunch");
+    expect(sessionState(bj("2026-10-06", 11, 30), undefined, "JP")).toBe("open");
+    expect(sessionState(bj("2026-10-06", 14, 30), undefined, "JP")).toBe("open");
+    expect(sessionState(bj("2026-10-06", 14, 31), undefined, "JP")).toBe("closed");
+  });
+
+  it("韩股 09:00–15:30 KST 中间**不休息**（北京 08:00–14:30）", () => {
+    expect(sessionState(bj("2026-10-06", 7, 59), undefined, "KR")).toBe("pre");
+    expect(sessionState(bj("2026-10-06", 8, 0), undefined, "KR")).toBe("open");
+    // 北京 10:30 之后 A 股要午休、日股正是午休，韩股一路开着 —— 这一段最容易被漏判
+    expect(sessionState(bj("2026-10-06", 11, 30), undefined, "KR")).toBe("open");
+    expect(sessionState(bj("2026-10-06", 12, 0), undefined, "KR")).toBe("open");
+    expect(sessionState(bj("2026-10-06", 14, 30), undefined, "KR")).toBe("open");
+    expect(sessionState(bj("2026-10-06", 14, 31), undefined, "KR")).toBe("closed");
+  });
+
+  it("北京 15:30：A 股与日韩都收了，只剩港股还在连续竞价", () => {
+    const at = bj("2026-10-06", 15, 30);
+    expect(sessionState(at, undefined, "CN")).toBe("closed");
+    expect(sessionState(at, undefined, "JP")).toBe("closed");
+    expect(sessionState(at, undefined, "KR")).toBe("closed");
+    expect(sessionState(at, undefined, "HK")).toBe("open");
+  });
+
+  it("北京 08:30：日韩开着、A 股还没开盘（只看 A 股会整天不发请求）", () => {
+    const at = bj("2026-10-06", 8, 30);
+    expect(sessionState(at, undefined, "CN")).toBe("pre");
+    expect(isTradingNow(at, undefined, "JP")).toBe(true);
+    expect(isTradingNow(at, undefined, "KR")).toBe(true);
+  });
+
+  it("日韩各查各的日历（韩国休市那天日本照常开）", () => {
+    const krCal = ["2026-09-30", "2026-10-07"];
+    const jpCal = ["2026-09-30", "2026-10-06", "2026-10-07"];
+    const at = bj("2026-10-06", 9, 0);
+    expect(sessionState(at, krCal, "KR")).toBe("holiday");
+    expect(sessionState(at, jpCal, "JP")).toBe("open");
+  });
+
+  it("msUntilNextOpen 用市场自己的开盘时间（韩股 09:00 KST = 北京 08:00）", () => {
+    // 北京 07:00 距韩股开盘 1 小时，距 A 股开盘（北京 09:30）2.5 小时
+    expect(msUntilNextOpen(bj("2026-10-06", 7, 0), undefined, "KR")).toBe(3600_000);
+    expect(msUntilNextOpen(bj("2026-10-06", 7, 0), undefined, "CN")).toBe(2.5 * 3600_000);
   });
 });
 
@@ -358,6 +463,18 @@ describe("港股进快照（日历 / 汇率）", () => {
     expect(fxRatesOfMeta({ hk: { fx: { rate: "0.85" } } })).toEqual({});
   });
 
+  it("fxRatesOfMeta 同时读 jp / kr 两块，缺哪块就少哪个币种", () => {
+    expect(
+      fxRatesOfMeta({
+        hk: { fx: { rate: 0.8584 } },
+        jp: { fx: { rate: 0.042727 } },
+        kr: { fx: { rate: 0.004958 } },
+      }),
+    ).toEqual({ HKD: 0.8584, JPY: 0.042727, KRW: 0.004958 });
+    // 只有日股那块时，不能凭空给韩元安一个汇率
+    expect(fxRatesOfMeta({ jp: { fx: { rate: 0.042727 } } })).toEqual({ JPY: 0.042727 });
+  });
+
   it("convertSnapshotToCny 只折境外标的，A 股一位不动", () => {
     const out = convertSnapshotToCny(bundle({ lastDate: "2026-09-30" }).snapshot, { HKD: 0.9 });
     expect(out.stocks[0].close).toEqual([10, 20, 30]);
@@ -400,7 +517,7 @@ describe("港股进快照（日历 / 汇率）", () => {
     const b = bundle({ lastDate: "2026-09-30" });
     const out = applyLivePrices(b, [cnQuote, hkQuote], {
       today: "2026-10-02",
-      hkCalendar: ["2026-09-30", "2026-10-05", "2026-10-06"],
+      calendars: { HK: ["2026-09-30", "2026-10-05", "2026-10-06"] },
       fx: { HKD: 0.9 },
     });
     const hk = out.stocks[1];
@@ -409,5 +526,94 @@ describe("港股进快照（日历 / 汇率）", () => {
     expect(hk.volume.at(-1)).toBeNull();
     // A 股那边照常追加，价格是实时价
     expect(out.stocks[0].close).toEqual([10, 20, 30, 99]);
+  });
+});
+
+describe("日韩进快照（日历 / 汇率）", () => {
+  /** 一只 A 股 + 一只日股 + 一只韩股，与 fetch_snapshot.py 写出来的形状一致 */
+  const bundle = (lastDate: string): SnapshotBundle => ({
+    name: "snapshot_test",
+    calendar: ["2026-09-30", lastDate],
+    meta: {
+      jp: { calendar: ["2026-09-30", "2026-10-05"], fx: { pair: "JPYCNY", date: "2026-09-30", rate: 0.04 } },
+      kr: { calendar: ["2026-09-30", "2026-10-05"], fx: { pair: "KRWCNY", date: "2026-09-30", rate: 0.005 } },
+    },
+    snapshot: {
+      indices: [],
+      sectors: [],
+      etfs: [],
+      stocks: [
+        { code: "600519.SH", name: "贵州茅台", industry: "食品饮料", industryCode: "X", weight: 1, isST: false, close: [10, 20, 30], high: [10, 20, 30], low: [10, 20, 30], volume: [1, 2, 3] },
+        { code: "7203.JP", name: "丰田汽车", industry: "日股", industryCode: "JP", weight: 0, isST: false, market: "JP", currency: "JPY", close: [2800, 2900, 2930.5], high: [2800, 2900, 2937.5], low: [2800, 2900, 2904], volume: [1, 2, 3] },
+        { code: "005930.KR", name: "三星电子", industry: "韩股", industryCode: "KR", weight: 0, isST: false, market: "KR", currency: "KRW", close: [260000, 270000, 272000], high: [260000, 270000, 279000], low: [260000, 270000, 270000], volume: [1, 2, 3] },
+      ],
+    },
+  });
+  const cnQuote: Quote = {
+    code: "600519.SH", name: "贵州茅台", price: 99,
+    changePct: 1, change: 1, amount: 1, asOf: Date.now(), source: "eastmoney",
+  };
+  const jpQuote: Quote = {
+    code: "7203.JP", name: "丰田汽车", price: 3000.5,
+    changePct: 1, change: 1, amount: 1, asOf: Date.now(), source: "tencent",
+  };
+  const krQuote: Quote = {
+    code: "005930.KR", name: "三星电子", price: 272000,
+    changePct: 1, change: 1, amount: 1, asOf: Date.now(), source: "tencent",
+  };
+
+  it("convertSnapshotToCny 折日元与韩元，A 股一位不动", () => {
+    const out = convertSnapshotToCny(bundle("2026-09-30").snapshot, { JPY: 0.04, KRW: 0.005 });
+    expect(out.stocks[0].close).toEqual([10, 20, 30]);
+    // 2930.5 JPY × 0.04 = 117.22
+    expect(out.stocks[1].close).toEqual([112, 116, 117.22]);
+    // 272000 KRW × 0.005 = 1360
+    expect(out.stocks[2].close).toEqual([1300, 1350, 1360]);
+    // currency 保持原样：界面要标「原以日元/韩元计价」
+    expect(out.stocks[1].currency).toBe("JPY");
+    expect(out.stocks[2].currency).toBe("KRW");
+  });
+
+  it("折不了韩元时，韩股整支留着不动（只有日股被折）", () => {
+    const out = convertSnapshotToCny(bundle("2026-09-30").snapshot, { JPY: 0.04 });
+    expect(out.stocks[1].close).toEqual([112, 116, 117.22]);
+    expect(out.stocks[2].close).toEqual([260000, 270000, 272000]);
+  });
+
+  it("日股的实时价按 JPY 折过再覆盖（3000.5 日元 → 120.02 人民币）", () => {
+    const out = applyLivePrices(bundle("2026-09-30"), [jpQuote], {
+      today: "2026-09-30",
+      fx: { JPY: 0.04 },
+    });
+    expect(out.stocks[1].close).toEqual([2800, 2900, 120.02]);
+  });
+
+  it("没传 JPY 时日股的实时价整支跳过（宁可显示旧价，也不把日元当人民币）", () => {
+    const out = applyLivePrices(bundle("2026-09-30"), [jpQuote], { today: "2026-09-30" });
+    expect(out.stocks[1].close).toEqual([2800, 2900, 2930.5]);
+  });
+
+  it("日历按市场各查各的：日股休市补 null，韩股照常写价", () => {
+    /*
+     * 2026-10-06 是 A 股与韩股的交易日，但日股休市。
+     * 两份日历都必须**新鲜**才会真的被查（过期日历退回按周末粗判，
+     * 周二一律算开市，测不出差别）——所以日股那份要给到 ≥ today 的日期。
+     */
+    const out = applyLivePrices(bundle("2026-09-30"), [cnQuote, jpQuote, krQuote], {
+      today: "2026-10-06",
+      calendars: {
+        JP: ["2026-09-30", "2026-10-05", "2026-10-07"],
+        KR: ["2026-09-30", "2026-10-05", "2026-10-06", "2026-10-07"],
+      },
+      fx: { JPY: 0.04, KRW: 0.005 },
+    });
+    // A 股：日历过期 → 退回按周末粗判（周二算开市），写实时价
+    expect(out.stocks[0].close).toEqual([10, 20, 30, 99]);
+    // 日股：日历新鲜且不含今天 → 占位 null，不写价
+    expect(out.stocks[1].close).toHaveLength(4);
+    expect(out.stocks[1].close.at(-1)).toBeNull();
+    expect(out.stocks[1].volume.at(-1)).toBeNull();
+    // 韩股：日历新鲜且含今天 → 照常写实时价（272000 × 0.005 = 1360）
+    expect(out.stocks[2].close).toEqual([260000, 270000, 272000, 1360]);
   });
 });

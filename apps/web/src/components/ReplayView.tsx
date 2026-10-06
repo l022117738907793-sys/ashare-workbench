@@ -18,6 +18,7 @@ import {
   type SeasonResult,
   type Side,
 } from "@aw/game";
+import type { Currency, MarketGroup } from "@aw/core";
 import { displayDate, maskDate, maskDatesIn, replayPrices, settleReplay } from "../lib/replay";
 import { fmtNum, fmtPct } from "../lib/helpers";
 import { EmptyHint, KV, RichP } from "./common";
@@ -30,7 +31,7 @@ import { ReplayChart } from "./ReplayChart";
 import "./replay-view.css";
 
 /** 市场的中文名，界面各处复用 */
-const MARKET_NAME: Record<string, string> = { CN: "A 股", HK: "港股", US: "美股" };
+const MARKET_NAME: Record<string, string> = { CN: "A 股", HK: "港股", US: "美股", JP: "日股", KR: "韩股" };
 
 export interface ReplayViewProps {
   state: ReplayState;
@@ -56,14 +57,14 @@ export interface ReplayViewProps {
      * 缺省按 `"CN"` —— 老分片里没有这一列，而那些分片全是 A 股。
      * 界面靠它决定写「T+1」还是「T+0」、提示几股起买。
      */
-    market?: "CN" | "HK" | "US";
+    market?: MarketGroup;
     /**
      * 计价币种。
      *
      * **价格已经折成人民币了**（折算发生在分片加载时），这一列只用来在界面上标注一句
      * 「原以港币计价、已折成人民币」，引擎全程只认人民币。
      */
-    currency?: "CNY" | "HKD" | "USD";
+    currency?: Currency;
     /** 与日历对齐的收盘价，算当日涨跌幅用 */
     close?: Array<number | null>;
     /** 与日历对齐的成交量，算当日成交额用 */
@@ -179,9 +180,10 @@ export function ReplayView(props: ReplayViewProps) {
   const pickedMarket = picked?.market ?? "CN";
   const isOverseas = pickedMarket !== "CN";
   const tPlusOne = pickedMarket === "CN";
-  const minLot = pickedMarket === "US" ? 1 : 100;
-  /** 快捷股数：A 股一手 100 股，港股一手，美股 1 股起 */
-  const quickShares = pickedMarket === "US" ? [1, 10, 100] : [100, 300, 500];
+  // 日股是 100 股一手（単元株）；港股各股不同、分片里没有这份数据，按 100 简化
+  const minLot = pickedMarket === "US" || pickedMarket === "KR" ? 1 : 100;
+  /** 快捷股数：A 股/港股一手 100 股，美股与韩股 1 股起 */
+  const quickShares = minLot === 1 ? [1, 10, 100] : [100, 300, 500];
   /** A 股的后缀是噪音，港美股的 `.HK` / `.US` 是信息 —— 只剥前者 */
   const shortCode = (c: string) => c.replace(/\.(SH|SZ|BJ)$/, "");
   const holding = account.holdings.find((h) => h.code === code);
@@ -333,7 +335,15 @@ export function ReplayView(props: ReplayViewProps) {
             <div className="replay-order-body">
               <div className="replay-side-tabs" aria-label="委托方向"><button type="button" className={side === "buy" ? "is-active" : ""} aria-pressed={side === "buy"} onClick={() => { setSide("buy"); setFeedback(null); }}>买入</button><button type="button" className={side === "sell" ? "is-active" : ""} aria-pressed={side === "sell"} onClick={() => { setSide("sell"); setFeedback(null); }}>卖出</button></div>
               <div className="replay-order-stock"><span>当前标的</span><strong>{picked ? picked.name : "请先选择股票"}</strong></div>
-              <div className="field"><label className="field-label" htmlFor="replay-shares">委托股数</label><input id="replay-shares" className="text-input text-input-num" type="number" min={1} step={minLot} value={sharesText} onChange={(e) => setSharesText(e.target.value)}/><div className="replay-quantity-buttons">{quickShares.map((n) => <button key={n} type="button" onClick={() => setSharesText(String(n))}>{n} 股</button>)}{side === "sell" && holding && <button type="button" disabled={holding.sellable === 0} onClick={() => setSharesText(String(holding.sellable))}>可卖全部</button>}</div><p className="field-hint">{pickedMarket === "US" ? "美股 1 股起买 · 无涨跌停 · 当日买入当日可卖" : pickedMarket === "HK" ? "港股按手交易，本模拟统一按 100 股一手 · 无涨跌停 · 当日买入当日可卖" : `常规一手 ${LOT_SIZE} 股 · 科创板至少 200 股 · 当日买入次日才可卖`}{holding ? ` · 持有 ${holding.shares} / 可卖 ${holding.sellable}` : ""}</p></div>
+              <div className="field"><label className="field-label" htmlFor="replay-shares">委托股数</label><input id="replay-shares" className="text-input text-input-num" type="number" min={1} step={minLot} value={sharesText} onChange={(e) => setSharesText(e.target.value)}/><div className="replay-quantity-buttons">{quickShares.map((n) => <button key={n} type="button" onClick={() => setSharesText(String(n))}>{n} 股</button>)}{side === "sell" && holding && <button type="button" disabled={holding.sellable === 0} onClick={() => setSharesText(String(holding.sellable))}>可卖全部</button>}</div><p className="field-hint">{pickedMarket === "US"
+  ? "美股 1 股起买 · 无涨跌停 · 当日买入当日可卖"
+  : pickedMarket === "HK"
+    ? "港股按手交易，本模拟统一按 100 股一手 · 无涨跌停 · 当日买入当日可卖"
+    : pickedMarket === "JP"
+      ? "日股一手 100 股（単元株）· 无涨跌停百分比 · 当日买入当日可卖"
+      : pickedMarket === "KR"
+        ? "韩股 1 股起 · 涨跌停 ±30% · 当日买入当日可卖，卖出收 0.20% 证券交易税"
+        : `常规一手 ${LOT_SIZE} 股 · 科创板至少 200 股 · 当日买入次日才可卖`}{holding ? ` · 持有 ${holding.shares} / 可卖 ${holding.sellable}` : ""}</p></div>
               <div className="replay-order-estimate"><span>按收盘价参考金额</span><strong>{selectedPrice !== null && shares > 0 && Number.isFinite(shares) ? `¥ ${fmtNum(selectedPrice * shares)}` : "—"}</strong></div>
               <div className="replay-matching-note"><span aria-hidden="true">◷</span><p>今天挂单，按<strong>次一交易日开盘价</strong>撮合。金额以实际成交价、滑点和费用为准。</p></div>
               <button type="button" className="btn btn-primary replay-submit" disabled={state.finished} onClick={submit}>{state.finished ? "推演已结束" : `挂出${side === "buy" ? "买" : "卖"}单 →`}</button>

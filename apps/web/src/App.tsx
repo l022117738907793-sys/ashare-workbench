@@ -33,11 +33,13 @@ import {
   sourceLabel,
   type FxRates,
   type Quote,
+  type SessionMarket,
   type SnapshotBundle,
 } from "@aw/data";
 import {
   executeOrder,
   holdingsValue as calcHoldingsValue,
+  MARKET_NAME,
   rolloverTradingDay,
   settleSeason,
   totalAssets as calcTotalAssets,
@@ -301,18 +303,21 @@ export default function App() {
   const calendar = bundle?.calendar;
 
   /**
-   * 港股交易日历（`meta.hk.calendar`，由快照脚本从恒生指数日线反推）。
+   * 境外各市场的交易日历（`meta.hk/jp/kr.calendar`，由快照脚本从该市场大盘股日线反推）。
    *
-   * 为什么必须与 A 股日历分开：A 股与港股放假不同。国庆那一周 A 股全休、
+   * 为什么必须与 A 股日历分开：A 股与境外放假不同。国庆那一周 A 股全休、
    * 港股照常开市，只看 A 股日历会整天不发请求，港股价格就永远停在快照里。
+   * 日韩同理（日本黄金周、韩国秋夕那几天 A 股照常开市）。
    */
-  const hkCalendar = useMemo(() => {
-    const hk = bundle?.meta?.hk;
-    if (!hk || typeof hk !== "object") return undefined;
-    const cal = (hk as { calendar?: unknown }).calendar;
-    return Array.isArray(cal) && cal.every((d) => typeof d === "string")
-      ? (cal as string[])
-      : undefined;
+  const calendars = useMemo(() => {
+    const out: Partial<Record<SessionMarket, string[]>> = {};
+    for (const market of ["HK", "JP", "KR"] as const) {
+      const block = (bundle?.meta as Record<string, unknown> | undefined)?.[market.toLowerCase()];
+      if (!block || typeof block !== "object") continue;
+      const cal = (block as { calendar?: unknown }).calendar;
+      if (Array.isArray(cal) && cal.every((d) => typeof d === "string")) out[market] = cal as string[];
+    }
+    return out;
   }, [bundle]);
 
   /** 汇率表：1 单位外币值多少人民币。取不到就是空表 —— 调用方必须自己判断，不许当 1:1 */
@@ -441,7 +446,7 @@ export default function App() {
   const live = useLiveQuotes(visibleCodes, {
     intervalMs: settings.refreshMs,
     calendar,
-    hkCalendar,
+    calendars,
     enabled: !!snapshot,
     nonce: reloadNonce,
   });
@@ -452,19 +457,27 @@ export default function App() {
   });
 
   const session = sessionState(new Date(), calendar);
-  /* 港股时段与 A 股不同：午休 12:00–13:00（A 股 11:30–13:00）、收盘 16:00（A 股 15:00） */
-  const hkSession = hkCalendar && hkCalendar.length > 0 ? sessionState(new Date(), hkCalendar, "HK") : null;
   /*
-   * 「此刻能不能按实时价成交」看的是**两个市场合起来**开不开门。
-   * 15:00–16:00 这一段 A 股已收盘、港股还在连续竞价；只按 A 股判断，
-   * 会把港股的实时成交错标成「按最近收盘价成交」。
+   * 境外市场各自的时段与 A 股不同：港股午休 12:00–13:00、收盘 16:00；
+   * 日股 09:00–11:30 / 12:30–15:30 JST；韩股 09:00–15:30 KST **没有午休**。
+   * 只有拿到该市场的日历才算它的时段 —— 没有日历就等于不知道它放不放假，
+   * 那时候退回「按 A 股的说法」而不是硬报一个「交易中」。
    */
-  const isTradingNow = session === "open" || hkSession === "open";
+  const overseasOpen = (["HK", "JP", "KR"] as const)
+    .map((market) => ({ market, state: calendars[market] ? sessionState(new Date(), calendars[market], market) : null }))
+    .filter((x) => x.state === "open");
+  /*
+   * 「此刻能不能按实时价成交」看的是**所有市场合起来**开不开门。
+   * 15:00–16:00 这一段 A 股已收盘、港股还在连续竞价；只按 A 股判断，
+   * 会把港股的实时成交错标成「按最近收盘价成交」。日韩收盘更早（北京 14:30），
+   * 但早盘 08:00 就开，同样会被 A 股时段盖住。
+   */
+  const isTradingNow = session === "open" || overseasOpen.length > 0;
   const sessionText =
-    session === "open" || hkSession === null
+    session === "open"
       ? sessionLabel(session)
-      : hkSession === "open"
-        ? "港股交易中"
+      : overseasOpen.length > 0
+        ? `${overseasOpen.map((x) => MARKET_NAME[x.market]).join("、")}交易中`
         : sessionLabel(session);
 
   // ── 实时叠加后的快照与展示用漏斗 ────────────────────────────
@@ -472,8 +485,8 @@ export default function App() {
     if (!bundle) return null;
     const quotes = live.result?.quotes ?? [];
     if (quotes.length === 0) return bundle.snapshot;
-    return applyLivePrices(bundle, quotes, { today: live.today, hkCalendar, fx: fxRates });
-  }, [bundle, live.result, live.today, hkCalendar, fxRates]);
+    return applyLivePrices(bundle, quotes, { today: live.today, calendars, fx: fxRates });
+  }, [bundle, live.result, live.today, calendars, fxRates]);
 
   const quotesByCode = useMemo(() => {
     const m = new Map<string, Quote>();
@@ -634,7 +647,7 @@ export default function App() {
   const updatedText = live.updatedAt === null ? "—（暂无实时数据）" : beijingClock(live.updatedAt);
   const quoteSourceText = live.result ? sourceLabel(live.result.source) : "—（未取到实时行情）";
   // ── 模拟游戏 ──────────────────────────────────────────────────
-  // isTradingNow 与 sessionText 在上面按「A 股或港股任一开市」算过了
+  // isTradingNow 与 sessionText 在上面按「所有市场任一开市」算过了
 
   /** 价格表：先用快照收盘价铺底，再用实时价覆盖。取不到的保持 null（不猜） */
   const gamePricesObj = useMemo(() => {

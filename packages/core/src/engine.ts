@@ -7,8 +7,8 @@ export type Maybe = number | null;
  * **core 不依赖任何包**（连 `@aw/data` 都不依赖，反倒是 data 依赖 core），
  * 引过去会成环。两边都是字符串字面量联合，结构上完全兼容。
  */
-export type MarketGroup = "CN" | "HK" | "US";
-export type Currency = "CNY" | "HKD" | "USD";
+export type MarketGroup = "CN" | "HK" | "US" | "JP" | "KR";
+export type Currency = "CNY" | "HKD" | "USD" | "JPY" | "KRW";
 
 export interface SeriesData {
   code: string;

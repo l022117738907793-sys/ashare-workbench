@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""生成演示行情快照：申万一级行业 + 代表成分股 + 宽基指数 + 主流 ETF。
+"""生成演示行情快照：申万一级行业 + 代表成分股 + 宽基指数 + 主流 ETF + 港股 + 日韩股。
 
 数据来源：
 - 申万一级行业列表/成分股/行业指数日线：akshare（申万官网口径）
 - 个股、指数、ETF 日线：腾讯行情（qfq 前复权）
+- 港股日线：腾讯行情（`hk00700`）—— 腾讯对港股有完整历史
+- 日股/韩股日线：Naver（腾讯的日线接口对日韩任何 datalen 都只回 1 根）
+- 折算价（HKD/JPY/KRW → CNY）：中国银行折算价（akshare `currency_boc_sina`）
 - 市值：东方财富行情列表接口（push2.eastmoney.com/api/qt/clist/get）
   用于按行业选取代表股；不可用时退化为按申万权重排序
 
@@ -12,6 +15,7 @@
 """
 
 import argparse
+import ast
 import json
 import os
 import random
@@ -96,6 +100,73 @@ HK_UNIVERSE = [
 # 不手写节假日表——港股一年四季的假期（佛诞、复活节、圣诞）跟 A 股不同，
 # 手写一定会过期；指数哪天有 bar，哪天就是港股交易日，这是自维护的。
 HK_CALENDAR_SYMBOL = "hkHSI"
+
+# 日股标的池。与港股同理：固定名单，不按行业选（日股没有申万那样的分类），
+# 挑的是日经 225 里成交活跃、中文名耳熟能详的 20 只。
+# 中文名取自东方财富搜索接口（`searchapi.eastmoney.com/api/suggest/get`，
+# 按 `MktNum == 176` 过滤），与行情页显示的名字一致。
+JP_UNIVERSE = [
+    ("7203", "丰田汽车"),
+    ("6758", "索尼"),
+    ("6861", "基恩士"),
+    ("8306", "三菱日联金融"),
+    ("9984", "软银集团"),
+    ("9432", "日本电报电话"),
+    ("8035", "Tokyo Electron"),
+    ("6098", "瑞可利控股"),
+    ("4063", "信越化学工业"),
+    ("6501", "日立"),
+    ("8058", "三菱商事"),
+    ("8001", "伊藤忠商事"),
+    ("4502", "武田制药"),
+    ("4568", "第一三共"),
+    ("6367", "大金工业"),
+    ("7974", "任天堂"),
+    ("4661", "东方乐园"),
+    ("3382", "7&I控股"),
+    ("6902", "日本电装"),
+    ("7267", "本田汽车"),
+]
+
+# 韩股标的池。同上，取自东财搜索接口 `MktNum == 177`。
+KR_UNIVERSE = [
+    ("005930", "三星电子"),
+    ("000660", "SK海力士"),
+    ("373220", "LG Energy Solution"),
+    ("207940", "三星生物制剂"),
+    ("005380", "现代汽车"),
+    ("000270", "Kia Corp"),
+    ("068270", "赛尔群"),
+    ("105560", "KB金融集团"),
+    ("055550", "新韩金融集团"),
+    ("005490", "项浦制铁"),
+    ("051910", "LG化学"),
+    ("006400", "三星SDI"),
+    ("035420", "Naver Corp"),
+    ("035720", "Kakao"),
+    ("012330", "现代摩比斯"),
+    ("028260", "三星物产"),
+    ("066570", "LG电子"),
+    ("003670", "POSCO Future M"),
+    ("015760", "韩国电力公司"),
+    ("032830", "三星生命"),
+]
+
+# 日韩的历史日线走 Naver —— **腾讯没有**。
+# 腾讯的实时接口有日韩（`jp7203` / `kr005930`），但 `fqkline` / `kline` 对日韩
+# 任何 datalen、任何区间都只返回 1 根。实测的可用源只有 Naver 这两个。
+NAVER_JP_CHART = "https://api.stock.naver.com/chart/foreign/item/{code}.T/day"
+NAVER_KR_SISE = "https://api.finance.naver.com/siseJson.naver"
+NAVER_JP_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://m.stock.naver.com/"}
+NAVER_KR_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.naver.com/"}
+
+# 日韩交易日历的锚点：同市场里不会停牌的大盘股。
+# 日韩都没有像恒生指数那样好用的指数日线（Naver 的 foreign 接口对 KOSPI/N225
+# 一律返回空数组），所以日历只能从个股反推。取这几只日线日期的**并集**而不是
+# 交集 —— 交集会被任何一只临时停牌砍掉一整天。代价是「停牌」与「休市」分不出来，
+# 但那两天给别的票补一根 null 只是空档，不影响任何计算。
+JP_CALENDAR_ANCHORS = ["7203", "6758", "8306", "9432"]
+KR_CALENDAR_ANCHORS = ["005930", "000660", "005380", "015760"]
 
 TOP_N = 20
 
@@ -266,6 +337,202 @@ def fetch_tencent_cached(symbol, qfq=True, fresh=False, days=DAYS):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
     return data
+
+
+def _naver_get(url, headers, params, parse, attempts=4):
+    """Naver 没有腾讯那种「整体惩罚」，所以退避是每请求独立的小退避。"""
+    last = None
+    for i in range(attempts):
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=25)
+            if resp.status_code != 200:
+                raise RuntimeError(f"HTTP {resp.status_code}")
+            return parse(resp.text)
+        except Exception as e:  # noqa: BLE001
+            last = e
+            time.sleep(min(20.0, 1.5 * 2**i) + random.uniform(0.0, 1.0))
+    raise RuntimeError(str(last)[:120])
+
+
+def _naver_range(days):
+    """Naver 收的是自然日区间，而 days 是交易日 —— 多给一倍余量再裁。"""
+    end = (datetime.now(timezone.utc) + timedelta(hours=9)).date()
+    start = end - timedelta(days=int(days * 1.6) + 40)
+    return start, end
+
+
+def _parse_naver_kr(text):
+    """
+    `siseJson.naver` 的回包是 JS 数组字面量，**每一行前面都带缩进**（响应里有
+    `\\n\\t\\t\\n` 这种排版空白）。`ast.literal_eval` 在 eval 模式下对表达式开头的
+    空白不宽容，直接喂会报 `unexpected indent (<unknown>, line 2)` —— 所以先把
+    每行的首尾空白剥掉再交给它。剥完就是干净的 `[[...],[...]]`。
+    """
+    dedented = "\n".join(line.strip() for line in text.splitlines() if line.strip())
+    return ast.literal_eval(dedented)
+
+
+def fetch_naver_jp(code, days=DAYS):
+    """
+    日股日线（丰田 `7203`、索尼 `6758`…），返回与 `fetch_tencent` 同形状的
+    `[{date, open, close, high, low, volume}]`。
+
+    返回的是**裸 JSON 数组**（不是 `{"chartData": [...]}` 那种包裹），每项形如
+    `{'localDate': '20260925', 'closePrice': 2989.5, 'openPrice': 2990.0,
+      'highPrice': 3003.0, 'lowPrice': 2979.0, 'accumulatedTradingVolume': 21084000}`。
+    `localDate` 是 `YYYYMMDD` **无横杠**，要转成 `YYYY-MM-DD` 才能进 `align`。
+    """
+    start, end = _naver_range(days)
+    payload = _naver_get(
+        NAVER_JP_CHART.format(code=code),
+        NAVER_JP_HEADERS,
+        {
+            "startDateTime": start.strftime("%Y%m%d") + "000000",
+            "endDateTime": end.strftime("%Y%m%d") + "235959",
+        },
+        json.loads,
+    )
+    rows = []
+    for it in payload if isinstance(payload, list) else []:
+        d = str(it.get("localDate") or "")
+        if len(d) != 8 or not d.isdigit():
+            continue
+        rows.append(
+            {
+                "date": f"{d[:4]}-{d[4:6]}-{d[6:]}",
+                "open": it.get("openPrice"),
+                "close": it.get("closePrice"),
+                "high": it.get("highPrice"),
+                "low": it.get("lowPrice"),
+                "volume": it.get("accumulatedTradingVolume"),
+            }
+        )
+    return rows[-days:]
+
+
+def fetch_naver_kr(code, days=DAYS):
+    """
+    韩股日线（三星电子 `005930`、SK海力士 `000660`…）。
+
+    两个坑，都踩过：
+    1. `siseJson.naver` **不是 JSON**（也不是 JSONP），是 JS 数组字面量：表头行
+       用单引号、数据行用双引号。`json.loads` 会报 `JSONDecodeError: Expecting
+       value`，得用 `ast.literal_eval` 才吃得下两种引号。
+    2. 列序是 **日期 / 开 / 高 / 低 / 收 / 量 / 外资持股比** —— 与腾讯的
+       「日期 / 开 / 收 / 高 / 低 / 量」**不同**，照抄腾讯的下标会把高低与收盘对调，
+       而且不报错（价格量级都对，只是每根 K 线的形状是错的）。
+    """
+    start, end = _naver_range(days)
+    payload = _naver_get(
+        NAVER_KR_SISE,
+        NAVER_KR_HEADERS,
+        {
+            "symbol": code,
+            "requestType": "1",
+            "startTime": start.strftime("%Y%m%d"),
+            "endTime": end.strftime("%Y%m%d"),
+            "timeframe": "day",
+        },
+        _parse_naver_kr,
+    )
+    rows = []
+    for it in payload if isinstance(payload, list) else []:
+        if not isinstance(it, (list, tuple)) or len(it) < 6:            continue
+        d = str(it[0])
+        if len(d) != 8 or not d.isdigit():
+            continue  # 表头行 ['날짜', '시가', ...]
+        rows.append(
+            {
+                "date": f"{d[:4]}-{d[4:6]}-{d[6:]}",
+                "open": it[1],
+                "high": it[2],
+                "low": it[3],
+                "close": it[4],
+                "volume": it[5],
+            }
+        )
+    return rows[-days:]
+
+
+NAVER_FETCHERS = {"JP": fetch_naver_jp, "KR": fetch_naver_kr}
+
+
+def fetch_naver_cached(market, code, fresh=False, days=DAYS):
+    """
+    带缓存的 Naver 拉取，缓存文件与腾讯那套同目录（`data/cache`，已被 .gitignore）。
+
+    **空结果不入缓存**：一次网络抖动回个空数组，如果把它写进缓存，当天剩下的
+    所有运行都会拿到空数据，而且要等有人删缓存才会好。宁可下次重拉。
+    """
+    path = os.path.join(CACHE_DIR, f"{market.lower()}{code}_raw_{days}.json")
+    if not fresh and os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    data = NAVER_FETCHERS[market](code, days=days)
+    if data:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    return data
+
+
+def build_overseas_market(
+    universe, anchors, market, industry, currency_code, calendar, fresh=False, days=DAYS
+):
+    """
+    拉一个境外市场的全部标的，返回 `(stocks, market_calendar, dropped)`。
+
+    两个日历是不同的东西，别混：
+    - 序列按**传进来的 `calendar`（A 股公共日历）**对齐 —— 快照里所有序列必须等长，
+      下游按同一个下标取数。拿市场自己的日历去 align 会让日韩序列比 A 股长 10 根，
+      于是每一个日韩价格都被错位地当成「A 股日历上的第 n 天」，**而且不报错**。
+    - `market_calendar` 是**这个市场自己的交易日**（从锚点股日线日期的并集反推），
+      只用来判断「今天这个市场开不开市」，放进 `meta.<市场>.calendar`，
+      与序列对齐无关（同港股：`meta.hk.calendar` 是恒生指数的日期，序列按 A 股日历对齐）。
+    """
+    rows_by_code = {}
+    dropped = 0
+    for num, _cname in universe:
+        try:
+            rows_by_code[num] = fetch_naver_cached(
+                market, num, fresh=fresh, days=days
+            )
+        except Exception as e:  # noqa: BLE001
+            warn(f"{industry} {num} 拉取失败: {str(e)[:80]}")
+            dropped += 1
+
+    dates = set()
+    for num in anchors:
+        for r in rows_by_code.get(num) or []:
+            dates.add(r["date"])
+    market_calendar = sorted(dates)
+
+    stocks = []
+    for num, cname in universe:
+        rows = rows_by_code.get(num)
+        if rows is None:
+            continue
+        series = align(rows, calendar)
+        valid = sum(1 for v in series["close"] if v is not None)
+        if valid < 60:
+            warn(f"{industry} {num} 只有 {valid} 天有效数据，跳过")
+            dropped += 1
+            continue
+        stocks.append(
+            {
+                "code": f"{num}.{market}",
+                "name": cname,
+                "industry": industry,
+                "industryCode": market,
+                # weight 是申万行业权重，境外市场没有对应概念，给 0（同港股）。
+                "weight": 0.0,
+                "isST": False,
+                "market": market,
+                "currency": currency_code,
+                **series,
+            }
+        )
+    return stocks, market_calendar, dropped
 
 
 def symbol_for(code):
@@ -644,17 +911,71 @@ def main():
         )
     print(f"    港股 {len(hk_stocks)} 只，跳过 {hk_dropped} 只")
 
-    hk_fx = None
-    try:
-        hk_fx = fetch_boc_fx("港币", "HKDCNY")
-        if hk_fx:
-            print(f"    港币折算价 {hk_fx['date']}：{hk_fx['rate']}")
-        else:
-            warn("港币折算价取到空表，港股将无法折算成人民币")
-    except Exception as e:  # noqa: BLE001
-        warn(f"港币折算价拉取失败: {str(e)[:90]}")
+    def safe_boc_fx(name_cn, pair, label):
+        """取不到折算价只 warn，不中断快照 —— 与 hk_fx 一直是这个策略。"""
+        try:
+            got = fetch_boc_fx(name_cn, pair)
+        except Exception as e:  # noqa: BLE001
+            warn(f"{label}折算价拉取失败: {str(e)[:90]}")
+            return None
+        if not got:
+            warn(f"{label}折算价取到空表，相关标的将无法折算成人民币")
+            return None
+        print(f"    {label}折算价 {got['date']}：{got['rate']}")
+        return got
 
-    stocks = stocks + hk_stocks
+    # 中行的币种名是**「韩国元」不是「韩元」**：传「韩元」会 `KeyError: '韩元'`，
+    # 传「韩币」也一样。这个不是笔误，是中行页面上就这么写的。
+    hk_fx = safe_boc_fx("港币", "HKDCNY", "港币")
+
+    # —— 日股 / 韩股 ——
+    # 与 A 股共用同一份日历：日韩放假而 A 股开市的日子留 null（同港股）。
+    # 日历从锚点股日线日期的并集反推 —— Naver 的 foreign 接口对 KOSPI/N225
+    # 一律返回空数组，没有指数日线可用。
+    # 整块失败只 warn 并跳过：日韩是新增市场，不该因为它拿不到数据就毁掉
+    # 整个快照（A 股 + 港股那一大段是完全独立的）。
+    jp_stocks, jp_calendar = [], []
+    print(f"    拉取日股 {len(JP_UNIVERSE)} 只...")
+    try:
+        jp_stocks, jp_calendar, jp_dropped = build_overseas_market(
+            JP_UNIVERSE,
+            JP_CALENDAR_ANCHORS,
+            "JP",
+            "日股",
+            "JPY",
+            calendar,
+            fresh=args.fresh,
+            days=args.days,
+        )
+        print(
+            f"    日股 {len(jp_stocks)} 只，交易日历 {len(jp_calendar)} 天，跳过 {jp_dropped} 只"
+        )
+    except Exception as e:  # noqa: BLE001
+        warn(f"日股整块跳过: {str(e)[:90]}")
+
+    kr_stocks, kr_calendar = [], []
+    print(f"    拉取韩股 {len(KR_UNIVERSE)} 只...")
+    try:
+        kr_stocks, kr_calendar, kr_dropped = build_overseas_market(
+            KR_UNIVERSE,
+            KR_CALENDAR_ANCHORS,
+            "KR",
+            "韩股",
+            "KRW",
+            calendar,
+            fresh=args.fresh,
+            days=args.days,
+        )
+        print(
+            f"    韩股 {len(kr_stocks)} 只，交易日历 {len(kr_calendar)} 天，跳过 {kr_dropped} 只"
+        )
+    except Exception as e:  # noqa: BLE001
+        warn(f"韩股整块跳过: {str(e)[:90]}")
+
+    jp_fx = safe_boc_fx("日元", "JPYCNY", "日元") if jp_stocks else None
+    kr_fx = safe_boc_fx("韩国元", "KRWCNY", "韩元") if kr_stocks else None
+
+    stocks = stocks + hk_stocks + jp_stocks + kr_stocks
 
     stock_codes = {s["code"] for s in stocks}
     for s in sectors:
@@ -663,11 +984,22 @@ def main():
         if len(s["members"]) != before:
             warn(f"板块 {s['name']} 成员裁剪 {before} -> {len(s['members'])}")
 
+    # 不变量：每一支的每条序列都必须和 A 股公共日历等长 —— 下游是按同一个下标取数的。
+    # 破了这条**不会报错**，只会让整条序列错位（港股/日韩比 A 股多出来的那几天会
+    # 被当成 A 股日历上的第 n 天），价格看着都正常。所以宁可在这里当场炸掉。
+    for s in stocks:
+        for col in ("open", "close", "high", "low", "volume"):
+            if len(s[col]) != len(calendar):
+                raise RuntimeError(
+                    f"快照不变量被破坏：{s['code']} 的 {col} 有 {len(s[col])} 根，"
+                    f"公共日历是 {len(calendar)} 天（序列必须按公共日历对齐）"
+                )
+
     out_dir = os.path.join(ROOT, "data", f"snapshot_{as_of.replace('-', '')}")
     os.makedirs(out_dir, exist_ok=True)
     meta = {
         "asOf": as_of,
-        "source": "申万官网(akshare) + 腾讯行情 + 东方财富市值(可用时)",
+        "source": "申万官网(akshare) + 腾讯行情(A股/港股/实时) + Naver(日韩日线) + 中行折算价 + 东方财富市值(可用时)",
         "poolNote": f"演示股票池：申万一级行业按市值/权重前 {args.limit} 只代表股",
         "calendarNote": "以沪深300交易日为公共日历",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
@@ -683,6 +1015,23 @@ def main():
             # 注意这是快照生成当天的价，盘中用它折算会有一点点滞后——港股价格本身
             # 在盘中也会变，两者都是当日口径，够用。
             "fx": hk_fx,
+        },
+        # 日韩照 hk 的形状放 meta：顶层文件是按 A 股的四层漏斗设计的，多塞字段
+        # 不用改加载器（meta 本来就是自由结构）。
+        "jp": {
+            "calendar": jp_calendar,
+            "calendarNote": "以丰田、索尼等锚点个股在 Naver 有日线的日期并集为准（日韩没有可用的指数日线，只能从个股反推）",
+            "universeNote": f"固定 {len(JP_UNIVERSE)} 只，日经 225 里成交活跃的大盘股",
+            "count": len(jp_stocks),
+            # rate 是「1 日元值多少人民币」（中行折算价 ÷ 100）
+            "fx": jp_fx,
+        },
+        "kr": {
+            "calendar": kr_calendar,
+            "calendarNote": "以三星电子、SK海力士等锚点个股在 Naver 有日线的日期并集为准",
+            "universeNote": f"固定 {len(KR_UNIVERSE)} 只，KOSPI 权重股",
+            "count": len(kr_stocks),
+            "fx": kr_fx,
         },
     }
     for name, obj in [

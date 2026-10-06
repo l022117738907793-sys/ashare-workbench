@@ -180,11 +180,13 @@ export function validateOrder(account: Account, req: OrderRequest): string | nul
     }
   }
 
-  // 涨跌停：只有 A 股有。给港股美股套上会凭空拦住合法委托
+  // 涨跌停：A 股与韩股有（韩股是干净的 ±30%）。给港股/美股/日股套上会凭空拦住合法委托。
   const prev = quote.prevClose;
   if (hasPriceLimit(market) && prev !== null && prev !== undefined && prev > 0) {
-    // 按成交日与板块取涨跌幅：创业板 20% 是 2020-08-24 起才生效
-    const limit = limitPctAt(req.date, board, req.isST ?? false);
+    // 按成交日、板块与市场取涨跌幅：创业板 20% 是 2020-08-24 起才生效；韩股恒为 30%。
+    // market 必须传进来 —— 漏传会走 A 股那张板块表，把韩股的 ±30% 算成主板的 ±10%，
+    // 症状是「三星涨了 15% 就买不进去了」，而且不报错。
+    const limit = limitPctAt(req.date, board, req.isST ?? false, market);
     const upper = round2(prev * (1 + limit));
     const lower = round2(prev * (1 - limit));
     if (side === "buy" && quote.price >= upper) return `已涨停（${upper}），无法买入`;

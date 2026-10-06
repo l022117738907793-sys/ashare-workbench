@@ -9,9 +9,21 @@
 import { eastmoneyProvider } from "../packages/data/src/providers/eastmoney";
 import { tencentProvider } from "../packages/data/src/providers/tencent";
 import { fetchQuotes, sourceLabel } from "../packages/data/src/quotes";
-import { sessionState, sessionLabel, isTradingNow, msUntilNextOpen, beijingTime } from "../packages/data/src/session";
+import { sessionState, sessionLabel, isTradingNow, msUntilNextOpen, beijingTime, marketTime } from "../packages/data/src/session";
+import { currencyOf, fromTencentSymbol, parseCode, toTencentSymbol } from "../packages/data/src/codes";
 
-const CODES = ["600519.SH", "000001.SZ", "000300.SH", "300750.SZ", "00700.HK", "00939.HK"];
+const CODES = [
+  "600519.SH",
+  "000001.SZ",
+  "000300.SH",
+  "300750.SZ",
+  "00700.HK",
+  "00939.HK",
+  "7203.JP",
+  "6758.JP",
+  "005930.KR",
+  "000660.KR",
+];
 /** 用于判断解析是否合理的大致区间 */
 const SANITY: Record<string, [number, number]> = {
   "600519.SH": [500, 3000],
@@ -21,6 +33,12 @@ const SANITY: Record<string, [number, number]> = {
   // 港股：价格是**港币**。provider 不做折算，折算在 snapshot / App 那一层
   "00700.HK": [100, 800],
   "00939.HK": [3, 30],
+  // 日股是**日元**、韩股是**韩元**，同样不在这里折算。
+  // 区间给得宽：股价本身会动，这里只用来抓「字段下标错了」这种量级错误。
+  "7203.JP": [1000, 6000],
+  "6758.JP": [1500, 9000],
+  "005930.KR": [50000, 500000],
+  "000660.KR": [300000, 3000000],
 };
 
 let pass = 0;
@@ -83,12 +101,39 @@ async function main() {
   }
 
   // ── 4. 交易时段 ────────────────────────────────────────────────
-  console.log("\n[4] 交易时段判断");
+  console.log("\n[4] 交易时段判断（四个市场各一套）");
   const st = sessionState();
   console.log(`    当前状态: ${st} (${sessionLabel(st)})`);
   console.log(`    是否盘中: ${isTradingNow()}`);
   console.log(`    距下次开盘: ${(msUntilNextOpen() / 60000).toFixed(1)} 分钟`);
-  ok("交易时段计算无异常");
+  {
+    /*
+     * 日韩用的是 UTC+9，北京是 UTC+8 —— 东京 09:00 = 北京 08:00。
+     * 这套换算错了不会报错，只会让「交易中」的绿点早一小时亮起来。
+     * 用固定时刻比：北京 08:30 → 日韩已开盘（本地 09:30）、A 股还没开（09:30 差一小时）。
+     */
+    const at = new Date("2026-10-06T00:30:00Z"); // 北京 08:30 = 东京/首尔 09:30
+    const cn = sessionState(at, undefined, "CN");
+    const jp = sessionState(at, undefined, "JP");
+    const kr = sessionState(at, undefined, "KR");
+    console.log(`    北京 08:30 → A 股 ${cn} / 日股 ${jp} / 韩股 ${kr}`);
+    cn === "pre" && jp === "open" && kr === "open"
+      ? ok("08:30 日韩已开盘而 A 股还在盘前（UTC+9 偏移生效）")
+      : bad(`08:30 的时段不对：CN=${cn} JP=${jp} KR=${kr}，预期 pre/open/open`);
+    const t = marketTime(at, 540);
+    t.h === 9 && t.mi === 30
+      ? ok(`marketTime(北京 08:30, +540) = ${t.h}:${String(t.mi).padStart(2, "0")} 当地（东京/首尔）`)
+      : bad(`marketTime 偏移不对：得到 ${t.h}:${t.mi}，预期 9:30`);
+    // 首尔 09:00–15:30 **没有午休**，用 openPm = closeAm 表达。
+    // 日股午休是 11:30–12:30 JST = 北京 10:30–11:30，所以取北京 11:00 比。
+    const noon = new Date("2026-10-06T03:00:00Z"); // 北京 11:00 = 首尔/东京 12:00
+    const krNoon = sessionState(noon, undefined, "KR");
+    const jpNoon = sessionState(noon, undefined, "JP");
+    console.log(`    北京 11:00 → 韩股 ${krNoon} / 日股 ${jpNoon}`);
+    krNoon === "open" && jpNoon === "lunch"
+      ? ok("11:00 韩股连续交易而日股午休（韩股无午休）")
+      : bad(`11:00 的时段不对：KR=${krNoon} JP=${jpNoon}，预期 open/lunch`);
+  }
 
   // ── 5. 港股（时段 / 成交额单位 / 时间戳格式）────────────────────
   console.log("\n[5] 港股：时段表、成交额单位、时间戳格式");
@@ -125,6 +170,55 @@ async function main() {
         : bad(`A 股成交额口径可疑：${mt?.amount}`);
     } catch (e) {
       bad(`港股取价失败：${e instanceof Error ? e.message : e}`);
+    }
+  }
+
+  // ── 6. 日韩（代码换算 / 时间戳 / 成交额为空）─────────────────────
+  console.log("\n[6] 日股与韩股：代码换算、时间戳格式、成交额字段");
+  {
+    /*
+     * 腾讯的 `[2]` 给的是 `7203.T` / `005930.KS` / `247540.KQ`（带交易所后缀），
+     * 内部格式没有后缀（`.JP` / `.KR`），所以来回换算必须自己走一遍。
+     * 认不出来的代码会静默落回「A 股」，症状是「丰田按 A 股规则成交」且不报错。
+     */
+    const roundTrips: Array<[string, string]> = [
+      ["7203.JP", "jp7203"],
+      ["005930.KR", "kr005930"],
+    ];
+    for (const [code, sym] of roundTrips) {
+      const got = toTencentSymbol(code);
+      const back = fromTencentSymbol(sym);
+      got === sym && back === code
+        ? ok(`${code} ↔ ${sym} 来回换算一致`)
+        : bad(`${code} ↔ ${sym} 换算不对：toTencentSymbol=${got} fromTencentSymbol=${back}`);
+    }
+    // 带交易所后缀的写法必须**认不出来**——认出来了就会把 `.T` 当成合法后缀
+    (["7203.T", "005930.KS", "247540.KQ"] as const).every((c) => parseCode(c) === null)
+      ? ok("带交易所后缀的写法不被接受（不会把 .T/.KS 当成内部格式）")
+      : bad("`7203.T` 之类竟然被 parseCode 认下了，后缀解析过宽");
+    currencyOf("7203.JP") === "JPY" && currencyOf("005930.KR") === "KRW"
+      ? ok("币种推断正确：日股 → JPY、韩股 → KRW")
+      : bad(`币种推断不对：${currencyOf("7203.JP")} / ${currencyOf("005930.KR")}`);
+
+    try {
+      const qs = await tencentProvider.fetchQuotes(["7203.JP", "005930.KR"]);
+      console.log(`    返回 ${qs.length}/2 条`);
+      for (const q of qs) {
+        console.log(
+          `      ${q.code.padEnd(10)} ${String(q.name).padEnd(20)} 价=${String(q.price).padStart(9)} 涨跌幅=${String(q.changePct).padStart(8)}% 成交额=${q.amount === null ? "null" : q.amount} 时间=${q.asOf ? new Date(q.asOf).toISOString() : "null"}`,
+        );
+      }
+      qs.length === 2 ? ok("日韩都拿到了报价") : bad(`只拿到 ${qs.length}/2 条`);
+      // 日韩的 [30] 是**北京时间**（东京 15:30 收 = 北京 14:30），格式 `YYYY-MM-DD HH:mm:ss`
+      qs.every((q) => q.asOf !== null)
+        ? ok("日韩时间戳可解析（短横线 + 空格格式）")
+        : bad("日韩时间戳解析为 null");
+      // 日韩 [37] 成交额为空（f[37..44] 全空），不该瞎估一个数出来
+      qs.every((q) => q.amount === null)
+        ? ok("日韩成交额为 null（腾讯这两个市场不给成交额，不猜）")
+        : bad(`日韩成交额应为 null，实际 ${qs.map((q) => q.amount).join(", ")}`);
+    } catch (e) {
+      bad(`日韩取价失败：${e instanceof Error ? e.message : e}`);
     }
   }
 

@@ -33,7 +33,7 @@ import {
  * 里看到的是港币 —— 不标一句「港币」，两边对不上就会被当成数据错了。
  * A 股不标：它本来就是人民币，标了是噪音。
  */
-const CUR_NAME: Partial<Record<string, string>> = { HKD: "港币", USD: "美元" };
+const CUR_NAME: Partial<Record<string, string>> = { HKD: "港币", USD: "美元", JPY: "日元", KRW: "韩元" };
 
 export interface StockPickerProps {  /** 这一局能买的全部标的。只能来自本局的标的池，不能混进别的年份的票 */
   rows: PickStock[];

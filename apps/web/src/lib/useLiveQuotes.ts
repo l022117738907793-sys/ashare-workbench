@@ -41,7 +41,7 @@ export interface LiveQuotesState {
   updatedAt: number | null;
   /** 最近一次失败原因（原文，不美化） */
   error: string | null;
-  /** 当前交易时段。**中国与港股合并后的结论**：任一开市就是 `open` */
+  /** 当前交易时段。**所有市场合并后的结论**：任一开市就是 `open` */
   session: SessionState;
   /** 此刻正在开市的市场。空数组 = 都休市。UI 用它区分「A 股交易中」与「港股交易中」 */
   openMarkets: SessionMarket[];
@@ -57,36 +57,41 @@ export interface UseLiveQuotesOptions {
   intervalMs: number;
   calendar?: string[];
   /**
-   * 港股交易日历（`meta.hk.calendar`）。给了才会把港股的开市时间也算进来。
+   * 各市场的交易日历（`meta.hk.calendar` / `meta.jp.calendar` / `meta.kr.calendar`）。
+   * 给了才会把该市场的开市时间也算进来。`CN` 不用放，它用上面的 `calendar`。
    *
-   * 为什么必须是一份**独立的**日历：A 股与港股放假不同。国庆那一周 A 股全休、
+   * 为什么必须是**各市场独立**的日历：A 股与境外放假不同。国庆那一周 A 股全休、
    * 港股照常开市，只看 A 股日历会整天不发请求，港股价格就一直是快照里的旧值。
+   * 日韩同理（日本黄金周、韩国秋夕那几天 A 股照常开市）。
    */
-  hkCalendar?: string[];
+  calendars?: Partial<Record<SessionMarket, string[]>>;
   enabled?: boolean;
   /** 变化即立刻重启轮询（手动刷新按钮） */
   nonce?: number;
 }
 
 /** 参与轮询的市场，按优先级排：A 股在前（界面的「今天」以它为准） */
-const MARKETS: readonly SessionMarket[] = ["CN", "HK"];
+const MARKETS: readonly SessionMarket[] = ["CN", "HK", "JP", "KR"];
+
+/** 除 A 股外的市场，用于拼日历指纹 */
+const OVERSEAS: readonly SessionMarket[] = ["HK", "JP", "KR"];
 
 export function useLiveQuotes(codes: string[], options: UseLiveQuotesOptions): LiveQuotesState {
-  const { intervalMs, calendar, hkCalendar, enabled = true, nonce = 0 } = options;
+  const { intervalMs, calendar, calendars, enabled = true, nonce = 0 } = options;
   const codeKey = codes.join("|");
   const calendarKey = calendar && calendar.length > 0 ? calendar.join("|") : "";
-  const hkCalendarKey = hkCalendar && hkCalendar.length > 0 ? hkCalendar.join("|") : "";
+  const calendarsKey = OVERSEAS.map((m) => `${m}=${(calendars?.[m] ?? []).join("|")}`).join(";");
 
   const codesRef = useRef(codes);
   codesRef.current = codes;
   const calendarRef = useRef<string[] | undefined>(calendar);
   calendarRef.current = calendar;
-  const hkCalendarRef = useRef<string[] | undefined>(hkCalendar);
-  hkCalendarRef.current = hkCalendar;
+  const calendarsRef = useRef<Partial<Record<SessionMarket, string[]>> | undefined>(calendars);
+  calendarsRef.current = calendars;
 
-  /** 按市场取日历。港股没有独立日历时退回 A 股日历——总比不判断强 */
+  /** 按市场取日历。该市场没有独立日历时退回 A 股日历——总比不判断强 */
   const calendarOf = (market: SessionMarket): string[] | undefined =>
-    market === "HK" ? (hkCalendarRef.current ?? calendarRef.current) : calendarRef.current;
+    market === "CN" ? calendarRef.current : (calendarsRef.current?.[market] ?? calendarRef.current);
 
   /** 哪些市场此刻在连续竞价 */
   const openMarketsAt = (now: Date): SessionMarket[] =>
@@ -241,7 +246,7 @@ export function useLiveQuotes(codes: string[], options: UseLiveQuotesOptions): L
       document.removeEventListener("visibilitychange", onVisibility);
       tickRef.current = null;
     };
-  }, [codeKey, calendarKey, hkCalendarKey, enabled, intervalMs, nonce]);
+  }, [codeKey, calendarKey, calendarsKey, enabled, intervalMs, nonce]);
 
   return { ...state, refresh } as LiveQuotesState & { refresh: () => void };
 }
