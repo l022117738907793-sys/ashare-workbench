@@ -181,6 +181,17 @@ try {
   // 章节清单在「选择传奇关卡 →」后面，不点开就只有玩法三选一
   const openLevels = await evaluate<string>(CLICK("选择传奇关卡"));
   check("点得到「选择传奇关卡」", openLevels === "OK", openLevels);
+  /*
+   * 紧凑版把开局简报（含「温馨提示」那段思考题）收进了「开局简报 · 点开阅读」。
+   * 折叠时 innerText 里没有它，所以先点开 —— 这一步顺带验证它展得开。
+   */
+  const briefOpened = await evaluate<string>(`
+    const d = document.querySelector(".chapter-briefing-details");
+    if (!d) return "NO_DETAILS";
+    if (!d.open) { const s = d.querySelector("summary"); if (!s) return "NO_SUMMARY"; s.click(); }
+    return d.open ? "OK" : "STILL_CLOSED";
+  `);
+  check("点得开「开局简报」（温馨提示在里面）", briefOpened === "OK", briefOpened);
   await waitFor(`document.body.innerText.includes("温馨提示")`, "关卡清单展开", 40);
   const home = await evaluate<string>(TEXT);
   check("含「温馨提示」", home.includes("温馨提示"));

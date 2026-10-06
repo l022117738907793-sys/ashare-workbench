@@ -386,12 +386,13 @@ export function GameView(props: GameViewProps) {
           </button>
         </div>
 
-        <section className="game-launch-panel">
+        <p className="game-mode-description" aria-live="polite">{selectedMode === "legend" ? "站在 10 个历史时刻的起点，带着当时的线索作出判断。" : selectedMode === "live" ? "从今天开始跟随真实行情，适合每天回来观察与交易。" : "不告诉您身处哪一年，只凭眼前的信息探索未知行情。"}</p>
+        <section className={`game-launch-panel${selectedMode === "legend" ? " is-legend" : ""}`}>
           <div className="game-funding"><span className="game-eyebrow">准备您的虚拟本金</span><div className="cash-options">{CASH_OPTIONS.map((c) => <button key={c} type="button" className={`chip${cashChoice === c ? " chip-active" : ""}`} aria-pressed={cashChoice === c} onClick={() => setCashChoice(c)}>{c / 10000} 万</button>)}</div><p>A 股买入一手 100 股，资金量限制可买数量；本金较少时可能买不起一手高价股。</p><p>{selectedMode === "legend" ? "传奇关卡的资金与背景将在选关时确认。" : "仅用于模拟交易 · 账户保存在此浏览器"}</p></div>
           <div className="game-launch-action"><button type="button" className="btn btn-primary game-launch-button" disabled={replayBlocked && !replayInProgress} onClick={startSelected}>{selectedMode === "live" ? `用 ${cashChoice / 10000} 万开始实时盘` : replayInProgress ? "继续已保存的历史推演" : selectedMode === "legend" ? "选择传奇关卡" : `用 ${cashChoice / 10000} 万随机开局`} <span>→</span></button><p>{selectedMode === "live" ? `当前${sessionText}，非交易时段按最近收盘价成交。` : "今日挂单，下一交易日开盘撮合。"}</p></div>
         </section>
         {replayBlocked && !replayInProgress && <Notice tone="warn">当前快照缺少开盘价，历史推演暂不可用。您可以选择实时模式，或等下一次快照更新。</Notice>}
-        <div className="game-how-grid"><div><span>01</span><strong>读懂眼前的信息</strong><p>查看行情、新闻与背景，形成自己的判断。</p></div><div><span>02</span><strong>亲手作出决定</strong><p>选股、设置数量、提交委托，体验真实交易规则。</p></div><div><span>03</span><strong>回看每一次交易</strong><p>对照市场基准与交易记录，理解收益和风险。</p></div></div>
+        <details className="game-quick-guide"><summary>玩法三步 · 展开查看 <span>＋</span></summary><div className="game-how-grid"><div><span>01</span><strong>读懂眼前的信息</strong><p>查看行情、新闻与背景，形成自己的判断。</p></div><div><span>02</span><strong>亲手作出决定</strong><p>选股、设置数量、提交委托，体验真实交易规则。</p></div><div><span>03</span><strong>回看每一次交易</strong><p>对照市场基准与交易记录，理解收益和风险。</p></div></div></details>
         <p className="game-disclaimer" role="note">{GAME_DISCLAIMER} · 账户保存在此浏览器，重置后不可恢复。</p>
       </div>
     );
@@ -516,6 +517,8 @@ export function GameView(props: GameViewProps) {
               setFeedback(null);
             }}
           />
+          <details className="game-stock-browser">
+            <summary>从列表选择股票 <span>＋</span></summary>
           <StockPicker
             rows={pickRows}
             query={code}
@@ -525,6 +528,7 @@ export function GameView(props: GameViewProps) {
               setFeedback(null);
             }}
           />
+          </details>
         </div>
 
         <div className="field">

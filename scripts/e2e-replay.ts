@@ -75,7 +75,10 @@ browser = spawn(EDGE, [
   "--no-default-browser-check",
   `--remote-debugging-port=${PORT + 1000}`,
   "--user-data-dir=/tmp/edge-e2e-replay",
-  "--window-size=430,900",
+  // 桌面宽度：本脚本断言的是「整页能看到什么」，而 760px 以下的紧凑布局会把
+  // 推演日志、成交委托、简报收进 <details>，把行情/持仓列换成手机分页，整页文本里就没有它们了。
+  // 手机布局由 scripts/e2e-mobile.ts 专门覆盖（360/390/430）。
+  "--window-size=1280,1400",
   `http://127.0.0.1:${PORT}/`,
 ], { stdio: "ignore" });
 
@@ -158,6 +161,20 @@ const CLICK = (text: string) => `
  * 页头右上角那个齿轮没有文字，CLICK() 靠 textContent 找它必然落空 ——
  * 所以图标按钮要单独有一条按无障碍名字找的路径（也顺带证明它真的有无障碍名字）。
  */
+/**
+ * 展开一个 <details>。
+ *
+ * 紧凑版把「玩法三步」「股票列表」「开局简报」「走势图」「推演日志」收进了折叠块 ——
+ * 折叠时 `innerText` 是空的，所以断言之前必须先点开。这不是绕过测试：
+ * 内容本来就该能展开看到，这一步顺带验证它真的展得开。
+ */
+const OPEN_DETAILS = (selector: string) => `
+  const d = document.querySelector(${JSON.stringify(selector)});
+  if (!d) return "NO_DETAILS";
+  if (!d.open) { const s = d.querySelector("summary"); if (!s) return "NO_SUMMARY"; s.click(); }
+  return d.open ? "OK" : "STILL_CLOSED";
+`;
+
 const CLICK_LABEL = (label: string) => `
   const b = document.querySelector('button[aria-label=${JSON.stringify(label)}]');
   if (!b) return "NOT_FOUND";
@@ -426,6 +443,8 @@ try {
   const openLevel = await evaluate<string>(CLICK(level.title));
   check(`点得到第 ${level.order} 关「${level.title}」`, openLevel === "OK", openLevel);
   await sleep(500);
+  const briefOpened = await evaluate<string>(OPEN_DETAILS(".chapter-briefing-details"));
+  check("点得开「开局简报」", briefOpened === "OK", briefOpened);
   const brief = await evaluate<string>(`return document.body.innerText;`);
   check("简报页显示进场日期（传奇模式不藏）", brief.includes(level.startDate), level.startDate);
   check("简报页有「进场那天能看到的」", brief.includes("进场那天能看到的"));
@@ -641,6 +660,8 @@ try {
    * 而它在 iOS Safari 上根本不弹。所以这里盯的是**页面上真的有票**。
    */
   console.log("\n十之二、实时模式的下单候选榜单");
+  const picksOpened = await evaluate<string>(OPEN_DETAILS(".game-stock-browser"));
+  check("点得开「从列表选择股票」", picksOpened === "OK", picksOpened);
   const livePicks = await evaluate<string>(`
     const rows = [...document.querySelectorAll('.pick-row')];
     return JSON.stringify({ n: rows.length, first: rows[0] ? rows[0].innerText : "" });
@@ -1418,8 +1439,10 @@ try {
   };
 
   /** 某只票选中之后，下单卡上的那几个说法 */
-  const orderPanel = async () =>
-    await evaluate<string>(`
+  const orderPanel = async () => {
+    // 数据来源说明（原以港币计价…）在「查看走势图与成交标记」里，折叠时读不到
+    await evaluate(OPEN_DETAILS(".replay-chart-details"));
+    return await evaluate<string>(`
       const tag = document.querySelector(".replay-rule-tag");
       const note = document.querySelector(".replay-data-note");
       const hint = [...document.querySelectorAll(".replay-order-panel .field-hint")].map((e) => e.innerText).join(" | ");
@@ -1431,6 +1454,7 @@ try {
         quick,
       });
     `).then((raw) => JSON.parse(raw) as Record<string, string>);
+  };
 
   /** 折叠块里那块「XX 交易规则」面板 */
   const rulesPanel = async () =>

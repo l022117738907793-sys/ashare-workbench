@@ -50,6 +50,8 @@ export function LevelDetail(props: LevelDetailProps) {
         <div><dt>推演长度</dt><dd>{level.days}<small> 个交易日</small></dd></div>
       </dl>
 
+      <details className="chapter-briefing-details" key={level.id}>
+        <summary>开局简报 · 点开阅读 <span>＋</span></summary>
       <div className="chapter-briefing-section">
         <h3><span className="chapter-section-dot" />进场那天能看到的</h3>
         <ul className="chapter-facts">
@@ -63,6 +65,8 @@ export function LevelDetail(props: LevelDetailProps) {
         <span>温馨提示</span>
         <p>{level.theme}</p>
       </div>
+
+      </details>
 
       <fieldset className="chapter-funds">
         <legend>初始虚拟资金</legend>

@@ -126,6 +126,7 @@ export function ReplayView(props: ReplayViewProps) {
   const [lastSeason, setLastSeason] = useState<SeasonResult | null>(null);
   const [lastSeasonDay, setLastSeasonDay] = useState(0);
   const [showStocks, setShowStocks] = useState(false);
+  const [mobilePane, setMobilePane] = useState<"trade" | "market" | "account">("trade");
 
   const { account, calendar, startIndex } = {
     account: state.account,
@@ -226,7 +227,7 @@ export function ReplayView(props: ReplayViewProps) {
   const nextDayLabel = nextDate ? maskDate(state, nextDate, hideDate) : "本局已结束";
 
   return (
-    <div className="view replay-game">
+    <div className="view replay-game" data-mobile-pane={mobilePane}>
       <header className="replay-mission">
         <div>
           <p className="replay-eyebrow">{hideDate ? "RANDOM CHALLENGE / 随机挑战" : "HISTORICAL CAMPAIGN / 传奇推演"}</p>
@@ -263,6 +264,11 @@ export function ReplayView(props: ReplayViewProps) {
         <Metric k="成交笔数" v={`${account.trades.length} 笔`} />
       </section>
 
+      <div className="replay-phone-tabs" role="group" aria-label="推演功能切换">
+        <button type="button" aria-pressed={mobilePane === "trade"} onClick={() => setMobilePane("trade")}>下单交易</button>
+        <button type="button" aria-pressed={mobilePane === "market"} onClick={() => setMobilePane("market")}>行情资讯</button>
+        <button type="button" aria-pressed={mobilePane === "account"} onClick={() => setMobilePane("account")}>持仓成绩</button>
+      </div>
       <div className="replay-workspace">
         <section className="replay-panel replay-stock-selection">
           <div className="replay-stock-search field">
@@ -283,8 +289,11 @@ export function ReplayView(props: ReplayViewProps) {
               <div><p className="replay-eyebrow">MARKET / 当时的市场</p><h2>{picked?.name ?? "选择观察标的"}<span className="replay-stock-code">{picked ? shortCode(picked.code) : ""}</span></h2></div>
               <div className="replay-quote"><strong>{selectedPrice === null ? "—" : fmtNum(selectedPrice)}</strong><span className={selectedRow?.changePct === null || selectedRow?.changePct === undefined ? "tone-muted" : `tone-${pnlTone(selectedRow.changePct)}`}>{fmtPct(selectedRow?.changePct ?? null)} <small>当日涨跌</small></span></div>
             </header>
+            <details className="replay-chart-details">
+              <summary>查看走势图与成交标记 <span>＋</span></summary>
             <ReplayChart state={state} code={code} hideDate={hideDate}/>
             <p className="replay-data-note">{picked?.industry ? `${picked.industry} · ` : ""}历史行情 · 红涨绿跌 · 买卖标记按真实成交日显示{isOverseas ? ` · 原以${picked?.currency === "HKD" ? "港币" : "美元"}计价，此处已按当日汇率折成人民币` : ""}</p>
+            </details>
           </section>
 
           <div className="replay-information">
@@ -316,7 +325,7 @@ export function ReplayView(props: ReplayViewProps) {
             <header className="replay-panel-head"><div><p className="replay-eyebrow">YOUR MOVE / 您的决策</p><h2>模拟下单</h2></div><span className="replay-rule-tag">{tPlusOne ? "T+1" : "T+0"}</span></header>
             <div className="replay-order-body">
               <div className="replay-side-tabs" aria-label="委托方向"><button type="button" className={side === "buy" ? "is-active" : ""} aria-pressed={side === "buy"} onClick={() => { setSide("buy"); setFeedback(null); }}>买入</button><button type="button" className={side === "sell" ? "is-active" : ""} aria-pressed={side === "sell"} onClick={() => { setSide("sell"); setFeedback(null); }}>卖出</button></div>
-              <div className="replay-order-stock"><span>当前标的</span><strong>{picked ? picked.name : "请先选择股票"}</strong></div>
+              <div className="replay-order-stock"><span>当前标的</span><strong>{picked ? picked.name : "请先选择股票"}{selectedPrice !== null && <small> · ¥ {fmtNum(selectedPrice)}</small>}</strong></div>
               <div className="field"><label className="field-label" htmlFor="replay-shares">委托股数</label><input id="replay-shares" className="text-input text-input-num" type="number" min={1} step={minLot} value={sharesText} onChange={(e) => setSharesText(e.target.value)}/><div className="replay-quantity-buttons">{quickShares.map((n) => <button key={n} type="button" onClick={() => setSharesText(String(n))}>{n} 股</button>)}{side === "sell" && holding && <button type="button" disabled={holding.sellable === 0} onClick={() => setSharesText(String(holding.sellable))}>可卖全部</button>}</div><p className="field-hint">{pickedMarket === "US"
   ? "美股 1 股起买 · 无涨跌停 · 当日买入当日可卖"
   : pickedMarket === "HK"
@@ -333,19 +342,19 @@ export function ReplayView(props: ReplayViewProps) {
             </div>
           </section>
 
-          <section className="replay-panel replay-pending-panel"><header className="replay-panel-head"><h2>待成交委托</h2><span className="replay-count">{pending.length}</span></header><div className="replay-pending-body"><p className="replay-next-open">下次撮合：{nextDayLabel}</p>{pending.length === 0 ? <EmptyHint>暂无挂单。提交委托后，点「下一天」等待成交。</EmptyHint> : <ul className="replay-order-list">{pending.map((o) => <li key={o.id}><div><strong><span className={`replay-side-label ${o.side}`}>{o.side === "buy" ? "买" : "卖"}</span>{o.name}</strong><span>{o.shares} 股 · {maskDate(state, o.placedAt, hideDate)}挂出</span></div><button type="button" className="btn btn-ghost btn-tiny" onClick={() => onCancel(o.id)}>撤单</button></li>)}</ul>}<p className="field-hint">次日无开盘价（停牌或数据缺失）时作废；请查看推演日志。</p></div></section>
+          <details className="replay-panel replay-pending-panel" key={pending.length === 0 ? "empty" : "pending"} open={pending.length > 0 || undefined}><summary><span>待成交委托</span><span className="replay-count">{pending.length} 笔 ＋</span></summary><div className="replay-pending-body"><p className="replay-next-open">下次撮合：{nextDayLabel}</p>{pending.length === 0 ? <EmptyHint>暂无挂单。提交委托后，点「下一天」等待成交。</EmptyHint> : <ul className="replay-order-list">{pending.map((o) => <li key={o.id}><div><strong><span className={`replay-side-label ${o.side}`}>{o.side === "buy" ? "买" : "卖"}</span>{o.name}</strong><span>{o.shares} 股 · {maskDate(state, o.placedAt, hideDate)}挂出</span></div><button type="button" className="btn btn-ghost btn-tiny" onClick={() => onCancel(o.id)}>撤单</button></li>)}</ul>}<p className="field-hint">次日无开盘价（停牌或数据缺失）时作废；请查看推演日志。</p></div></details>
         </aside>
       </div>
 
       <section className="replay-panel replay-holdings-panel"><header className="replay-panel-head"><div><h2>我的持仓 <span className="replay-count">{account.holdings.length}</span></h2><p>按{hideDate ? "当前交易日" : date}收盘价估值 · A 股当日买入次日才可卖，港美股当日可卖 · 境外标的已折成人民币</p></div></header>{account.holdings.length === 0 ? <div className="replay-empty-holdings"><span aria-hidden="true">◇</span><div><strong>还没有持仓</strong><p>挂出买单，再推进一个交易日。成交的股票会出现在这里。</p></div></div> : <div className="replay-holding-list">{account.holdings.map((h) => {
         const price = prices[h.code] ?? null;
         const pnl = price === null ? null : (price - h.avgCost) * h.shares;
-        return <div key={h.code} className="replay-holding-row"><div className="replay-holding-name"><strong>{h.name}</strong><span>{shortCode(h.code)}</span></div><div><span>持有 / 可卖</span><strong>{h.shares} / {h.sellable}</strong></div><div><span>成本 / 收盘</span><strong>{fmtNum(h.avgCost)} / {price === null ? "—" : fmtNum(price)}</strong></div><div><span>持仓盈亏</span><strong className={pnl === null ? "tone-muted" : `tone-${pnlTone(pnl)}`}>{pnl === null ? "—" : fmtNum(pnl)}</strong></div><button type="button" className="btn btn-ghost btn-tiny" onClick={() => { setCode(h.code); setSide("sell"); setSharesText(String(h.sellable || 100)); setFeedback(null); document.getElementById("replay-shares")?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>查看 / 卖出 ↗</button></div>;
+        return <div key={h.code} className="replay-holding-row"><div className="replay-holding-name"><strong>{h.name}</strong><span>{shortCode(h.code)}</span></div><div><span>持有 / 可卖</span><strong>{h.shares} / {h.sellable}</strong></div><div><span>成本 / 收盘</span><strong>{fmtNum(h.avgCost)} / {price === null ? "—" : fmtNum(price)}</strong></div><div><span>持仓盈亏</span><strong className={pnl === null ? "tone-muted" : `tone-${pnlTone(pnl)}`}>{pnl === null ? "—" : fmtNum(pnl)}</strong></div><button type="button" className="btn btn-ghost btn-tiny" onClick={() => { setCode(h.code); setSide("sell"); setSharesText(String(h.sellable || 100)); setFeedback(null); setMobilePane("trade"); requestAnimationFrame(() => document.getElementById("replay-shares")?.scrollIntoView({ behavior: "smooth", block: "center" })); }}>查看 / 卖出 ↗</button></div>;
       })}</div>}</section>
 
       <div className="replay-bottom-grid">
         <section className="replay-panel replay-results"><header className="replay-panel-head"><div><p className="replay-eyebrow">PERFORMANCE / 本局表现</p><h2>{state.finished ? "本局结算" : "阶段成绩"}</h2></div><button type="button" className="btn btn-primary btn-tiny" onClick={finish}>{state.finished ? "结算本局" : "查看阶段结算"}</button></header><div className="replay-results-body">{state.finished ? <p className="replay-result-note">已走完最后一个交易日。查看成绩后，可退出游戏开始新一局。</p> : <p className="replay-result-note">阶段结算只查看当前成绩，您仍可继续推进和下单。</p>}{lastSeason ? <><p className="replay-snapshot-date">截至第 {lastSeasonDay} 天{lastSeasonDay !== dayNo ? " · 可重新查看最新成绩" : ""}</p><div className="kv-list"><KV k="本局区间" v={hideDate ? `第 1 天 → 第 ${lastSeasonDay} 天` : `${lastSeason.startDate} → ${lastSeason.endDate}`}/><KV k="期末总资产" v={`${fmtNum(lastSeason.finalAssets)} 元`}/><KV k="总收益率" v={fmtPct(lastSeason.totalReturnPct)}/><KV k={`同期${benchmarkName}`} v={fmtPct(lastSeason.benchmarkReturnPct)}/><KV k="超额收益" v={fmtPct(lastSeason.excessReturnPct)}/><KV k="最大回撤" v={fmtPct(-lastSeason.maxDrawdownPct)}/><KV k="胜率" v={lastSeason.winRatePct === null ? "—（无平仓）" : fmtPct(lastSeason.winRatePct)}/><KV k="成交笔数" v={`${lastSeason.tradeCount} 笔`}/></div></> : <div className="replay-result-empty"><span>{account.trades.length} 笔成交</span><strong className={`tone-${pnlTone(totalReturnPct)}`}>{fmtPct(totalReturnPct)}</strong><small>查看结算，对照同期{benchmarkName}、回撤与胜率。</small></div>}</div></section>
-        <section className="replay-panel replay-log-panel"><header className="replay-panel-head"><h2>推演日志</h2><span className="replay-count">最近 {recentLog.length} 条</span></header><div className="replay-log-body">{recentLog.length === 0 ? <EmptyHint>尚无成交记录。推进交易日后，撮合结果会记录在这里。</EmptyHint> : <ul className="replay-log-list">{recentLog.map((e, i) => <li key={`${e.date}-${e.code}-${i}`}><span className={`replay-log-dot${e.ok ? " is-ok" : ""}`}/><p className={e.ok ? "" : "tone-muted"}>{maskDatesIn(state, e.text, hideDate)}</p></li>)}</ul>}</div></section>
+        <details className="replay-panel replay-log-panel replay-log-details"><summary><span>推演日志 · 最近 {recentLog.length} 条</span><span>＋</span></summary><div className="replay-log-body">{recentLog.length === 0 ? <EmptyHint>尚无成交记录。推进交易日后，撮合结果会记录在这里。</EmptyHint> : <ul className="replay-log-list">{recentLog.map((e, i) => <li key={`${e.date}-${e.code}-${i}`}><span className={`replay-log-dot${e.ok ? " is-ok" : ""}`}/><p className={e.ok ? "" : "tone-muted"}>{maskDatesIn(state, e.text, hideDate)}</p></li>)}</ul>}</div></details>
       </div>
       <p className="game-disclaimer replay-disclaimer" role="note">{`⚠️ ${GAME_DISCLAIMER}`}</p>
     </div>

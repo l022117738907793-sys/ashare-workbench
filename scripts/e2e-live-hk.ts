@@ -139,6 +139,18 @@ try {
   check("开局按钮点得动", started === "OK", started);
   check("进了模拟下单卡", await waitFor(`document.body.innerText.includes("模拟下单")`, "下单卡"));
 
+  /*
+   * 紧凑版把股票列表收进了「从列表选择股票」折叠块，折叠时 innerText 是空的 —— 先点开，
+   * 这一步顺带验证它展得开（玩家要能从列表里挑票，不能只是有个折叠符号）。
+   */
+  const picksOpened = await evaluate<string>(`
+    const d = document.querySelector(".game-stock-browser");
+    if (!d) return "NO_DETAILS";
+    if (!d.open) { const s = d.querySelector("summary"); if (!s) return "NO_SUMMARY"; s.click(); }
+    return d.open ? "OK" : "STILL_CLOSED";
+  `);
+  check("点得开「从列表选择股票」", picksOpened === "OK", picksOpened);
+
   console.log("\n三、港股进得了候选清单，价格已折成人民币");
   await evaluate(TYPE("#game-code", "00700"));
   const listed = await waitFor(`document.body.innerText.includes("腾讯控股")`, "腾讯控股出现在候选里", 20);

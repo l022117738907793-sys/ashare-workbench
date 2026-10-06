@@ -26,7 +26,7 @@ export function GameCompanion({onGuide, context = "lobby"}: {onGuide: () => void
   const tip = index === 0 ? {...TIPS[0], text: START_TIPS[context]} : TIPS[index];
   const [x,y] = MOOD_CELL[tip.mood];
   const position = `${x * 50}% ${y * 100}%`;
-  return <section className="game-companion" aria-label="翡翠教学助手">
+  return <section className={`game-companion${expanded ? " is-expanded" : ""}`} aria-label="翡翠教学助手">
     <div className="companion-portrait" role="img" aria-label={`翡翠，${tip.label}`}>
       <span className="companion-frame companion-open" style={{backgroundImage:`url(${sheet})`,backgroundPosition:position}} />
       <span className="companion-frame companion-blink" style={{backgroundImage:`url(${blink})`,backgroundPosition:position}} />

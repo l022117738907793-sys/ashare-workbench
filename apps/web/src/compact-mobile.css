@@ -1,0 +1,209 @@
+/* Compact phone layouts: keep touch targets, reveal supporting content on demand. */
+.game-mode-description { display: none; }
+.replay-phone-tabs { display: none; }
+.replay-order-stock small { color: var(--text-2); font-weight: 400; font-size: 12px; }
+.game-quick-guide, .game-stock-browser, .chapter-briefing-details { border-top: 1px solid var(--border); }
+.game-quick-guide > summary,
+.game-stock-browser > summary,
+.chapter-briefing-details > summary,
+.replay-chart-details > summary,
+.replay-log-details > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: 44px; list-style: none; cursor: pointer; font-size: 13px; color: var(--text-2);
+}
+summary::-webkit-details-marker { display: none; }
+.game-quick-guide > summary > span,
+.game-stock-browser > summary > span,
+.chapter-briefing-details > summary > span,
+.replay-chart-details > summary > span,
+.replay-log-details > summary > span:last-child { color: var(--accent); transition: transform .18s; }
+.game-quick-guide[open] > summary > span,
+.game-stock-browser[open] > summary > span,
+.chapter-briefing-details[open] > summary > span,
+.replay-chart-details[open] > summary > span,
+.replay-log-details[open] > summary > span:last-child { transform: rotate(45deg); }
+.replay-chart-details > summary { padding: 0 18px; border-top: 1px solid var(--border); }
+.replay-log-details > summary { padding: 0 18px; }
+.replay-pending-panel > summary { display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 0 12px; gap: 8px; font-size: 13px; cursor: pointer; list-style: none; }
+.replay-pending-panel[open] > summary { border-bottom: 1px solid var(--border); }
+.game-quick-guide .game-how-grid { padding: 8px 0 12px; }
+
+@media (max-width: 760px) {
+  .app-head-row { min-height: 60px; padding: 0 14px; }
+  .app-head { padding-left: 0; padding-right: 0; }
+  .data-strip { min-height: 32px; margin: 0 14px; font-size: 10px; }
+  .app-main { padding: 12px 14px 0; }
+  .app-game:has(.game-lobby) .app-main { padding-bottom: 0; }
+  .view, .game-lobby, .game-stage, .replay-game { gap: 10px; }
+  .game-pane-switch { margin-bottom: 8px; }
+  .game-hero { padding: 0; gap: 0; }
+  .game-hero .game-eyebrow { font-size: 10px; }
+  .game-hero h1 { font-size: clamp(23px, 6.4vw, 28px); line-height: 1.25; margin: 8px 0; letter-spacing: -.5px; }
+  .game-hero h1 br { display: none; }
+  .game-hero-copy > p { font-size: 12px; line-height: 1.6; margin: 0; }
+  .game-hero-secondary { display: none; }
+  .game-section-heading { align-items: center; gap: 8px; }
+  .game-section-heading .game-eyebrow { display: none; }
+  .game-section-heading h2 { margin: 0; font-size: 15px; }
+  .game-section-heading .game-text-button { font-size: 11px; min-height: 44px; white-space: nowrap; padding: 0; }
+  .game-mode-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .game-mode-card { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 5px; min-height: 102px; padding: 11px 10px; border-radius: 12px; }
+  .game-mode-top { display: flex; margin: 0; }
+  .game-mode-top svg { width: 22px; height: 22px; }
+  .game-mode-card .game-mode-number { margin: 0; font-size: 9px; line-height: 1.4; letter-spacing: 0; }
+  .game-mode-card > strong { margin: 0; font-size: 15px; line-height: 1.4; }
+  .game-mode-card > p, .game-mode-foot, .game-mode-tag { display: none !important; }
+  .game-mode-description { display: block; font-size: 12px; line-height: 1.6; margin: 0; color: var(--text-2); }
+  .game-launch-panel { padding: 12px; gap: 10px; border-radius: 12px; }
+  .game-launch-panel.is-legend .game-funding { display: none; }
+  .game-launch-panel.is-legend { gap: 0; }
+  .game-funding > .game-eyebrow { font-size: 11px; }
+  .game-funding .cash-options { gap: 6px; margin-top: 8px; }
+  .game-funding .chip { min-height: 44px; padding: 0 6px; font-size: 13px; }
+  .game-funding p { margin: 6px 0 0; font-size: 11px; line-height: 1.5; }
+  .game-launch-action { position: static; order: 0; padding: 0; border: 0; border-radius: 0; box-shadow: none; backdrop-filter: none; background: transparent; }
+  .game-launch-action .game-launch-button { min-height: 44px; padding: 10px 14px; font-size: 14px; }
+  .game-launch-action p { margin: 6px 0 0; font-size: 11px; line-height: 1.5; }
+  .game-quick-guide > summary { font-size: 12px; }
+  .game-how-grid { gap: 10px; }
+  .game-disclaimer { margin: 0; padding: 8px 10px; font-size: 11px; line-height: 1.55; }
+  .game-lobby .game-disclaimer { padding: 8px 0 0; font-size: 11px; line-height: 1.55; }
+  .game-resume { padding: 12px; gap: 8px; }
+  .game-resume p { font-size: 12px; margin-top: 4px; }
+
+  .game-companion { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; padding: 10px 12px; margin-top: 12px; border-radius: 12px; align-items: center; }
+  .companion-portrait { width: 44px; height: 44px; }
+  .companion-copy h2 { margin: 3px 0; font-size: 12px; }
+  .companion-copy .eyebrow { font-size: 8px; }
+  .game-companion:not(.is-expanded) .companion-copy > p { display: none; }
+  .companion-actions { grid-column: auto; flex-direction: column; gap: 3px; align-items: stretch; }
+  .companion-actions .btn { padding: 0 9px; font-size: 11px; min-height: 44px; }
+  .companion-actions .text-action { font-size: 10px; min-height: 44px; }
+  .game-companion:not(.is-expanded) .companion-actions .text-action { display: none; }
+  .game-companion.is-expanded { grid-template-columns: 44px minmax(0, 1fr); align-items: start; }
+  .game-companion.is-expanded .companion-actions { grid-column: 2; flex-direction: row; }
+  .companion-copy p { font-size: 12px; line-height: 1.65; }
+  .app-footer { margin-top: 12px; padding: 10px 0; gap: 5px 12px; font-size: 10px; }
+  .app-footer > span:first-child { display: none; }
+
+  .chapter-view { gap: 10px; }
+  .chapter-page-heading { flex-direction: row; align-items: flex-start; gap: 10px; }
+  .chapter-page-heading > div { flex: 1; min-width: 0; }
+  .chapter-page-heading .chapter-kicker { font-size: 9px; letter-spacing: .3px; }
+  .chapter-page-heading h1 { font-size: 22px; line-height: 1.3; margin: 5px 0; }
+  .chapter-page-heading p { font-size: 12px; line-height: 1.55; margin: 0; }
+  .chapter-page-heading { padding: 0; }
+  .chapter-page-heading p { display: none; }
+  .chapter-page-heading .chapter-back { flex: 0 0 94px; min-height: 44px; padding: 6px; font-size: 11px; white-space: normal; text-align: center; }
+  .chapter-mode-strip { display: flex; flex-wrap: wrap; gap: 8px 12px; padding: 9px 10px; font-size: 11px; }
+  .chapter-mode-strip strong { font-size: 13px; }
+  .chapter-layout { gap: 10px; }
+  .chapter-catalog-heading { margin: 0 0 8px; }
+  .chapter-catalog-heading h2 { font-size: 14px; }
+  .chapter-catalog-heading > span { font-size: 10px; }
+  .chapter-grid { gap: 8px; padding-bottom: 6px; }
+  .chapter-grid > li { width: 158px; flex-basis: 158px; }
+  .chapter-card { min-height: 124px; padding: 10px; border-radius: 12px; gap: 5px; }
+  .chapter-card-top { margin-bottom: 0; }
+  .chapter-number { font-size: 22px; }
+  .chapter-year { font-size: 10px; }
+  .chapter-card-title { font-size: 14px; line-height: 1.45; }
+  .chapter-card-subtitle { display: none; }
+  .chapter-card-footer { font-size: 10px; gap: 4px; margin-top: auto; }
+  .chapter-card-status { margin-top: 5px; padding-top: 5px; font-size: 10px; }
+  .chapter-catalog-note { font-size: 11px; line-height: 1.5; margin: 3px 0 0; }
+  .chapter-briefing { padding: 12px; border-radius: 12px; }
+  .chapter-briefing-top { margin-bottom: 7px; }
+  .chapter-briefing-top .chapter-kicker { font-size: 9px; }
+  .chapter-briefing h2 { font-size: 21px; margin: 0 0 5px; line-height: 1.3; }
+  .chapter-briefing-subtitle { font-size: 12px; line-height: 1.55; margin: 0; }
+  .chapter-mission-stats { margin: 8px 0; padding: 7px 0; }
+  .chapter-mission-stats dt { margin-bottom: 3px; }
+  .chapter-mission-stats dt { font-size: 11px; }
+  .chapter-mission-stats dd { font-size: 15px; margin-top: 0; }
+  .chapter-briefing-details > summary { font-size: 12px; }
+  .chapter-briefing-section { margin-top: 8px; }
+  .chapter-facts { gap: 10px; }
+  .chapter-facts li { font-size: 13px; line-height: 1.65; }
+  .chapter-question { margin: 10px 0; padding: 10px; }
+  .chapter-funds { margin: 4px 0; }
+  .chapter-funds legend { font-size: 12px; margin-bottom: 6px; }
+  .chapter-cash-options { gap: 6px; }
+  .chapter-cash { min-height: 44px; font-size: 13px; padding: 0 4px; }
+  .chapter-enter { min-height: 44px; padding: 10px 12px; font-size: 13px; margin-top: 8px; }
+  .chapter-price-note { font-size: 11px; line-height: 1.55; margin: 6px 0 0; }
+
+  .replay-mission { gap: 8px; }
+  .replay-mission h1 { font-size: 21px; margin: 4px 0; }
+  .replay-mission-note { margin: 5px 0 0; font-size: 11px; line-height: 1.55; }
+  .replay-mission { padding-top: 0; }
+  .replay-mission-meta { flex-direction: row; align-items: center; gap: 6px; }
+  .replay-mission-meta .replay-date { display: none; }
+  .replay-mission h1 { font-size: 18px; }
+  .replay-mission > div:first-child { min-width: 0; }
+  .replay-timebar { padding: 8px 10px; gap: 6px; }
+  .replay-time-actions { gap: 6px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .replay-time-actions .btn { min-height: 44px; padding: 6px; font-size: 12px; }
+  .replay-account { grid-template-columns: repeat(5, minmax(104px, 1fr)); gap: 8px; padding: 5px 0 8px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  .replay-account .replay-metric { gap: 4px; padding-left: 6px; border-left: 1px solid var(--border); }
+  .replay-account .replay-metric:first-child { padding-left: 0; border-left: 0; }
+  .replay-metric-k { font-size: 11px; }
+  .replay-metric-v, .replay-account .replay-metric:first-child .replay-metric-v { font-size: 15px; }
+  .replay-phone-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; }
+  .replay-phone-tabs button { min-height: 44px; padding: 0 6px; font: inherit; font-size: 12px; color: var(--text-2); border: 0; background: transparent; border-radius: 6px; cursor: pointer; }
+  .replay-phone-tabs button[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+  .replay-game[data-mobile-pane="trade"] .replay-market-column,
+  .replay-game[data-mobile-pane="trade"] .replay-holdings-panel,
+  .replay-game[data-mobile-pane="trade"] .replay-bottom-grid,
+  .replay-game[data-mobile-pane="market"] .replay-trade-column,
+  .replay-game[data-mobile-pane="market"] .replay-holdings-panel,
+  .replay-game[data-mobile-pane="market"] .replay-bottom-grid,
+  .replay-game[data-mobile-pane="account"] .replay-workspace { display: none; }
+  .replay-workspace, .replay-market-column, .replay-trade-column, .replay-information, .replay-bottom-grid { gap: 10px; }
+  .replay-stock-selection, .replay-stock-search { padding: 10px; }
+  .replay-stock-selection .replay-stock-search { padding: 0; }
+  .replay-panel-head { padding: 10px 12px; gap: 8px; }
+  .replay-panel-head h2 { font-size: 15px; }
+  .replay-panel-head .replay-eyebrow { font-size: 9px; margin-bottom: 4px; }
+  .replay-order-body { padding: 12px; gap: 10px; }
+  .replay-order-body .field { gap: 6px; }
+  .replay-order-panel .replay-panel-head, .replay-pending-panel .replay-panel-head { padding: 10px 12px; }
+  .replay-order-panel .replay-eyebrow { display: none; }
+  .replay-order-body .field { display: grid; grid-template-columns: 80px minmax(0, 1fr); }
+  .replay-order-body .field-label, .replay-order-body .field-hint { grid-column: 1 / -1; margin: 0; }
+  .replay-order-body .text-input { min-height: 44px; height: 44px; padding: 6px 8px; font-size: 18px; }
+  .replay-order-body .replay-quantity-buttons { margin: 0; flex-wrap: nowrap; }
+  .replay-order-body .replay-quantity-buttons button { flex: 1; min-width: 0; padding: 4px; font-size: 11px; }
+  .replay-order-body .replay-order-estimate { padding: 0; }
+  .replay-stock-search .field-label { margin-bottom: 0; }
+  .replay-search-row .text-input { padding: 8px 10px; min-height: 44px; }
+  .replay-quantity-buttons { gap: 6px; }
+  .replay-quantity-buttons button, .replay-side-tabs button, .replay-submit { min-height: 44px; }
+  .replay-order-estimate { padding: 8px 0; font-size: 12px; }
+  .replay-matching-note { padding: 8px 10px; gap: 8px; }
+  .replay-matching-note p, .replay-game .field-hint, .replay-game .empty-hint { font-size: 12px; line-height: 1.55; }
+  .replay-pending-body { padding: 10px 12px; gap: 8px; }
+  .replay-next-open { margin: 0; font-size: 12px; }
+  .replay-pending-body .empty-hint { padding: 8px 0; }
+  .replay-chart-details > summary, .replay-log-details > summary { padding: 0 12px; font-size: 12px; }
+  .replay-details > summary { min-height: 48px; padding: 10px 12px; }
+  .replay-details > summary small { margin-top: 3px; font-size: 11px; }
+  .replay-empty-holdings { padding: 12px; gap: 10px; }
+  .replay-empty-holdings > span { font-size: 22px; }
+  .replay-empty-holdings p { font-size: 12px; line-height: 1.55; margin-top: 4px; }
+  .replay-results-body { padding: 10px 12px; }
+  .replay-result-note { margin: 0 0 8px; font-size: 12px; line-height: 1.55; }
+  .replay-result-empty { padding: 8px 0; gap: 4px; }
+  .replay-result-empty strong { font-size: 22px; }
+  .replay-result-empty small { font-size: 11px; line-height: 1.55; }
+  .game-stage-heading h1 { font-size: 22px; margin: 4px 0; }
+  .card-head { padding: 12px 12px 0; gap: 8px; }
+  .card-body { padding: 10px 12px 12px; gap: 10px; }
+  .game-stage > .card:nth-of-type(1) .metric-grid { gap: 10px; }
+  .game-stage .card-head { padding: 12px 12px 0; }
+  .game-stage .card-body { padding: 10px 12px 12px; gap: 10px; }
+  .game-stage .metric-v { font-size: 20px; }
+  .game-trading-grid { gap: 10px; }
+  .game-stock-browser > summary { font-size: 12px; }
+  .game-stock-browser .pick-list { max-height: 190px; }
+}
