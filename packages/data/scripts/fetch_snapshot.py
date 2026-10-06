@@ -16,6 +16,7 @@ import json
 import os
 import random
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
@@ -33,6 +34,11 @@ CACHE_DIR = os.path.join(ROOT, "data", "cache")
 HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://gu.qq.com/"}
 DAYS = 130  # 默认多取 10 天以便对齐后裁剪到 120；可用 --days 覆盖
 MAX_DAYS = 650  # 腾讯日线接口实测上限 641 根，留一点余量
+
+# 限流重试：原来 5 次、最长等 16 秒，CI 上实测 22.3% 的标的仍会耗尽重试。
+# 现在拉长到 8 次、最长等 48 秒，并且退避是全局的（见 note_throttle）。
+THROTTLE_ATTEMPTS = 8
+THROTTLE_MAX_WAIT = 48.0
 
 # 东方财富行情列表：沪深A股全市场（沪主板+科创板 / 深主板+创业板）
 EASTMONEY_CLIST_URL = "https://push2.eastmoney.com/api/qt/clist/get"
@@ -63,6 +69,37 @@ def warn(msg):
     print("[warn]", msg, file=sys.stderr)
 
 
+# —— 全局限流闸门 ——————————————————————————————————————————————
+# 501 不是「这一个请求太快」，而是腾讯对来源 IP 的**整体**惩罚：同一时刻在飞的
+# 请求越多，它惩罚得越久。所以每个线程各自 sleep 是没用的 —— 其他线程会继续把
+# 请求打上去，闸门永远关不上。实测 CI 上 4 线程拉 628 个标的失败 140 个（22.3%）。
+#
+# 正确的做法是**所有线程共用一条冷却时间线**：任何一次 501 都把冷却线往后推，
+# 之后每个线程发请求前都要先等这条线过去。等于把并发从「4 个一直打」变成
+# 「4 个排队，被罚就全体安静一会儿」。
+_throttle_lock = threading.Lock()
+_cooldown_until = 0.0
+
+
+def note_throttle(seconds):
+    """把全局冷却线推后，只延不缩。"""
+    global _cooldown_until
+    with _throttle_lock:
+        target = time.monotonic() + seconds
+        if target > _cooldown_until:
+            _cooldown_until = target
+
+
+def wait_for_throttle():
+    """发请求前过闸门：所有线程共享，冷却期内一律等待。"""
+    while True:
+        with _throttle_lock:
+            remaining = _cooldown_until - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(remaining, 1.0))
+
+
 def fetch_tencent(symbol, datalen=DAYS, qfq=True):
     """返回 [{date, open, close, high, low, volume}, ...] 从旧到新。"""
     kind = "qfq" if qfq else ""
@@ -71,13 +108,15 @@ def fetch_tencent(symbol, datalen=DAYS, qfq=True):
         f"?param={symbol},day,,,{datalen},{kind}"
     )
     last_err = None
-    for attempt in range(5):
+    for attempt in range(THROTTLE_ATTEMPTS):
         try:
+            wait_for_throttle()
             r = requests.get(url, headers=HEADERS, timeout=15)
             # 501 / 429 是腾讯的限流信号（实测并发拉 600+ 标的时必现）。
-            # 必须用指数退避 + 随机抖动等待，否则重试只是把限流撞得更狠。
+            # 冷却线推后 + 自己也要立刻退避，否则刚被罚完的线程会马上再撞一次。
             if r.status_code in (429, 501, 502, 503):
-                wait = min(60, 2 ** attempt) + random.uniform(0, 1.5)
+                wait = min(THROTTLE_MAX_WAIT, 3 * 2 ** attempt) + random.uniform(0, 1.5)
+                note_throttle(wait)
                 time.sleep(wait)
                 last_err = RuntimeError(f"HTTP {r.status_code}（限流，已等待 {wait:.1f}s）")
                 continue
@@ -105,7 +144,7 @@ def fetch_tencent(symbol, datalen=DAYS, qfq=True):
     raise RuntimeError(f"{symbol}: {last_err}")
 
 
-def eastmoney_page(pn, page_size=EASTMONEY_PAGE_SIZE, attempts=4):
+def eastmoney_page(pn, page_size=EASTMONEY_PAGE_SIZE, attempts=6):
     """取东财行情列表第 pn 页（1-based），返回响应中的 data 字段。"""
     params = {
         "pn": pn,
@@ -135,7 +174,8 @@ def eastmoney_page(pn, page_size=EASTMONEY_PAGE_SIZE, attempts=4):
             return data
         except Exception as e:  # noqa: BLE001
             last_err = e
-            time.sleep(0.6 * (attempt + 1))
+            # 东财翻页偶发 502（CI 上实测第 4 页挂过），原来只等 0.6/1.2/1.8 秒太急。
+            time.sleep(min(12.0, 0.8 * 2 ** attempt) + random.uniform(0, 0.5))
     raise RuntimeError(f"eastmoney clist pn={pn}: {last_err}")
 
 

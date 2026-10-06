@@ -33,8 +33,22 @@ jobs:
       - name: Install Python deps
         run: pip install akshare requests pandas
 
+      # 并发 2 而不是默认 4：腾讯按来源 IP 限流，CI 上 4 线程实测失败 22.3%
+      # （140/628 标的耗尽重试），脚本因此拒绝产出残缺快照并退出 1。
       - name: Fetch snapshot
-        run: python3 -u packages/data/scripts/fetch_snapshot.py
+        id: fetch
+        continue-on-error: true
+        run: python3 -u packages/data/scripts/fetch_snapshot.py --workers 2
+
+      # 限流是暂时的，而第一次跑已经把成功的标的全写进 data/cache ——
+      # 重试只补失败的那部分，比放弃一整天划算得多。
+      - name: Fetch snapshot（被限流后退避重试）
+        if: steps.fetch.outcome == 'failure'
+        run: |
+          echo "第一次取数失败（多为腾讯 501 限流），等 3 分钟后重试。"
+          echo "成功过的标的已落在 data/cache，这一步不会重复取。"
+          sleep 180
+          python3 -u packages/data/scripts/fetch_snapshot.py --workers 2
 
       - name: Prune old snapshots
         # 每份快照约 0.5~2MB，每天留一份一年就是几百 MB，
