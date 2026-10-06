@@ -62,6 +62,41 @@ ETFS = [
     ("sh588000", "588000.SH", "科创50ETF"),
 ]
 
+# 港股标的池。固定名单，不按行业选——港股没有申万那样的行业分类，
+# 而且这 20 只就是「历史推演」里用的那批，两处保持同一批标的，
+# 玩家在推演里认识的港股，到实时盘里还是这些。
+#
+# 名单按成交活跃度挑的代表：互联网（腾讯/阿里/美团/小米/京东/网易/百度/快手）、
+# 金融（建行/友邦/平安/港交所/汇丰）、运营商与能源（中移动/神华/中海油/中石化）、
+# 制造与消费（比亚迪/安踏/海底捞）。
+HK_UNIVERSE = [
+    ("00700", "腾讯控股"),
+    ("09988", "阿里巴巴-W"),
+    ("03690", "美团-W"),
+    ("01810", "小米集团-W"),
+    ("09618", "京东集团-SW"),
+    ("09999", "网易-S"),
+    ("09888", "百度集团-SW"),
+    ("01024", "快手-W"),
+    ("00939", "建设银行"),
+    ("01299", "友邦保险"),
+    ("02318", "中国平安"),
+    ("00941", "中国移动"),
+    ("00388", "香港交易所"),
+    ("00005", "汇丰控股"),
+    ("01211", "比亚迪股份"),
+    ("02020", "安踏体育"),
+    ("01088", "中国神华"),
+    ("00883", "中国海洋石油"),
+    ("00386", "中国石化"),
+    ("06862", "海底捞"),
+]
+
+# 恒生指数：港股的交易日历从它的日线日期反推。
+# 不手写节假日表——港股一年四季的假期（佛诞、复活节、圣诞）跟 A 股不同，
+# 手写一定会过期；指数哪天有 bar，哪天就是港股交易日，这是自维护的。
+HK_CALENDAR_SYMBOL = "hkHSI"
+
 TOP_N = 20
 
 
@@ -263,6 +298,51 @@ def align(rows, calendar):
             out["low"].append(r["low"])
             out["volume"].append(r["volume"])
     return out
+
+
+def fetch_boc_fx(name_cn, pair, days=40):
+    """
+    取最近一个交易日的中行折算价，返回 `{pair, date, rate}`；取不到返回 None。
+
+    `rate` 是「1 单位外币值多少人民币」，正是引擎要的口径
+    （`@aw/game` 的 calcFee 拿它把港股最低佣金折回人民币）。
+
+    两个坑（与 packages/data/scripts/fetch_overseas.py 里同源）：
+    1. 接口收 `YYYYMMDD`，传带横杠的进去会被安静地切错、回一个空表，不报错。
+    2. 接口给的是「100 外币兑人民币」，要除以 100。
+       列名里只有「中行折算价」一直有值，央行中间价那几列常是 NaN。
+    """
+    import akshare as ak  # 与 main() 里的延迟导入一致，避免脚本启动就拉起 akshare
+
+    end = (datetime.now(timezone.utc) + timedelta(hours=8)).date()
+    start = end - timedelta(days=days)
+    df = ak.currency_boc_sina(
+        symbol=name_cn,
+        start_date=start.strftime("%Y%m%d"),
+        end_date=end.strftime("%Y%m%d"),
+    )
+    rate_col = None
+    for c in df.columns:
+        if "折算价" in str(c):
+            rate_col = c
+            break
+    if rate_col is None or len(df) == 0:
+        return None
+
+    best = None
+    for _, row in df.iterrows():
+        try:
+            f = float(row[rate_col]) / 100.0
+        except (TypeError, ValueError):
+            continue
+        if f != f or f <= 0:  # NaN 或非法值
+            continue
+        d = str(row[df.columns[0]])[:10]
+        if best is None or d > best[0]:
+            best = (d, f)
+    if best is None:
+        return None
+    return {"pair": pair, "date": best[0], "rate": best[1]}
 
 
 def main():
@@ -516,6 +596,66 @@ def main():
             )
     print(f"    股票 {len(stocks)} 只，跳过 {dropped} 只")
 
+    # —— 港股 ——
+    # 与 A 股共用同一份日历（快照的所有序列必须等长，下游按同一个下标取数）。
+    # 港股放假而 A 股开市的日子（圣诞、佛诞、复活节）会留下 null——
+    # 那不是缺数据，是那天港股真的没开市，界面照 null 显示空档才对。
+    print(f"    拉取港股 {len(HK_UNIVERSE)} 只...")
+    hk_calendar = []
+    try:
+        hsi = fetch_tencent_cached(
+            HK_CALENDAR_SYMBOL, qfq=False, fresh=args.fresh, days=args.days
+        )
+        hk_calendar = [r["date"] for r in hsi]
+        print(f"       恒生指数 {len(hk_calendar)} 根，港股交易日历以此为准")
+    except Exception as e:  # noqa: BLE001
+        warn(f"恒生指数拉取失败，港股交易日历缺失: {str(e)[:90]}")
+
+    hk_stocks = []
+    hk_dropped = 0
+    for num, cname in HK_UNIVERSE:
+        sym = f"hk{num}"
+        try:
+            rows = fetch_tencent_cached(sym, qfq=False, fresh=args.fresh, days=args.days)
+        except Exception as e:  # noqa: BLE001
+            warn(f"港股 {sym} 拉取失败: {str(e)[:80]}")
+            hk_dropped += 1
+            continue
+        series = align(rows, calendar)
+        valid = sum(1 for v in series["close"] if v is not None)
+        if valid < 60:
+            warn(f"港股 {sym} 只有 {valid} 天有效数据，跳过")
+            hk_dropped += 1
+            continue
+        hk_stocks.append(
+            {
+                "code": f"{num}.HK",
+                "name": cname,
+                "industry": "港股",
+                "industryCode": "HK",
+                # weight 是申万行业权重，港股没有对应概念，给 0。
+                # 它只影响「按权重」的排序，游戏里的选股清单按涨跌/成交额排，用不到。
+                "weight": 0.0,
+                "isST": False,
+                "market": "HK",
+                "currency": "HKD",
+                **series,
+            }
+        )
+    print(f"    港股 {len(hk_stocks)} 只，跳过 {hk_dropped} 只")
+
+    hk_fx = None
+    try:
+        hk_fx = fetch_boc_fx("港币", "HKDCNY")
+        if hk_fx:
+            print(f"    港币折算价 {hk_fx['date']}：{hk_fx['rate']}")
+        else:
+            warn("港币折算价取到空表，港股将无法折算成人民币")
+    except Exception as e:  # noqa: BLE001
+        warn(f"港币折算价拉取失败: {str(e)[:90]}")
+
+    stocks = stocks + hk_stocks
+
     stock_codes = {s["code"] for s in stocks}
     for s in sectors:
         before = len(s["members"])
@@ -532,6 +672,18 @@ def main():
         "calendarNote": "以沪深300交易日为公共日历",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "days": len(calendar),
+        # 港股的交易日历与折算价放 meta：快照的顶层文件是按 A 股的四层漏斗设计的，
+        # 多塞一个 hk 字段不用改加载器（meta 本来就是自由结构）。
+        "hk": {
+            "calendar": hk_calendar,
+            "calendarNote": "以恒生指数有日线的日期为准，与 A 股日历不同（港股的圣诞、佛诞、复活节 A 股照常开市）",
+            "universeNote": f"固定 {len(HK_UNIVERSE)} 只，与历史推演用的是同一批标的",
+            "count": len(hk_stocks),
+            # rate 是「1 港币值多少人民币」，引擎用它把港股折成人民币记账。
+            # 注意这是快照生成当天的价，盘中用它折算会有一点点滞后——港股价格本身
+            # 在盘中也会变，两者都是当日口径，够用。
+            "fx": hk_fx,
+        },
     }
     for name, obj in [
         ("meta.json", meta),

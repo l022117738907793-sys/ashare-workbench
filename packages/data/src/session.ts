@@ -70,17 +70,52 @@ export function isCalendarFresh(calendar: string[] | undefined, iso: string): bo
   return last >= iso;
 }
 
-const OPEN_AM = 9 * 60 + 30; // 09:30
-const CLOSE_AM = 11 * 60 + 30; // 11:30
-const OPEN_PM = 13 * 60; // 13:00
-const CLOSE_PM = 15 * 60; // 15:00
+/**
+ * 交易时段按市场分表。**时间一律是北京时间**——香港时间就是北京时间（同为 UTC+8），
+ * 所以港股只要换时段数字，不需要换时区。
+ *
+ * 港股的午休是 12:00–13:00（比 A 股晚收半小时），下午 16:00 收盘（比 A 股晚一小时）。
+ * 于是 15:00–16:00 这一小时会同时出现「A 股已收盘、港股还在交易」——
+ * 这正是把时段做成参数、而不是继续硬编码的原因。
+ *
+ * 日股/韩股暂未纳入：它们不在北京时间白天收市（日本 15:30 JST = 14:30 北京），
+ * 且腾讯源只给 72 个字段、没有币种标识，先不接。
+ */
+export type SessionMarket = "CN" | "HK";
+
+interface MarketHours {
+  openAm: number;
+  closeAm: number;
+  openPm: number;
+  closePm: number;
+}
+
+const HOURS: Record<SessionMarket, MarketHours> = {
+  CN: {
+    openAm: 9 * 60 + 30, // 09:30
+    closeAm: 11 * 60 + 30, // 11:30
+    openPm: 13 * 60, // 13:00
+    closePm: 15 * 60, // 15:00
+  },
+  HK: {
+    openAm: 9 * 60 + 30, // 09:30
+    closeAm: 12 * 60, // 12:00
+    openPm: 13 * 60, // 13:00
+    closePm: 16 * 60, // 16:00
+  },
+};
 
 /**
  * 判断当前处于哪个交易时段。
  * @param at 时刻，默认现在
- * @param calendar 快照里的交易日历（`YYYY-MM-DD` 数组）。提供时可识别节假日。
+ * @param calendar 该市场的交易日历（`YYYY-MM-DD` 数组）。提供时可识别节假日。
+ * @param market 市场，默认 A 股（老调用方不传也仍然是原来的行为）
  */
-export function sessionState(at: Date = new Date(), calendar?: string[]): SessionState {
+export function sessionState(
+  at: Date = new Date(),
+  calendar?: string[],
+  market: SessionMarket = "CN",
+): SessionState {
   const t = beijingTime(at);
   // 日历过期时不能拿它判"非交易日"，否则每个新交易日都会被误判成 holiday
   const usable = isCalendarFresh(calendar, t.iso);
@@ -93,40 +128,50 @@ export function sessionState(at: Date = new Date(), calendar?: string[]): Sessio
     return "weekend";
   }
 
+  const h = HOURS[market];
   const m = minutesOfDay(t);
-  if (m < OPEN_AM) return "pre";
-  if (m <= CLOSE_AM) return "open";
-  if (m < OPEN_PM) return "lunch";
-  if (m <= CLOSE_PM) return "open";
+  if (m < h.openAm) return "pre";
+  if (m <= h.closeAm) return "open";
+  if (m < h.openPm) return "lunch";
+  if (m <= h.closePm) return "open";
   return "closed";
 }
 
 /** 是否处于连续竞价（唯一需要秒级轮询的时段） */
-export function isTradingNow(at: Date = new Date(), calendar?: string[]): boolean {
-  return sessionState(at, calendar) === "open";
+export function isTradingNow(
+  at: Date = new Date(),
+  calendar?: string[],
+  market: SessionMarket = "CN",
+): boolean {
+  return sessionState(at, calendar, market) === "open";
 }
 
 /**
  * 距离下一次开盘的毫秒数。用于决定"多久之后再重新探测"，
  * 避免收盘后还在傻轮询。
  */
-export function msUntilNextOpen(at: Date = new Date(), calendar?: string[]): number {
+export function msUntilNextOpen(
+  at: Date = new Date(),
+  calendar?: string[],
+  market: SessionMarket = "CN",
+): number {
+  const h = HOURS[market];
   const t = beijingTime(at);
   const m = minutesOfDay(t);
 
-  if (sessionState(at, calendar) === "open") return 0;
+  if (sessionState(at, calendar, market) === "open") return 0;
 
-  // 当天还没到 09:30 且今天是交易日 → 今天开盘
+  // 当天还没到开盘时间且今天是交易日 → 今天开盘
   const todayIsTrading = isCalendarFresh(calendar, t.iso) && calendar
     ? calendar.includes(t.iso)
     : t.dow !== 0 && t.dow !== 6;
 
-  if (todayIsTrading && m < OPEN_AM) {
-    return OPEN_AM * MIN - m * MIN;
+  if (todayIsTrading && m < h.openAm) {
+    return h.openAm * MIN - m * MIN;
   }
   // 午休 → 当天下午开盘
-  if (todayIsTrading && m >= CLOSE_AM && m < OPEN_PM) {
-    return OPEN_PM * MIN - m * MIN;
+  if (todayIsTrading && m >= h.closeAm && m < h.openPm) {
+    return h.openPm * MIN - m * MIN;
   }
 
   // 否则找下一个交易日
@@ -137,7 +182,7 @@ export function msUntilNextOpen(at: Date = new Date(), calendar?: string[]): num
       ? calendar.includes(pt.iso)
       : pt.dow !== 0 && pt.dow !== 6;
     if (isTrading) {
-      return pt.dayStartUtc + OPEN_AM * MIN - at.getTime();
+      return pt.dayStartUtc + h.openAm * MIN - at.getTime();
     }
   }
   return 24 * 3600_000; // 兜底：一天后再看

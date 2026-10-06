@@ -1685,6 +1685,16 @@ code {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+/* 非人民币标的的币种标注：价格已折成人民币，这里只说明「原本以什么计价」 */
+.pick-cur {
+  margin-left: 5px;
+  padding: 0 4px;
+  border: 1px solid var(--line, rgba(128, 128, 128, 0.35));
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--muted);
+}
 .pick-mid {
   flex: 0 0 auto;
   display: flex;

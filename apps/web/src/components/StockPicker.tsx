@@ -25,8 +25,17 @@ import {
   type PickStock,
 } from "../lib/picks";
 
-export interface StockPickerProps {
-  /** 这一局能买的全部标的。只能来自本局的标的池，不能混进别的年份的票 */
+/**
+ * 只有**非人民币**的票才标注币种。
+ *
+ * 港股（将来也许还有美股）的报价在进这一屏之前就折成人民币了（见 App.tsx 的
+ * `convertSnapshotToCny` 与 `fxFor`），所以这里显示的数字是元；而玩家在券商 App
+ * 里看到的是港币 —— 不标一句「港币」，两边对不上就会被当成数据错了。
+ * A 股不标：它本来就是人民币，标了是噪音。
+ */
+const CUR_NAME: Partial<Record<string, string>> = { HKD: "港币", USD: "美元" };
+
+export interface StockPickerProps {  /** 这一局能买的全部标的。只能来自本局的标的池，不能混进别的年份的票 */
   rows: PickStock[];
   /** 输入框里已经打了的字 */
   query: string;
@@ -83,6 +92,17 @@ export function StockPicker({ rows, query, onPick, activeCode }: StockPickerProp
                 <span className="pick-name">
                   {s.name}
                   <span className="pick-code">{s.code.replace(/\.(SH|SZ|BJ)$/, "")}</span>
+                  {(() => {
+                    const cur = CUR_NAME[s.currency ?? "CNY"];
+                    return cur ? (
+                      <span
+                        className="pick-cur"
+                        title={`这只票以${cur}计价，报价已按汇率折成人民币`}
+                      >
+                        {cur}
+                      </span>
+                    ) : null;
+                  })()}
                 </span>
                 <span className="pick-mid">
                   <span className="pick-sector">{s.sector || "—"}</span>
@@ -103,8 +123,7 @@ export function StockPicker({ rows, query, onPick, activeCode }: StockPickerProp
   );
 }
 
-/** 红涨绿跌（A 股习惯）。0 和取不到都不上色。 */
-function chgClass(v: number | null): string {
+/** 红涨绿跌（A 股习惯）。0 和取不到都不上色。 */function chgClass(v: number | null): string {
   if (v === null || v === 0) return "";
   return v > 0 ? "chg-up" : "chg-down";
 }

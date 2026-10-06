@@ -86,3 +86,53 @@ describe("分析引擎与 fixture 一致性", () => {
     });
   }
 });
+
+describe("大盘广度只数 A 股", () => {
+  const base = fixtures[0] as Snapshot & { rules: any };
+  const rules = base.rules;
+  const breadthOf = (r: { reasons: Array<{ key: string; value: number | null }> }) => {
+    const item = r.reasons.find((x) => x.key === "main.breadth");
+    expect(item, "main.breadth 应当存在").toBeDefined();
+    return item!.value;
+  };
+
+  /**
+   * 造一批「20 日一路下跌」的港股掺进股票池。
+   *
+   * 恒生涨跌跟沪深300 不是一回事：这些港股若被算进分母，广度会被明显拉低，
+   * 卡在 strong/weak 阈值附近时足以把「大盘环境」的结论翻过来。
+   */
+  const fallingHk = (n: number): any[] =>
+    Array.from({ length: n }, (_, i) => {
+      const close = Array.from({ length: 60 }, (_, k) => 100 * Math.pow(0.99, k));
+      return {
+        code: `${String(700 + i).padStart(5, "0")}.HK`,
+        name: `港股${i}`,
+        industry: "港股",
+        industryCode: "HK",
+        weight: 0,
+        isST: false,
+        market: "HK",
+        currency: "HKD",
+        open: close,
+        close,
+        high: close,
+        low: close,
+        volume: close.map(() => 1),
+      };
+    });
+
+  it("掺进 40 只下跌的港股，广度与大盘结论都不变", () => {
+    const before = analyzeMarket(base, rules);
+    const after = analyzeMarket({ ...base, stocks: [...base.stocks, ...fallingHk(40)] }, rules);
+    expect(breadthOf(after)).toBe(breadthOf(before));
+    expect(after.state).toBe(before.state);
+  });
+
+  it("对照组：同样 40 只换成 A 股，广度会被拉下去（证明上面不是空跑）", () => {
+    const before = analyzeMarket(base, rules);
+    const cnTwins = fallingHk(40).map((s) => ({ ...s, code: s.code.replace(".HK", ".SZ"), market: "CN", currency: "CNY" }));
+    const after = analyzeMarket({ ...base, stocks: [...base.stocks, ...cnTwins] }, rules);
+    expect(breadthOf(after)).not.toBe(breadthOf(before));
+  });
+});

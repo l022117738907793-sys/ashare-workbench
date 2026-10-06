@@ -14,13 +14,14 @@ import { useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_SLIPPAGE,
   LOT_SIZE,
+  marketGroupOf,
   reviewReport,
   type ReviewReport,
   type SeasonResult,
   type Side,
   type Trade,
 } from "@aw/game";
-import type { StockData, StockResult } from "@aw/core";
+import type { MarketGroup, StockData, StockResult } from "@aw/core";
 import { sourceLabel, type Quote } from "@aw/data";
 import { StockPicker } from "./StockPicker";
 import { OrderPreview } from "./OrderPreview";
@@ -55,6 +56,14 @@ export interface GameViewProps {
     side: Side,
     shares: number,
   ) => { ok: boolean; reason?: string; trade?: Trade };
+  /**
+   * 某个标的的结算汇率（1 单位本币值多少人民币）；A 股返回 1，拿不到返回 null。
+   *
+   * 实时报价里的**成交额是标的的本币**（腾讯给港股的就是港币），而这一屏别处的
+   * 价格都已经折成人民币了 —— 不折就是把两个币种的数字并排放在同一行。
+   * 拿不到汇率时退回「按人民币价 × 快照成交量」的估算，那也是人民币口径。
+   */
+  fxOf?: (code: string) => number | null;
   /**
    * 下单卡里当前选中的标的，选中/清空时上报。
    *
@@ -202,7 +211,7 @@ export function GameView(props: GameViewProps) {
     replayReady, onStartReplay, onOpenLegend,
     replayInProgress = false, onResumeReplay,
     away = null, onDismissAway,
-    onPickCode,
+    onPickCode, fxOf,
   } = props;
 
   const { account, equity } = state;
@@ -237,17 +246,28 @@ export function GameView(props: GameViewProps) {
       const price = prices.get(s.code) ?? snapLast;
       const isLive = q?.price !== null && q?.price !== undefined;
       const prevClose = isLive ? snapLast : snapPrev;
+      /*
+       * 实时成交额是**本币**，这一行其余数字都是人民币 —— 不折就并排放了两个币种。
+       * 折不了（汇率缺失）时退回「人民币价 × 快照成交量」，那同样是人民币口径。
+       */
+      const liveAmount = (() => {
+        if (q?.amount === null || q?.amount === undefined) return null;
+        const rate = fxOf?.(s.code);
+        if (rate === null || rate === undefined) return null;
+        return rate === 1 ? q.amount : Math.round(q.amount * rate * 1e4) / 1e4;
+      })();
       return {
         code: s.code,
         name: s.name,
         sector: s.industry,
         price,
         changePct: q?.changePct ?? changePctOf(price, prevClose),
-        amount: q?.amount ?? amountOf(price, n > 0 ? numOrNull(s.volume[n - 1]) : null),
+        amount: liveAmount ?? amountOf(price, n > 0 ? numOrNull(s.volume[n - 1]) : null),
+        currency: s.currency,
         signal: resultsByCode.get(s.code)?.type ?? null,
       };
     });
-  }, [stocks, prices, quotesByCode, resultsByCode]);
+  }, [stocks, prices, quotesByCode, resultsByCode, fxOf]);
   const picked = code ? stockByCode.get(code) : undefined;
   const pickedPrice = code ? (prices.get(code) ?? null) : null;
   const pickedQuote = code ? quotesByCode.get(code) : undefined;
@@ -269,7 +289,15 @@ export function GameView(props: GameViewProps) {
 
   const holding = account.holdings.find((h) => h.code === code);
   const shares = Number(sharesText);
-  const maxShares = suggestedMaxShares(side, pickedPrice, account.cash, holding?.sellable ?? 0);
+  /*
+   * 每手股数。A 股统一 100；**港股的「一手」各股不同（腾讯 100、建行 1000…），
+   * 快照里没有这份数据**，所以港股这边按 1 股步长走，只当输入提示，不做整手校验
+   * ——`validateOrder` 本来也不校验手数。
+   */
+  const pickedMarket: MarketGroup = picked ? marketGroupOf(picked.code) : "CN";
+  const lot = pickedMarket === "CN" ? LOT_SIZE : 1;
+  const isHk = pickedMarket === "HK";
+  const maxShares = suggestedMaxShares(side, pickedPrice, account.cash, holding?.sellable ?? 0, lot);
 
   const totalReturnPct = account.initialCash > 0 ? (totalAssets / account.initialCash - 1) * 100 : 0;
   const excessPct = benchmarkReturnPct === null ? null : totalReturnPct - benchmarkReturnPct;
@@ -432,7 +460,11 @@ export function GameView(props: GameViewProps) {
       <div className="game-trading-grid">
       <Card
         title="模拟下单"
-        subtitle={`一手 ${LOT_SIZE} 股 · T+1：当日买入次日才可卖`}
+        subtitle={
+          isHk
+            ? "港股 T+0：当日买入即可卖出 · 每手股数各股不同，按股填写"
+            : `一手 ${LOT_SIZE} 股 · T+1：当日买入次日才可卖`
+        }
         right={
           <button type="button" className="btn btn-ghost btn-tiny" onClick={onOpenRules}>
             规则说明
@@ -493,7 +525,7 @@ export function GameView(props: GameViewProps) {
             className="text-input text-input-num"
             type="number"
             min={0}
-            step={LOT_SIZE}
+            step={lot}
             value={sharesText}
             onChange={(e) => setSharesText(e.target.value)}
           />
@@ -504,11 +536,11 @@ export function GameView(props: GameViewProps) {
                 key={fraction}
                 type="button"
                 className="chip chip-tiny"
-                disabled={fraction === 1 ? maxShares <= 0 : maxShares < LOT_SIZE}
+                disabled={fraction === 1 ? maxShares <= 0 : maxShares < lot}
                 onClick={() => setSharesText(String(
                   side === "sell" && fraction === 1
                     ? maxShares
-                    : Math.floor(maxShares * fraction / LOT_SIZE) * LOT_SIZE || LOT_SIZE,
+                    : Math.floor(maxShares * fraction / lot) * lot || lot,
                 ))}
               >
                 {fraction === 1 ? (side === "buy" ? "最大可买" : "全部可卖") : fraction === 0.25 ? "1/4" : "1/2"}
@@ -516,7 +548,9 @@ export function GameView(props: GameViewProps) {
             ))}
           </div>
           <p className="field-hint">
-            {side === "buy" ? "买入" : "卖出"}需为 {LOT_SIZE} 股整数倍
+            {isHk
+              ? "港股每手股数各股不同（快照里没有这份数据），这里不强制整手，按股填写即可"
+              : `${side === "buy" ? "买入" : "卖出"}需为 ${LOT_SIZE} 股整数倍`}
             {side === "sell" && holding ? `，或一次性卖出全部 ${holding.shares} 股` : ""}
             {maxShares > 0 ? ` · 最多约 ${maxShares} 股` : ""}
           </p>
@@ -543,6 +577,8 @@ export function GameView(props: GameViewProps) {
               cash={account.cash}
               sellable={holding?.sellable ?? 0}
               today={today}
+              market={marketGroupOf(picked.code)}
+              fx={fxOf?.(picked.code) ?? null}
             />
             {pickedResult && (
               <KV

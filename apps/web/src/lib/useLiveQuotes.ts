@@ -18,6 +18,7 @@ import {
   msUntilNextOpen,
   sessionState,
   type QuoteResult,
+  type SessionMarket,
   type SessionState,
 } from "@aw/data";
 
@@ -40,8 +41,10 @@ export interface LiveQuotesState {
   updatedAt: number | null;
   /** 最近一次失败原因（原文，不美化） */
   error: string | null;
-  /** 当前交易时段 */
+  /** 当前交易时段。**中国与港股合并后的结论**：任一开市就是 `open` */
   session: SessionState;
+  /** 此刻正在开市的市场。空数组 = 都休市。UI 用它区分「A 股交易中」与「港股交易中」 */
+  openMarkets: SessionMarket[];
   /** 是否正在按秒轮询（false = 已停，等下一次开盘或页面可见） */
   polling: boolean;
   /** 非交易时段：下一次自动探测的时间戳 */
@@ -53,26 +56,48 @@ export interface LiveQuotesState {
 export interface UseLiveQuotesOptions {
   intervalMs: number;
   calendar?: string[];
+  /**
+   * 港股交易日历（`meta.hk.calendar`）。给了才会把港股的开市时间也算进来。
+   *
+   * 为什么必须是一份**独立的**日历：A 股与港股放假不同。国庆那一周 A 股全休、
+   * 港股照常开市，只看 A 股日历会整天不发请求，港股价格就一直是快照里的旧值。
+   */
+  hkCalendar?: string[];
   enabled?: boolean;
   /** 变化即立刻重启轮询（手动刷新按钮） */
   nonce?: number;
 }
 
+/** 参与轮询的市场，按优先级排：A 股在前（界面的「今天」以它为准） */
+const MARKETS: readonly SessionMarket[] = ["CN", "HK"];
+
 export function useLiveQuotes(codes: string[], options: UseLiveQuotesOptions): LiveQuotesState {
-  const { intervalMs, calendar, enabled = true, nonce = 0 } = options;
+  const { intervalMs, calendar, hkCalendar, enabled = true, nonce = 0 } = options;
   const codeKey = codes.join("|");
   const calendarKey = calendar && calendar.length > 0 ? calendar.join("|") : "";
+  const hkCalendarKey = hkCalendar && hkCalendar.length > 0 ? hkCalendar.join("|") : "";
 
   const codesRef = useRef(codes);
   codesRef.current = codes;
   const calendarRef = useRef<string[] | undefined>(calendar);
   calendarRef.current = calendar;
+  const hkCalendarRef = useRef<string[] | undefined>(hkCalendar);
+  hkCalendarRef.current = hkCalendar;
+
+  /** 按市场取日历。港股没有独立日历时退回 A 股日历——总比不判断强 */
+  const calendarOf = (market: SessionMarket): string[] | undefined =>
+    market === "HK" ? (hkCalendarRef.current ?? calendarRef.current) : calendarRef.current;
+
+  /** 哪些市场此刻在连续竞价 */
+  const openMarketsAt = (now: Date): SessionMarket[] =>
+    MARKETS.filter((m) => isTradingNow(now, calendarOf(m), m));
 
   const [state, setState] = useState<LiveQuotesState>(() => ({
     result: null,
     updatedAt: null,
     error: null,
     session: sessionState(new Date(), calendar),
+    openMarkets: [],
     polling: false,
     nextProbeAt: null,
     today: beijingTime().iso,
@@ -106,14 +131,26 @@ export function useLiveQuotes(codes: string[], options: UseLiveQuotesOptions): L
       }
     };
 
+    /** 合并后的时段：任一市场开市就算 open，全休时用 A 股的说法（那是对多数标的的真相） */
+    const mergedSession = (now: Date, open: SessionMarket[]): SessionState => {
+      if (open.length > 0) return "open";
+      return sessionState(now, calendarRef.current, "CN");
+    };
+
+    /** 下一个开盘时刻取两个市场里更早的那个 */
+    const msToNextAnyOpen = (now: Date): number =>
+      Math.min(...MARKETS.map((m) => msUntilNextOpen(now, calendarOf(m), m)));
+
     function scheduleProbe() {
       const now = new Date();
-      const wait = msUntilNextOpen(now, calendarRef.current);
+      const wait = msToNextAnyOpen(now);
       const delay = Math.min(MAX_TIMEOUT, Math.max(MIN_PROBE_MS, Math.min(wait, MAX_PROBE_MS)));
+      const open = openMarketsAt(now);
       setState((s) => ({
         ...s,
         polling: false,
-        session: sessionState(now, calendarRef.current),
+        session: mergedSession(now, open),
+        openMarkets: open,
         nextProbeAt: Date.now() + delay,
       }));
       timer = setTimeout(() => void tick(), delay);
@@ -130,8 +167,9 @@ export function useLiveQuotes(codes: string[], options: UseLiveQuotesOptions): L
       }
 
       const now = new Date();
-      const session = sessionState(now, calendarRef.current);
-      const trading = isTradingNow(now, calendarRef.current);
+      const open = openMarketsAt(now);
+      const session = mergedSession(now, open);
+      const trading = open.length > 0;
 
       // 休市 ≠ 没数据可拿：行情接口收盘后返回的就是当日收盘价。
       // 隔一段时间拉一次，页面才不会一直停在几天前的快照上。
@@ -146,7 +184,7 @@ export function useLiveQuotes(codes: string[], options: UseLiveQuotesOptions): L
         }
       }
 
-      setState((s) => ({ ...s, polling: trading, session, nextProbeAt: null }));
+      setState((s) => ({ ...s, polling: trading, session, openMarkets: open, nextProbeAt: null }));
       const list = codesRef.current;
       if (list.length === 0) return;
 
@@ -162,6 +200,7 @@ export function useLiveQuotes(codes: string[], options: UseLiveQuotesOptions): L
           updatedAt: Date.now(),
           error: null,
           session,
+          openMarkets: open,
           polling: trading,
           nextProbeAt: null,
           today: beijingTime().iso,
@@ -172,7 +211,7 @@ export function useLiveQuotes(codes: string[], options: UseLiveQuotesOptions): L
       } catch (err) {
         if (stopped) return;
         const msg = err instanceof Error ? err.message : String(err);
-        setState((s) => ({ ...s, error: msg, session, polling: trading }));
+        setState((s) => ({ ...s, error: msg, session, openMarkets: open, polling: trading }));
         // 失败退避，别把限频的接口打爆
         if (trading) timer = setTimeout(() => void tick(), Math.max(ERROR_BACKOFF_MS, intervalMs * 3));
         else scheduleProbe();
@@ -202,7 +241,7 @@ export function useLiveQuotes(codes: string[], options: UseLiveQuotesOptions): L
       document.removeEventListener("visibilitychange", onVisibility);
       tickRef.current = null;
     };
-  }, [codeKey, calendarKey, enabled, intervalMs, nonce]);
+  }, [codeKey, calendarKey, hkCalendarKey, enabled, intervalMs, nonce]);
 
   return { ...state, refresh } as LiveQuotesState & { refresh: () => void };
 }

@@ -11,13 +11,16 @@ import { tencentProvider } from "../packages/data/src/providers/tencent";
 import { fetchQuotes, sourceLabel } from "../packages/data/src/quotes";
 import { sessionState, sessionLabel, isTradingNow, msUntilNextOpen, beijingTime } from "../packages/data/src/session";
 
-const CODES = ["600519.SH", "000001.SZ", "000300.SH", "300750.SZ"];
+const CODES = ["600519.SH", "000001.SZ", "000300.SH", "300750.SZ", "00700.HK", "00939.HK"];
 /** 用于判断解析是否合理的大致区间 */
 const SANITY: Record<string, [number, number]> = {
   "600519.SH": [500, 3000],
   "000001.SZ": [5, 50],
   "000300.SH": [2000, 8000],
   "300750.SZ": [50, 600],
+  // 港股：价格是**港币**。provider 不做折算，折算在 snapshot / App 那一层
+  "00700.HK": [100, 800],
+  "00939.HK": [3, 30],
 };
 
 let pass = 0;
@@ -86,6 +89,44 @@ async function main() {
   console.log(`    是否盘中: ${isTradingNow()}`);
   console.log(`    距下次开盘: ${(msUntilNextOpen() / 60000).toFixed(1)} 分钟`);
   ok("交易时段计算无异常");
+
+  // ── 5. 港股（时段 / 成交额单位 / 时间戳格式）────────────────────
+  console.log("\n[5] 港股：时段表、成交额单位、时间戳格式");
+  {
+    /*
+     * 港股三项都容易错，且错了都不报错：
+     *  ① 时段表 —— 港股 12:00 午休、16:00 收盘，与 A 股不是一套；
+     *  ② 成交额 —— 腾讯给 A 股是**万元**、给港股是**元**，一律 ×10000 会让港股差 10⁴；
+     *  ③ 时间戳 —— 港股是 `2026/10/06 16:08:08`（斜杠），原来只认 14 位纯数字 → 静默 null。
+     * 用固定时刻比，避免「跑脚本时正好两边都收盘」导致看不出差别。
+     */
+    const at = new Date("2026-10-06T07:30:00Z"); // 北京 15:30：A 股已收盘、港股还在交易
+    const cn = sessionState(at, undefined, "CN");
+    const hk = sessionState(at, undefined, "HK");
+    console.log(`    北京 15:30 → A 股 ${cn}（${sessionLabel(cn)}）/ 港股 ${hk}（${sessionLabel(hk)}）`);
+    cn === "closed" && hk === "open"
+      ? ok("15:30 港股仍在交易而 A 股已收盘（时段分表生效）")
+      : bad(`15:30 的时段不对：CN=${cn} HK=${hk}，预期 closed/open`);
+
+    try {
+      const hkQuotes = await tencentProvider.fetchQuotes(["00700.HK", "00939.HK"]);
+      const tx = hkQuotes.find((q) => q.code === "00700.HK");
+      tx?.asOf
+        ? ok(`港股时间戳可解析：${new Date(tx.asOf).toISOString()}`)
+        : bad("港股时间戳解析为 null（斜杠格式没认出来？）");
+      tx?.amount !== null && tx?.amount !== undefined && tx.amount > 1e8 && tx.amount < 1e11
+        ? ok(`港股成交额量级正常：${(tx.amount / 1e8).toFixed(2)} 亿（元，未再 ×10000）`)
+        : bad(`港股成交额量级可疑：${tx?.amount}，疑似按 A 股的「万元」又乘了 10000`);
+      // A 股对照：同一时刻的成交额应仍是「万元 ×10000」的口径
+      const cnQuotes = await tencentProvider.fetchQuotes(["600519.SH"]);
+      const mt = cnQuotes.find((q) => q.code === "600519.SH");
+      mt?.amount !== null && mt?.amount !== undefined && mt.amount > 1e8
+        ? ok(`A 股成交额口径未变：${(mt.amount / 1e8).toFixed(2)} 亿`)
+        : bad(`A 股成交额口径可疑：${mt?.amount}`);
+    } catch (e) {
+      bad(`港股取价失败：${e instanceof Error ? e.message : e}`);
+    }
+  }
 
   console.log(`\n════════ 结果：${pass} 通过 / ${fail} 失败 ════════`);
   if (fail > 0) process.exitCode = 1;

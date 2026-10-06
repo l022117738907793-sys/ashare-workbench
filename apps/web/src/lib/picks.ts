@@ -18,6 +18,8 @@
  * 事实上「涨得最猛」那几张票往往正是最危险的。界面上必须把这句话写出来。
  */
 
+import type { Currency } from "@aw/core";
+
 export type PickKey = "up" | "down" | "hot";
 
 export const PICK_KEYS: PickKey[] = ["up", "down", "hot"];
@@ -39,8 +41,15 @@ export interface PickStock {
   price: number | null;
   /** 当日涨跌幅（百分数，-3.2 表示跌 3.2%） */
   changePct: number | null;
-  /** 当日成交额（元），「成交最热」用它排序 */
+  /** 当日成交额（**人民币**，与 price 同口径），「成交最热」用它排序 */
   amount: number | null;
+  /**
+   * 这只票的**本币**币种，用于界面标注「原以港币计价」。
+   *
+   * 注意 `price` / `amount` 都已经是人民币了（快照和实时价各折一次）；
+   * 这个字段只影响显示，不参与任何计算。缺省当人民币。
+   */
+  currency?: Currency;
   /** 引擎给这只票的分类。实时模式有，历史推演模式没有 */
   signal?: string | null;
 }

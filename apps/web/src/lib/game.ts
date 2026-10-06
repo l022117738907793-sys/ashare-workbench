@@ -313,12 +313,15 @@ export function suggestedMaxShares(
   price: number | null,
   cash: number,
   sellable: number,
+  /** 每手股数。A 股固定 100；港股各股不同、快照里也没有这份数据，调用方传 1 */
+  lot = 100,
 ): number {
   if (side === "sell") return sellable;
   if (price === null || !Number.isFinite(price) || price <= 0) return 0;
+  const step = Number.isFinite(lot) && lot >= 1 ? Math.floor(lot) : 100;
   // 预留 0.2% 给滑点与费用，避免刚好差几毛钱被拒
   const budget = cash / (price * 1.002);
-  return Math.max(0, Math.floor(budget / 100) * 100);
+  return Math.max(0, Math.floor(budget / step) * step);
 }
 
 /** 常驻提示语。红线要求：模拟游戏必须显著说明是虚拟的 */

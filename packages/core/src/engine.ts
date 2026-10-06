@@ -2,10 +2,30 @@ import defaultRules from "../rules.json";
 
 export type Maybe = number | null;
 
+/**
+ * 市场分组。`@aw/data` 的 `codes.ts` 里有同名类型，这里重写一份是因为
+ * **core 不依赖任何包**（连 `@aw/data` 都不依赖，反倒是 data 依赖 core），
+ * 引过去会成环。两边都是字符串字面量联合，结构上完全兼容。
+ */
+export type MarketGroup = "CN" | "HK" | "US";
+export type Currency = "CNY" | "HKD" | "USD";
+
 export interface SeriesData {
   code: string;
   name: string;
   kind?: string;
+  /**
+   * 所属市场。缺省是 A 股——老快照与老 fixture 里没有这一列，而那些数据全是 A 股。
+   *
+   * 引擎靠它决定 T+1/T+0、有没有涨跌停、用哪套费率（见 `@aw/game` 的 rules.ts）。
+   * 写错了不会报错，只会「A 股按美股规则成交」，所以只能在数据源头写对。
+   */
+  market?: MarketGroup;
+  /**
+   * 计价货币。**只用于界面标注**——港股美股的 OHLC 在被推演引擎消费前已经折成人民币了
+   * （见 `apps/web/src/lib/replay.ts` 的 `convertShardToCny`），引擎全程只认人民币。
+   */
+  currency?: Currency;
   /**
    * 开盘价。可选：四层漏斗与个股分析都只用收盘价，老快照与老 fixture 里没有这一列，
    * 所以不能设成必填。目前唯一的使用方是「历史推演」（@aw/game 的 replay.ts）——
@@ -307,11 +327,20 @@ export function analyzeMarket(snapshot: Snapshot, rules: Rules): MarketResult {
     ? null
     : lastMain > ma20m;
   const m20 = maUp(main.close, 20);
-  const upCount = snapshot.stocks.filter(
+  /*
+   * 上涨家数占比只数 A 股。
+   *
+   * 「大盘环境」问的是 A 股市场（主指数就是沪深300），而快照的股票池里
+   * 现在还混着港股 —— 把 20 只港股算进来，广度会被稀释掉几个百分点，
+   * 正好卡在 strong/weak 阈值附近时能把结论翻过来。恒生涨跌跟沪深300
+   * 本来就不是一回事，不该进这个分母。
+   */
+  const cnStocks = snapshot.stocks.filter((s) => (s.market ?? "CN") === "CN");
+  const upCount = cnStocks.filter(
     (s) => (ret(s.close, 20) ?? -999) > 0,
   ).length;
-  const breadth = snapshot.stocks.length > 0
-    ? upCount / snapshot.stocks.length
+  const breadth = cnStocks.length > 0
+    ? upCount / cnStocks.length
     : null;
 
   reasons.push(

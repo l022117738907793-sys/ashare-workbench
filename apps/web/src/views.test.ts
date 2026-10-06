@@ -761,6 +761,53 @@ describe("下单预览：显示价就是成交价", () => {
   });
 });
 
+/**
+ * 这一组来自一个真实 bug：`OrderPreview` 曾经不把 `market` / `fx` 传给 `previewOrder`，
+ * 于是港股下单时**卡片按 A 股费率算、成交回执按港股费率算** —— 正是这个组件
+ * 头注释里说要消灭的「第二个真相来源」，只是从滑点换成了费率表。
+ *
+ * 断言的是具体数字，因为「两边不一样」本身不算修好：必须与 `executeOrder`
+ * 拿到的同一套 `calcFee(side, amount, date, { market, fx })` 对得上。
+ */
+describe("下单预览：费率口径跟着市场走", () => {
+  function renderPreview(over: Partial<Parameters<typeof OrderPreview>[0]> = {}): string {
+    return renderToStaticMarkup(
+      createElement(OrderPreview, {
+        price: 20,
+        side: "buy",
+        shares: 100,
+        cash: 200_000,
+        sellable: 0,
+        today: "2026-09-30",
+        ...over,
+      }),
+    );
+  }
+
+  it("A 股：佣金 max(2002×0.025%, 5) = 5，买入无印花税", () => {
+    expect(renderPreview()).toContain("手续费 5");
+  });
+
+  it("港股：最低佣金是 100 港元，按汇率折成 85.84 元，不是 100 元", () => {
+    // amount = 20×1.001×100 = 2002；local = 2002/0.8584 = 2332.24 港元
+    // 佣金 = max(2332.24×0.25%, 100 港元) × 0.8584 = 85.84
+    // 印花税 = 2002×0.1%（港股买卖双向）= 2.00
+    expect(renderPreview({ market: "HK", fx: 0.8584 })).toContain("手续费 87.84");
+  });
+
+  it("港股：不传 fx 会退化成 1:1（100 港元当成 100 元）——这就是必须传汇率的原因", () => {
+    expect(renderPreview({ market: "HK" })).toContain("手续费 102");
+  });
+
+  it("港股卖出：印花税同样收（双向），A 股卖出也收，但费率与最低佣金不同", () => {
+    const params = { price: 20, side: "sell" as const, shares: 1000, sellable: 1000 };
+    // 港股：19980×0.1% = 19.98 印花税 + 85.84 最低佣金
+    expect(renderPreview({ ...params, market: "HK", fx: 0.8584 })).toContain("手续费 105.82");
+    // A 股：19980×0.05% = 9.99 印花税 + max(4.995, 5) = 5 佣金 + 0.2 过户费
+    expect(renderPreview(params)).toContain("手续费 15.19");
+  });
+});
+
 describe("模拟游戏页渲染", () => {
   /**
    * 注意：模拟游戏**允许**出现「买入/卖出」——那是用户的操作标签，不是程序的建议。

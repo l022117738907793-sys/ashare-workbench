@@ -12,7 +12,12 @@ import {
 } from "./codes";
 import { fetchQuotes } from "./quotes";
 import { beijingTime, isCalendarFresh, isTradingNow, msUntilNextOpen, sessionState } from "./session";
-import { applyLivePrices, type SnapshotBundle } from "./snapshot";
+import {
+  applyLivePrices,
+  convertSnapshotToCny,
+  fxRatesOfMeta,
+  type SnapshotBundle,
+} from "./snapshot";
 import type { Quote, QuoteProvider } from "./types";
 
 /** 北京时间 → 对应 UTC 瞬间 */
@@ -318,5 +323,91 @@ describe("实时价叠加到快照", () => {
   it("无报价时原样返回", () => {
     const b = bundle("2026-09-22");
     expect(applyLivePrices(b, [], { today: "2026-09-23" })).toBe(b.snapshot);
+  });
+});
+
+describe("港股进快照（日历 / 汇率）", () => {
+  /** 一只 A 股 + 一只港股。港股那支带 market/currency，与 fetch_snapshot.py 写出来的一致 */
+  const bundle = (opts: { lastDate: string; hkClose?: number }): SnapshotBundle => ({
+    name: "snapshot_test",
+    calendar: ["2026-09-30", opts.lastDate],
+    meta: { hk: { calendar: ["2026-09-30", "2026-10-02"], fx: { pair: "HKDCNY", date: "2026-09-30", rate: 0.9 } } },
+    snapshot: {
+      indices: [],
+      sectors: [],
+      stocks: [
+        { code: "600519.SH", name: "贵州茅台", industry: "食品饮料", industryCode: "X", weight: 1, isST: false, close: [10, 20, 30], high: [10, 20, 30], low: [10, 20, 30], volume: [1, 2, 3] },
+        { code: "00700.HK", name: "腾讯控股", industry: "港股", industryCode: "HK", weight: 0, isST: false, market: "HK", currency: "HKD", close: [100, 200, opts.hkClose ?? 428.2], high: [100, 200, 428.2], low: [100, 200, 428.2], volume: [1, 2, 3] },
+      ],
+      etfs: [],
+    },
+  });
+  const hkQuote: Quote = {
+    code: "00700.HK", name: "腾讯控股", price: 431,
+    changePct: 1, change: 1, amount: 1, asOf: Date.now(), source: "tencent",
+  };
+  const cnQuote: Quote = {
+    code: "600519.SH", name: "贵州茅台", price: 99,
+    changePct: 1, change: 1, amount: 1, asOf: Date.now(), source: "eastmoney",
+  };
+
+  it("fxRatesOfMeta 从 meta.hk.fx 读汇率；没有就返回空表（不兜底成 1:1）", () => {
+    expect(fxRatesOfMeta({ hk: { fx: { rate: 0.8584 } } })).toEqual({ HKD: 0.8584 });
+    expect(fxRatesOfMeta({})).toEqual({});
+    expect(fxRatesOfMeta({ hk: { fx: { rate: 0 } } })).toEqual({});
+    expect(fxRatesOfMeta({ hk: { fx: { rate: "0.85" } } })).toEqual({});
+  });
+
+  it("convertSnapshotToCny 只折境外标的，A 股一位不动", () => {
+    const out = convertSnapshotToCny(bundle({ lastDate: "2026-09-30" }).snapshot, { HKD: 0.9 });
+    expect(out.stocks[0].close).toEqual([10, 20, 30]);
+    expect(out.stocks[1].close).toEqual([90, 180, 385.38]);
+    expect(out.stocks[1].high).toEqual([90, 180, 385.38]);
+    // currency 保持原样：界面要标「原以港币计价」
+    expect(out.stocks[1].currency).toBe("HKD");
+  });
+
+  it("convertSnapshotToCny 空汇率表时原样返回（不折、也不报错）", () => {
+    const snap = bundle({ lastDate: "2026-09-30" }).snapshot;
+    expect(convertSnapshotToCny(snap, {})).toBe(snap);
+  });
+
+  it("折不了的币种留着不动，不按 1:1 顶", () => {
+    const snap = bundle({ lastDate: "2026-09-30" }).snapshot;
+    const out = convertSnapshotToCny(snap, { USD: 7.1 });
+    expect(out.stocks[1].close).toEqual([100, 200, 428.2]);
+  });
+
+  it("实时价按汇率折过再覆盖（431 港币 → 387.9 人民币，不是 ¥431）", () => {
+    const out = applyLivePrices(bundle({ lastDate: "2026-09-30" }), [hkQuote], {
+      today: "2026-09-30",
+      fx: { HKD: 0.9 },
+    });
+    expect(out.stocks[1].close).toEqual([100, 200, 387.9]);
+  });
+
+  it("没传 fx 时港股的实时价整支跳过（宁可显示旧价，也不把港币当人民币）", () => {
+    const out = applyLivePrices(bundle({ lastDate: "2026-09-30" }), [hkQuote], { today: "2026-09-30" });
+    expect(out.stocks[1].close).toEqual([100, 200, 428.2]);
+  });
+
+  it("港股今天休市 → 补 null 占位，不写价（A 股照常开盘）", () => {
+    /*
+     * 2026-10-02 是 A 股的交易日（日历里有），但那天港股休市（国庆）。
+     * 港股日历必须**新鲜**才会真的去查它 —— 过期日历退回按周末粗判，
+     * 那样周五一律算开市（见 session.ts 的 isCalendarFresh）。
+     */
+    const b = bundle({ lastDate: "2026-09-30" });
+    const out = applyLivePrices(b, [cnQuote, hkQuote], {
+      today: "2026-10-02",
+      hkCalendar: ["2026-09-30", "2026-10-05", "2026-10-06"],
+      fx: { HKD: 0.9 },
+    });
+    const hk = out.stocks[1];
+    expect(hk.close).toHaveLength(4);
+    expect(hk.close.at(-1)).toBeNull();
+    expect(hk.volume.at(-1)).toBeNull();
+    // A 股那边照常追加，价格是实时价
+    expect(out.stocks[0].close).toEqual([10, 20, 30, 99]);
   });
 });

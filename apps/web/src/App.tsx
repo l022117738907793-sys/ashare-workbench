@@ -24,10 +24,14 @@ import {
 } from "@aw/core";
 import {
   applyLivePrices,
+  convertSnapshotToCny,
+  currencyOf,
+  fxRatesOfMeta,
   loadSnapshot,
   sessionLabel,
   sessionState,
   sourceLabel,
+  type FxRates,
   type Quote,
   type SnapshotBundle,
 } from "@aw/data";
@@ -267,7 +271,17 @@ export default function App() {
     loadSnapshot({ base })
       .then((b) => {
         if (cancelled) return;
-        setBundle(b);
+        /*
+         * 快照里的港股价是**港币**（快照按本币存，与历史推演分片同一约定），
+         * 而账户、漏斗、权益曲线全是人民币。折算必须发生在数据进引擎之前 ——
+         * 就在这里一次性折掉，下游一行都不用改，与推演走 `convertShardToCny`
+         * 是同一个道理。
+         *
+         * `meta` 里没有汇率时原样返回（不猜、也不按 1:1 顶），
+         * 那些标的靠 `currency` 字段在界面上标注。
+         */
+        const fx = fxRatesOfMeta(b.meta);
+        setBundle({ ...b, snapshot: convertSnapshotToCny(b.snapshot, fx) });
         setLoadError(null);
       })
       .catch((e) => {
@@ -285,6 +299,41 @@ export default function App() {
 
   const snapshot = bundle?.snapshot ?? null;
   const calendar = bundle?.calendar;
+
+  /**
+   * 港股交易日历（`meta.hk.calendar`，由快照脚本从恒生指数日线反推）。
+   *
+   * 为什么必须与 A 股日历分开：A 股与港股放假不同。国庆那一周 A 股全休、
+   * 港股照常开市，只看 A 股日历会整天不发请求，港股价格就永远停在快照里。
+   */
+  const hkCalendar = useMemo(() => {
+    const hk = bundle?.meta?.hk;
+    if (!hk || typeof hk !== "object") return undefined;
+    const cal = (hk as { calendar?: unknown }).calendar;
+    return Array.isArray(cal) && cal.every((d) => typeof d === "string")
+      ? (cal as string[])
+      : undefined;
+  }, [bundle]);
+
+  /** 汇率表：1 单位外币值多少人民币。取不到就是空表 —— 调用方必须自己判断，不许当 1:1 */
+  const fxRates: FxRates = useMemo(() => (bundle ? fxRatesOfMeta(bundle.meta) : {}), [bundle]);
+
+  /**
+   * 某个标的的结算汇率（1 单位本币值多少人民币）；取不到返回 null。
+   *
+   * **null 不是「按 1:1」** —— 港币当人民币是 14% 的静默偏差，界面上一片正常。
+   * 凡是人民币口径的计算（折算价格、算佣金、入账）都必须先过这一关：
+   * 拿不到汇率就宁可拒绝下单 / 停在旧价，也不许猜。
+   */
+  const fxFor = useCallback(
+    (code: string): number | null => {
+      const cur = currencyOf(code);
+      if (cur === "CNY") return 1;
+      const rate = fxRates[cur];
+      return typeof rate === "number" && Number.isFinite(rate) && rate > 0 ? rate : null;
+    },
+    [fxRates],
+  );
 
   // ── 基础漏斗（用于挑选轮询代码；不叠加实时价）────────────────
   const stockByCode = useMemo(() => {
@@ -392,6 +441,7 @@ export default function App() {
   const live = useLiveQuotes(visibleCodes, {
     intervalMs: settings.refreshMs,
     calendar,
+    hkCalendar,
     enabled: !!snapshot,
     nonce: reloadNonce,
   });
@@ -402,15 +452,28 @@ export default function App() {
   });
 
   const session = sessionState(new Date(), calendar);
-  const sessionText = sessionLabel(session);
+  /* 港股时段与 A 股不同：午休 12:00–13:00（A 股 11:30–13:00）、收盘 16:00（A 股 15:00） */
+  const hkSession = hkCalendar && hkCalendar.length > 0 ? sessionState(new Date(), hkCalendar, "HK") : null;
+  /*
+   * 「此刻能不能按实时价成交」看的是**两个市场合起来**开不开门。
+   * 15:00–16:00 这一段 A 股已收盘、港股还在连续竞价；只按 A 股判断，
+   * 会把港股的实时成交错标成「按最近收盘价成交」。
+   */
+  const isTradingNow = session === "open" || hkSession === "open";
+  const sessionText =
+    session === "open" || hkSession === null
+      ? sessionLabel(session)
+      : hkSession === "open"
+        ? "港股交易中"
+        : sessionLabel(session);
 
   // ── 实时叠加后的快照与展示用漏斗 ────────────────────────────
   const liveSnapshot = useMemo(() => {
     if (!bundle) return null;
     const quotes = live.result?.quotes ?? [];
     if (quotes.length === 0) return bundle.snapshot;
-    return applyLivePrices(bundle, quotes, { today: live.today });
-  }, [bundle, live.result, live.today]);
+    return applyLivePrices(bundle, quotes, { today: live.today, hkCalendar, fx: fxRates });
+  }, [bundle, live.result, live.today, hkCalendar, fxRates]);
 
   const quotesByCode = useMemo(() => {
     const m = new Map<string, Quote>();
@@ -571,15 +634,25 @@ export default function App() {
   const updatedText = live.updatedAt === null ? "—（暂无实时数据）" : beijingClock(live.updatedAt);
   const quoteSourceText = live.result ? sourceLabel(live.result.source) : "—（未取到实时行情）";
   // ── 模拟游戏 ──────────────────────────────────────────────────
-  const isTradingNow = session === "open";
+  // isTradingNow 与 sessionText 在上面按「A 股或港股任一开市」算过了
 
   /** 价格表：先用快照收盘价铺底，再用实时价覆盖。取不到的保持 null（不猜） */
   const gamePricesObj = useMemo(() => {
     const o: Record<string, number | null> = {};
     for (const s of (liveSnapshot ?? snapshot)?.stocks ?? []) o[s.code] = lastClose(s.close);
-    for (const [code, q] of quotesByCode) if (q.price !== null) o[code] = q.price;
+    /*
+     * 快照那一层已经折成人民币（见加载处的 convertSnapshotToCny），
+     * 而 `live.result` 里的报价**仍然与本币一致**（腾讯给港股的就是港币）——
+     * 所以这里必须自己折一次，否则 431 港币会被当成 ¥431 覆盖掉正确的收盘价。
+     */
+    for (const [code, q] of quotesByCode) {
+      if (q.price === null) continue;
+      const rate = fxFor(code);
+      if (rate === null) continue; // 拿不到汇率就别覆盖，宁可显示旧的收盘价
+      o[code] = rate === 1 ? q.price : Math.round(q.price * rate * 1e4) / 1e4;
+    }
     return o;
-  }, [liveSnapshot, snapshot, quotesByCode]);
+  }, [liveSnapshot, snapshot, quotesByCode, fxFor]);
 
   const gamePrices = useMemo(() => new Map(Object.entries(gamePricesObj)), [gamePricesObj]);
 
@@ -719,6 +792,20 @@ export default function App() {
        */
       // 进入新的交易日时先解锁此前建仓的股份（T+1）
       const account = rolloverTradingDay(game.account, live.today, lastBuyDates(game.account.trades));
+
+      /*
+       * 汇率缺失就拒绝下单。
+       *
+       * `executeOrder` / `calcFee` 拿不到 fx 会**按 1:1 处理**（`portfolio.ts:61`）：
+       * 港股「最低 100 港币」的佣金会被当成 100 人民币（实差约 14 元），费率项也整块偏掉。
+       * 账户余额是人民币口径的，汇率是必需品而不是可选优化 —— 缺了就停，
+       * 不能给一个「看着成交了」的错账。
+       */
+      const fx = fxFor(code);
+      if (fx === null) {
+        return { ok: false, reason: `缺少 ${code} 的汇率数据，无法按人民币结算，请稍后再试` };
+      }
+
       const res = executeOrder(account, {
         code,
         name: stock.name,
@@ -733,6 +820,8 @@ export default function App() {
         // 创业板 300xxx / 科创板 688xxx 涨跌停 20%
         isGrowthBoard: code.startsWith("300") || code.startsWith("688"),
         typeAtTrade: gameResults.get(code)?.type,
+        // 币种与汇率：市场由代码推（marketGroupOf），汇率必须显式给（港股佣金有最低值）
+        fx,
       });
 
       if (!res.ok) {
@@ -1157,6 +1246,7 @@ export default function App() {
             quotesByCode={quotesByCode}
             stocks={snapshot?.stocks ?? []}
             resultsByCode={gameResults}
+            fxOf={fxFor}
             onOrder={handleOrder}
             onPickCode={setGamePick}
             onStart={handleStartGame}
