@@ -79,8 +79,21 @@ export function SignalCard({ signal }: { signal: TradeSignal }) {
   );
 }
 
-/** 按动作分组的信号总览，用于筛选页 */
-export function SignalSummary({ signals }: { signals: TradeSignal[] }) {
+/**
+ * 按动作分组的信号总览，用于筛选页。
+ *
+ * 折起来只留标题与四个动作的计数 —— 那张计数条本身就把「今天偏多还是偏空」
+ * 说清楚了，下面五条只是佐证。
+ */
+export function SignalSummary({
+  signals,
+  folded = false,
+  onToggleFold,
+}: {
+  signals: TradeSignal[];
+  folded?: boolean;
+  onToggleFold?: () => void;
+}) {
   if (signals.length === 0) return null;
   const counts = new Map<SignalAction, number>();
   for (const s of signals) counts.set(s.action, (counts.get(s.action) ?? 0) + 1);
@@ -91,6 +104,8 @@ export function SignalSummary({ signals }: { signals: TradeSignal[] }) {
     <Card
       title="今日信号"
       subtitle={`全池 ${signals.length} 只，按信号强度排序`}
+      folded={folded}
+      onToggleFold={onToggleFold}
       right={
         <span className="chips">
           {SIGNAL_ORDER.filter((a) => counts.get(a)).map((a) => (

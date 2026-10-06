@@ -298,11 +298,11 @@ export function ReplayView(props: ReplayViewProps) {
 
           <div className="replay-information">
             {briefing && <details className="replay-details">
-              <summary><span>开局简报<small>{hideDate ? "入场时的公开信息" : `${briefing.startDate} · 入场时的公开信息`}</small></span><span className="replay-expand">展开 +</span></summary>
+              <summary><span>开局简报<small>{hideDate ? "入场时的公开信息" : `${briefing.startDate} · 入场时的公开信息`}</small></span><span className="replay-expand"><span className="replay-expand-closed">展开 +</span><span className="replay-expand-open">收起 −</span></span></summary>
               <div className="replay-details-body"><ul className="briefing-list">{briefing.lines.map((line, i) => <li key={i}>{maskDatesIn(state, line, hideDate)}</li>)}</ul><RichP className="hint">简报只写到进场那天。后续发生的事，需要您在推演中观察。</RichP>{briefing.note && <RichP className="hint">{maskDatesIn(state, briefing.note, hideDate)}</RichP>}</div>
             </details>}
             <details className="replay-details">
-              <summary><span>当天资讯<small>{dayNews.loading ? "正在读取归档" : dayNews.news?.items.length ? `${dayNews.news.items.length} 条历史归档` : "当前日期暂无资讯归档"}</small></span><span className="replay-expand">展开 +</span></summary>
+              <summary><span>当天资讯<small>{dayNews.loading ? "正在读取归档" : dayNews.news?.items.length ? `${dayNews.news.items.length} 条历史归档` : "当前日期暂无资讯归档"}</small></span><span className="replay-expand"><span className="replay-expand-closed">展开 +</span><span className="replay-expand-open">收起 −</span></span></summary>
               <div className="replay-details-body"><DayNewsCard loading={dayNews.loading} missing={dayNews.missing} items={dayNews.news?.items ?? []} source={dayNews.news?.source} mask={(t) => maskDatesIn(state, t, hideDate)}/></div>
             </details>
             {picked && (
@@ -310,7 +310,7 @@ export function ReplayView(props: ReplayViewProps) {
               // 同一个「买 100 股」的动作，三个市场付的费用、能不能当天卖、几股起买全都不同。
               // 默认给境外标的展开，因为差异最多、玩家最容易按 A 股的习惯去操作。
               <details className="replay-details" open={isOverseas}>
-                <summary><span>{MARKET_NAME[pickedMarket]}交易规则<small>和 A 股逐条对照</small></span><span className="replay-expand">展开 +</span></summary>
+                <summary><span>{MARKET_NAME[pickedMarket]}交易规则<small>和 A 股逐条对照</small></span><span className="replay-expand"><span className="replay-expand-closed">展开 +</span><span className="replay-expand-open">收起 −</span></span></summary>
                 <div className="replay-details-body">
                   <ul className="briefing-list">{describeRules(date, boardOf(picked.code), pickedMarket).map((line, i) => <li key={i}>{line}</li>)}</ul>
                   <RichP className="hint">费用按{hideDate ? "当时" : date}的规则计算。港股与美股按本币原价成交，界面上的金额已折成人民币；汇率变动也会计入您的收益。</RichP>

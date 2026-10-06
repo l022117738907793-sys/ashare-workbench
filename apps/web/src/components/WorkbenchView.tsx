@@ -196,11 +196,13 @@ export function WorkbenchView(props: WorkbenchProps) {
 
   return (
     <div className="view">
-      <SignalSummary signals={signals} />
+      <SignalSummary signals={signals} folded={folds.signals} onToggleFold={() => toggleFold("signals")} />
 
       <Card
         title="① 大盘环境"
         subtitle="沪深300 + 股票池赚钱效应"
+        folded={folds.market}
+        onToggleFold={() => toggleFold("market")}
         right={<StateBadge state={market.state} size="lg" />}
       >
         <p className="implication">{market.implication}</p>
@@ -477,12 +479,16 @@ function scrollBelowHeader(el: HTMLElement | null): void {
 }
 
 export interface Folds {
+  /** ① 大盘环境 */
+  market: boolean;
+  /** 今日信号（在最上面，折起来能少滚一屏才够到下面三层） */
+  signals: boolean;
   sectors: boolean;
   stocks: boolean;
 }
 
 const FOLD_KEY = "aw.folds.v1";
-const NO_FOLDS: Folds = { sectors: false, stocks: false };
+const NO_FOLDS: Folds = { market: false, signals: false, sectors: false, stocks: false };
 
 /**
  * 解析存下来的折叠状态。
@@ -495,7 +501,12 @@ export function parseFolds(raw: string | null): Folds {
   try {
     const parsed = JSON.parse(raw) as Partial<Folds> | null;
     if (!parsed || typeof parsed !== "object") return NO_FOLDS;
-    return { sectors: parsed.sectors === true, stocks: parsed.stocks === true };
+    return {
+      market: parsed.market === true,
+      signals: parsed.signals === true,
+      sectors: parsed.sectors === true,
+      stocks: parsed.stocks === true,
+    };
   } catch {
     return NO_FOLDS;
   }

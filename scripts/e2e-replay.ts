@@ -772,13 +772,21 @@ try {
   );
 
   console.log("\n十三、卡片可折叠");
-  const foldBtn = (label: string) => `[...document.querySelectorAll("button.card-fold")].find(b => b.textContent.includes(${JSON.stringify(label)}))`;
+  /*
+   * 按**层的 id** 找按钮，不按「页面上第一个写着收起的」。
+   *
+   * 今日信号与①大盘环境现在也折得起来，页面上有四颗 `.card-fold`；
+   * 靠「第一个」定位的话，这里折的就成了今日信号 —— 断言会失败，
+   * 但失败的原因跟这段想验的东西（第二层/第三层折得动）毫无关系。
+   */
+  const foldIn = (layerId: string) => `document.getElementById(${JSON.stringify(layerId)})?.querySelector("button.card-fold")`;
   await evaluate(CLICK("市场观察"));
   await sleep(500);
   const h0 = await evaluate<number>(`return document.body.scrollHeight;`);
   const fold2 = await evaluate<string>(`
-    const b = ${foldBtn("收起")};
+    const b = ${foldIn("layer-sectors")};
     if (!b) return "NO_BTN";
+    if (!b.textContent.includes("收起")) return "ALREADY_FOLDED";
     b.click();
     return "OK";
   `);
@@ -794,8 +802,8 @@ try {
   check("折起来之后板块行整块不渲染，不是用 CSS 藏起来", bodyGone);
 
   await evaluate(`
-    const b = ${foldBtn("收起")};
-    if (b) b.click();
+    const b = ${foldIn("layer-stocks")};
+    if (b && b.textContent.includes("收起")) b.click();
     return true;
   `);
   await sleep(400);

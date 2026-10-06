@@ -249,6 +249,26 @@ async function main(): Promise<void> {
   const lobbyText = await evaluate<string>(TEXT);
   check("大厅仍然没有「快进」「少爷」「走一天」", !/快进|少爷|走一天/.test(lobbyText));
 
+  // 「玩法三步」这一行的尺寸与徽标。放在这里量是因为**只有大厅上才有它** ——
+  // 进过一局之后回到「游戏大厅」标签，看到的仍是那一局的界面。
+  const guideSize = JSON.parse(await evaluate<string>(`
+    const out = {};
+    const sm = document.querySelector(".game-quick-guide > summary");
+    out.summary = sm ? Math.round(sm.getBoundingClientRect().height) : null;
+    out.cursor = sm ? getComputedStyle(sm).cursor : null;
+    const b = document.querySelector(".game-quick-guide > summary > span");
+    if (b) { const r = b.getBoundingClientRect(); out.badge = [Math.round(r.width), Math.round(r.height)]; }
+    return JSON.stringify(out);
+  `)) as { summary: number | null; cursor: string | null; badge?: number[] };
+  console.log(`    「玩法三步」：${JSON.stringify(guideSize)}`);
+  check("details 的 summary ≥ 48px", typeof guideSize.summary === "number" && guideSize.summary >= 48, `${guideSize.summary}px`);
+  check("整行是可点的（cursor: pointer）", guideSize.cursor === "pointer", guideSize.cursor);
+  check(
+    "那个「＋」是个圆徽标（宽高相等且 ≥ 22px）",
+    Array.isArray(guideSize.badge) && guideSize.badge[0] === guideSize.badge[1] && guideSize.badge[0] >= 22,
+    JSON.stringify(guideSize.badge),
+  );
+
   // ── 三、关卡页：开局简报折叠块 ─────────────────────────────
   console.log("\n三、关卡页");
   check("点得到「选择传奇关卡」", (await evaluate<string>(CLICK("选择传奇关卡"))) === "OK");
@@ -391,8 +411,53 @@ async function main(): Promise<void> {
     `scrollWidth ${marketOverflow.sw} > 视口 ${marketOverflow.vw}${marketOverflow.worst.length ? ` · ${marketOverflow.worst.join(", ")}` : ""}`,
   );
 
-  // ── 八、控制台 ─────────────────────────────────────────────
-  console.log("\n八、控制台");
+  // ── 八、展开 / 收起：折得动，而且看得出是个按钮 ────────────
+  //
+  // 两件事一起测：**折得动**（今日信号与①大盘环境）和**够明显**
+  // （高度与徽标）。后者曾经是这一片最弱的地方 —— `.card-fold` 在
+  // redesign.css 里被抹成 `border:0; background:none`，手机上就是一小撮灰字。
+  console.log("\n八、展开 / 收起");
+  const foldCount = await evaluate<number>(`return document.querySelectorAll(".card-fold").length;`);
+  check("今日信号与①大盘环境都能折", foldCount === 4, `实际 ${foldCount} 个折叠按钮`);
+
+  // 数第一张卡（今日信号）里的行。它的行是不可点的 `row-static`，没有
+  // 「打开七步分析」那个按钮，所以不能拿全页那套计数。
+  const signalRows = () => evaluate<number>(`const c = document.querySelector(".card"); return c ? c.querySelectorAll("li").length : -1;`);
+  const beforeFold = await signalRows();
+  check("折之前「今日信号」里的个股行在", beforeFold > 0, `实际 ${beforeFold} 行`);
+
+  check("点得到第一个折叠按钮", (await evaluate<string>(`document.querySelectorAll(".card-fold")[0].click(); return "OK";`)) === "OK");
+  await sleep(400);
+  const afterFold = await signalRows();
+  const foldLabels = await evaluate<string[]>(`return [...document.querySelectorAll(".card-fold")].map(b => (b.textContent || "").trim());`);
+  check("折起来之后那张卡的行没了", afterFold === 0, `${beforeFold} → ${afterFold}`);
+  check("折起来的那张按钮写着「展开」", foldLabels[0] === "展开 ▾", foldLabels.join(" | "));
+  check("没折的那几张还写着「收起」", foldLabels.filter((t) => t === "收起 ▴").length === 3, foldLabels.join(" | "));
+  // 折起来顺序点两次要能回到原样，否则折了就打不开
+  check("再点一次能展开回来", (await evaluate<string>(`document.querySelectorAll(".card-fold")[0].click(); return "OK";`)) === "OK");
+  await sleep(400);
+  check("展开后行回来了", (await signalRows()) === beforeFold, `实际 ${await signalRows()} 行`);
+
+  const sizes = JSON.parse(await evaluate<string>(`
+    const out = {};
+    for (const [k, sel] of Object.entries({
+      cardFold: ".card-fold", revealMore: ".reveal-more",
+      groupHead: ".group-head", groupToggle: ".group-toggle",
+    })) {
+      const e = document.querySelector(sel);
+      out[k] = e ? Math.round(e.getBoundingClientRect().height) : null;
+    }
+    return JSON.stringify(out);
+  `)) as Record<string, number | null>;
+  console.log(`    市场观察页的控件高度：${JSON.stringify(sizes)}`);
+  check("卡片折叠按钮 ≥ 40px 高", typeof sizes.cardFold === "number" && sizes.cardFold >= 40, `${sizes.cardFold}px`);
+  check("「继续展开」整行 ≥ 48px", typeof sizes.revealMore === "number" && sizes.revealMore >= 48, `${sizes.revealMore}px`);
+  check("分组标题整行 ≥ 48px", typeof sizes.groupHead === "number" && sizes.groupHead >= 48, `${sizes.groupHead}px`);
+  check("「展开 / 收起」胶囊 ≥ 28px 高", typeof sizes.groupToggle === "number" && sizes.groupToggle >= 28, `${sizes.groupToggle}px`);
+
+
+  // ── 九、控制台 ─────────────────────────────────────────────
+  console.log("\n九、控制台");
   const errors = await evaluate<string[]>(`return window.__e2eErrors || [];`);
   check("没有未捕获异常", errors.length === 0, errors.slice(0, 3).join(" | "));
 

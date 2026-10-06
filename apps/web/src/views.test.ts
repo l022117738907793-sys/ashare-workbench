@@ -242,31 +242,49 @@ describe("卡片闪一下（跳转的落点提示）", () => {
 
 describe("折叠状态存档", () => {
   it("没存过 → 全展开", () => {
-    expect(parseFolds(null)).toEqual({ sectors: false, stocks: false });
+    expect(parseFolds(null)).toEqual({ market: false, signals: false, sectors: false, stocks: false });
   });
 
   it("存过 → 按存的来", () => {
-    expect(parseFolds('{"sectors":true,"stocks":false}')).toEqual({ sectors: true, stocks: false });
+    expect(parseFolds('{"market":true,"signals":true,"sectors":true,"stocks":false}')).toEqual({
+      market: true,
+      signals: true,
+      sectors: true,
+      stocks: false,
+    });
+  });
+
+  it("旧存档（只有 sectors / stocks）里新加的两层退回展开", () => {
+    // `aw.folds.v1` 没换版本，老存档会实打实读进来 ——
+    // 缺的字段必须是 false（展开），不能是 undefined 漏到 `folded` 上
+    expect(parseFolds('{"sectors":true,"stocks":false}')).toEqual({
+      market: false,
+      signals: false,
+      sectors: true,
+      stocks: false,
+    });
   });
 
   it("只认真正的 true，别的值当没折", () => {
     // 手改过的存档、或者以后改了字段含义，都不该让某一层莫名其妙地消失
-    expect(parseFolds('{"sectors":"yes","stocks":1}')).toEqual({ sectors: false, stocks: false });
+    expect(parseFolds('{"sectors":"yes","stocks":1}')).toEqual({ market: false, signals: false, sectors: false, stocks: false });
   });
 
   it("坏 json 不抛，退回全展开", () => {
-    expect(parseFolds("{不是 json")).toEqual({ sectors: false, stocks: false });
-    expect(parseFolds("null")).toEqual({ sectors: false, stocks: false });
-    expect(parseFolds('"字符串"')).toEqual({ sectors: false, stocks: false });
+    expect(parseFolds("{不是 json")).toEqual({ market: false, signals: false, sectors: false, stocks: false });
+    expect(parseFolds("null")).toEqual({ market: false, signals: false, sectors: false, stocks: false });
+    expect(parseFolds('"字符串"')).toEqual({ market: false, signals: false, sectors: false, stocks: false });
   });
 });
 
 describe("板块跳转：点板块跳到该板块的个股", () => {
   const sectorCode = firstSectorCode(devSnapshot);
 
-  it("第二层和第三层都给得出折叠按钮", () => {
+  it("四张卡都给得出折叠按钮", () => {
     const html = renderWorkbench(devSnapshot);
-    expect((html.match(/card-fold/g) ?? []).length).toBe(2);
+    // 今日信号 / ① 大盘环境 / ② 板块强弱 / ③ 个股分类 —— 四张都折得起来。
+    // 少一张就是某处漏传了 onToggleFold，那处会静静地没有按钮。
+    expect((html.match(/card-fold/g) ?? []).length).toBe(4);
     expect(html).toContain("收起 ▴");
     // 默认展开：一进来就把内容藏掉，等于让人先点一下才看得到东西
     expect(html).not.toContain("展开 ▾");

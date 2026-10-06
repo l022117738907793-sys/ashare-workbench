@@ -12,6 +12,15 @@
   min-height: 44px; list-style: none; cursor: pointer; font-size: 13px; color: var(--text-2);
 }
 summary::-webkit-details-marker { display: none; }
+
+/*
+ * 「展开 +」在打开之后仍然写着「展开」—— 文字是写死的，`<details>` 的开关状态
+ * React 读不到，所以放两个标签由 CSS 切。两行换一个正确的字，比留一个说了反话的
+ * 按钮划算。尺寸见下面手机断点里的 `.replay-expand`。
+ */
+.replay-expand-open { display: none; }
+.replay-details[open] .replay-expand-closed { display: none; }
+.replay-details[open] .replay-expand-open { display: inline; }
 .game-quick-guide > summary > span,
 .game-stock-browser > summary > span,
 .chapter-briefing-details > summary > span,
@@ -217,4 +226,112 @@ summary::-webkit-details-marker { display: none; }
   .game-trading-grid { gap: 10px; }
   .game-stock-browser > summary { font-size: 12px; }
   .game-stock-browser .pick-list { max-height: 190px; }
+
+  /*
+   * ── 展开 / 收起：手机上要一眼看出「这里能点」 ─────────────────────
+   *
+   * 这些开关原来的高度都在 24–44px 之间，标识是纯文字：一个继承正文尺寸的「＋」、
+   * 一个 **10px** 的「展开 +」、一个 12px 的「展开」。`.card-fold` 更彻底 ——
+   * redesign.css 把它的 `border` 和 `background` 都抹成了 `border:0; background:none`，
+   * 于是那颗「收起 ▴」在手机上就是一小撮灰字。
+   *
+   * 统一成三件事：**够高（≥48px）、有边界、箭头是个看得见的圆徽标**。
+   * 圆徽标沿用原来的「＋」字符，靠文件开头那两条 `[open] { transform: rotate(45deg) }`
+   * 在展开时转成「×」—— 这里只负责把它做大做圆。
+   */
+  .game-quick-guide > summary,
+  .game-stock-browser > summary,
+  .chapter-briefing-details > summary,
+  .replay-chart-details > summary,
+  .replay-log-details > summary,
+  .game-detail-section > summary,
+  .replay-details > summary,
+  .replay-pending-panel > summary {
+    min-height: 52px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  /* 那个「＋」：26px 的圆环，展开时转成「×」 */
+  .game-quick-guide > summary > span,
+  .game-stock-browser > summary > span,
+  .chapter-briefing-details > summary > span,
+  .replay-chart-details > summary > span,
+  .replay-log-details > summary > span:last-child,
+  .game-detail-hint > span {
+    flex: none;
+    display: inline-block;
+    width: 26px;
+    height: 26px;
+    line-height: 24px;
+    text-align: center;
+    border: 1.5px solid var(--accent);
+    border-radius: 999px;
+    font-size: 15px;
+    font-weight: 700;
+    vertical-align: middle;
+  }
+  /* 这一处原来没有旋转规则，补上，否则展开后还停在「＋」 */
+  .game-detail-hint > span { transition: transform .18s; }
+  .game-detail-section[open] .game-detail-hint > span { transform: rotate(45deg); }
+
+  /* 右边那颗 10px 的「展开 +」：做成正经的小胶囊 */
+  .replay-expand {
+    flex: none;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 20px;
+    padding: 4px 12px;
+    border: 1.5px solid var(--accent);
+    border-radius: 999px;
+    color: var(--accent);
+  }
+  .replay-details[open] .replay-expand { color: var(--bg, #16191c); background: var(--accent); }
+
+  /* 「待成交委托 0 笔 ＋」右侧那一小块，同样从 10px 提起 */
+  .replay-pending-panel > summary .replay-count {
+    flex: none;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 20px;
+    padding: 4px 12px;
+    border: 1.5px solid var(--accent);
+    border-radius: 999px;
+    color: var(--accent);
+    background: transparent;
+  }
+
+  /* 卡片右上角的「收起 ▴ / 展开 ▾」：redesign 把它做成了纯文字，恢复成按钮 */
+  .card-fold {
+    min-height: 44px;
+    padding: 0 18px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    border: 1.5px solid var(--accent);
+    background: transparent;
+  }
+
+  /* 个股分类的分组标题：整行可点，右侧「展开 / 收起」做成胶囊 */
+  .group-head { min-height: 52px; padding: 0 14px; }
+  .group-toggle {
+    flex: none;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 20px;
+    padding: 4px 12px;
+    border: 1.5px solid var(--accent);
+    border-radius: 999px;
+  }
+
+  /* 「继续展开（还有 N 只）」：本来就是整行按钮，改成描边强调色 */
+  .reveal-more {
+    min-height: 52px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    border: 1.5px solid var(--accent);
+    background: transparent;
+  }
 }
