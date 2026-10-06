@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   chunk,
+  currencyOf,
   fromEastmoney,
   fromTencentSymbol,
+  groupOfCode,
+  marketGroupOf,
   parseCode,
   toEastmoneySecid,
   toTencentSymbol,
@@ -53,6 +56,67 @@ describe("代码格式转换", () => {
   it("chunk 切块", () => {
     expect(chunk([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
     expect(chunk([], 3)).toEqual([]);
+  });
+});
+
+describe("境外代码（港股 / 美股）", () => {
+  it("解析港股：4–5 位数字，前导零要留住", () => {
+    expect(parseCode("00700.HK")).toEqual({ num: "00700", market: "HK" });
+    expect(parseCode("09988.HK")).toEqual({ num: "09988", market: "HK" });
+    // 长实集团是 4 位，不能因为「A 股是 6 位」就把 4 位拒掉
+    expect(parseCode("0700.HK")).toEqual({ num: "0700", market: "HK" });
+    expect(parseCode("700.HK")).toBeNull(); // 3 位不是港股代码
+    expect(parseCode("00700")).toBeNull(); // 没后缀一律不认
+  });
+
+  it("解析美股：字母代码，统一转大写", () => {
+    expect(parseCode("AAPL.US")).toEqual({ num: "AAPL", market: "US" });
+    expect(parseCode("aapl.us")).toEqual({ num: "AAPL", market: "US" });
+    // 伯克希尔 B 类是 BRK.B，代码里带点 —— 不能按分隔点去切
+    expect(parseCode("BRK.B.US")).toEqual({ num: "BRK.B", market: "US" });
+    expect(parseCode(".US")).toBeNull(); // 空代码
+  });
+
+  it("转东方财富 secid：港股 116，美股宁可返回 null", () => {
+    expect(toEastmoneySecid("00700.HK")).toBe("116.00700");
+    expect(toEastmoneySecid("AAPL.US")).toBeNull();
+    // 这一条是给未来的守卫：东财美股要 105/106/107 分交易所，光看代码判断不出，
+    // 猜错的 secid 会拉到别的公司的行情 —— 不如返回 null 让调用方退到腾讯源。
+    expect(toEastmoneySecid("BABA.US")).toBeNull();
+  });
+
+  it("转腾讯 symbol 并往返一致", () => {
+    expect(toTencentSymbol("00700.HK")).toBe("hk00700");
+    expect(toTencentSymbol("AAPL.US")).toBe("usAAPL");
+    for (const c of ["00700.HK", "09988.HK", "AAPL.US", "BRK.B.US"]) {
+      expect(fromTencentSymbol(toTencentSymbol(c)!)).toBe(c);
+    }
+  });
+
+  it("东财 f13 还原：116 是港股，105/106/107 都是美股", () => {
+    expect(fromEastmoney("00700", 116)).toBe("00700.HK");
+    expect(fromEastmoney("AAPL", 105)).toBe("AAPL.US");
+    expect(fromEastmoney("BABA", 106)).toBe("BABA.US");
+  });
+
+  it("规则分组：沪深北共用 A 股那一套", () => {
+    expect(marketGroupOf("SH")).toBe("CN");
+    expect(marketGroupOf("SZ")).toBe("CN");
+    expect(marketGroupOf("BJ")).toBe("CN");
+    expect(marketGroupOf("HK")).toBe("HK");
+    expect(marketGroupOf("US")).toBe("US");
+    expect(groupOfCode("600519.SH")).toBe("CN");
+    expect(groupOfCode("00700.HK")).toBe("HK");
+    expect(groupOfCode("AAPL.US")).toBe("US");
+    // 认不出的按 A 股算：池子里绝大多数是 A 股，猜错代价最小
+    expect(groupOfCode("乱码")).toBe("CN");
+  });
+
+  it("计价货币跟着市场走", () => {
+    expect(currencyOf("600519.SH")).toBe("CNY");
+    expect(currencyOf("00700.HK")).toBe("HKD");
+    expect(currencyOf("AAPL.US")).toBe("USD");
+    expect(currencyOf("乱码")).toBe("CNY");
   });
 });
 

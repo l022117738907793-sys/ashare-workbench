@@ -1,27 +1,19 @@
-/**
- * 传奇模式（模式 2）的关卡选择。
- *
- * 十关都是真实的历史节点。和随机模式相反，这里**大方地显示日期**：
- * 传奇模式是纪念性复盘，玩的就是「我知道后来发生了什么，那如果当时是我呢」。
- * 藏日期反而把这个玩法抽掉了。
- *
- * 但有一条底线：**开局简报只写进场那天公开可见的信息**。
- * 顺手写一句「随后就暴跌了」，这一关就没有任何意义了。
- */
+/** Historical chapter selection. Briefings contain only information public at entry. */
 import { useState } from "react";
 import { LEVELS, type ReplayLevel } from "@aw/game";
-import { Card, Notice, RichP } from "./common";
+import { Notice, RichP } from "./common";
 import { GAME_DISCLAIMER } from "../lib/game";
+import "./level-picker.css";
 
 export interface LevelPickerProps {
-  /** 关卡数据是否已经就位（分片缺少时只能看名单，不能开局） */
+  /** At least one history shard is available. */
   ready: boolean;
-  /** 正在加载哪一关，null 表示没有在加载 */
+  /** Actual published chapter IDs; omitted by older callers. */
+  availableIds?: readonly string[] | null;
   loadingId: string | null;
   error: string | null;
   onStart: (level: ReplayLevel, initialCash: number) => void;
   onBack: () => void;
-  /** 可选资金档位，与实时模拟游戏共用 */
   cashOptions: number[];
   defaultCash: number;
 }
@@ -36,152 +28,128 @@ export interface LevelDetailProps {
   onCash: (v: number) => void;
   onStart: () => void;
   onBack: () => void;
+  /** Show beside the chapter list rather than as a standalone page. */
+  inline?: boolean;
 }
 
-/**
- * 单关的开局简报页。
- *
- * 单独拆出来是为了能直接渲染它做冒烟测试 —— `renderToStaticMarkup` 点不了按钮，
- * 列表里选一关这个交互测不到，但简报页本身的内容（尤其是那些不许出现的后见之明）必须测得到。
- */
+/** The exported standalone briefing is also used by static-render smoke tests. */
 export function LevelDetail(props: LevelDetailProps) {
-  const { level: open, ready, loading, error, cash, cashOptions, onCash, onStart, onBack } = props;
+  const { level, ready, loading, error, cash, cashOptions, onCash, onStart, onBack, inline = false } = props;
 
-  return (
-    <div className="view">
-      <p className="game-disclaimer" role="note">
-        {`⚠️ ${GAME_DISCLAIMER}`}
-      </p>
+  const briefing = (
+    <section className="chapter-briefing" aria-labelledby={`chapter-title-${level.id}`}>
+      <div className="chapter-briefing-top">
+        <span className="chapter-kicker">CHAPTER {String(level.order).padStart(2, "0")}</span>
+        <span className="chapter-selected-label">当前选择</span>
+      </div>
+      <h2 id={`chapter-title-${level.id}`}>{level.title}</h2>
+      <p className="chapter-briefing-subtitle">{level.subtitle}</p>
 
-      <Card
-        title={`${open.order}. ${open.title}`}
-        subtitle={open.subtitle}
-        right={
-          <button type="button" className="btn btn-ghost btn-tiny" onClick={onBack}>
-            返回关卡列表
-          </button>
-        }
-      >
-        <Notice tone="info">
-          从 <strong>{open.startDate}</strong> 开始，往前走 {open.days} 个交易日。
-          日期是公开的 —— 问题是在当时的信息下你会怎么做。
-        </Notice>
+      <dl className="chapter-mission-stats">
+        <div><dt>进场日期</dt><dd>{level.startDate}</dd></div>
+        <div><dt>推演长度</dt><dd>{level.days}<small> 个交易日</small></dd></div>
+      </dl>
 
-        <h4 className="briefing-h">进场那天能看到的</h4>
-        <ul className="briefing-list">
-          {open.briefing.map((line, i) => (
-            <li key={i}>{line}</li>
+      <div className="chapter-briefing-section">
+        <h3><span className="chapter-section-dot" />进场那天能看到的</h3>
+        <ul className="chapter-facts">
+          {level.briefing.map((line, i) => (
+            <li key={i}><span className="chapter-fact-index">{String(i + 1).padStart(2, "0")}</span><span>{line}</span></li>
           ))}
         </ul>
+      </div>
 
-        <h4 className="briefing-h">这一局要想清楚的是</h4>
-        <p className="briefing-theme">{open.theme}</p>
+      <div className="chapter-question">
+        <span>这一局要想清楚的是</span>
+        <p>{level.theme}</p>
+      </div>
 
-        <div className="field">
-          <label>初始资金</label>
-          <div className="chips">
-            {cashOptions.map((v) => (
-              <button
-                key={v}
-                type="button"
-                className={`chip${v === cash ? " chip-active" : ""}`}
-                onClick={() => onCash(v)}
-              >
-                {v / 10000} 万
-              </button>
-            ))}
-          </div>
+      <fieldset className="chapter-funds">
+        <legend>初始虚拟资金</legend>
+        <div className="chapter-cash-options">
+          {cashOptions.map((v) => (
+            <button key={v} type="button" className={`chapter-cash${v === cash ? " is-selected" : ""}`} aria-pressed={v === cash} onClick={() => onCash(v)} disabled={loading}>
+              {v / 10000}<span> 万</span>
+            </button>
+          ))}
         </div>
+      </fieldset>
 
-        {error ? <Notice tone="warn">{error}</Notice> : null}
+      {error ? <Notice tone="warn">{error}</Notice> : null}
 
-        {ready ? (
-          <button type="button" className="btn btn-primary" disabled={loading} onClick={onStart}>
-            {loading ? "正在载入这一关的行情…" : `进入 ${open.startDate}`}
-          </button>
-        ) : (
-          <Notice tone="warn">
-            这一关的行情文件没有随站点发布，暂时开不了。需要先跑
-            <code> scripts/build-history-shards.ts</code>。
-          </Notice>
-        )}
+      {ready ? (
+        <button type="button" className="chapter-enter" disabled={loading} onClick={onStart}>
+          <span>{loading ? "正在载入这一关的行情…" : `进入 ${level.startDate}`}</span>
+          <span className="chapter-enter-arrow" aria-hidden="true">{loading ? "…" : "↗"}</span>
+        </button>
+      ) : (
+        <div className="chapter-unavailable" role="status">
+          <strong>本章行情暂未就绪</strong>
+          <p>这一关还没有关卡数据，可以先选择其他章节，或返回大厅体验随机模式。</p>
+        </div>
+      )}
 
-        <RichP className="hint">
-          价格用前复权（按今天的复权因子回算）：收益连续，但绝对价位和当年不一样。
-        </RichP>
-      </Card>
-    </div>
+      <RichP className="chapter-price-note">
+        价格用前复权（按今天的复权因子回算）：收益连续，但绝对价位和当年不一样。
+      </RichP>
+      {!inline ? <button type="button" className="chapter-back" onClick={onBack}>← 返回关卡列表</button> : null}
+    </section>
   );
+
+  if (inline) return briefing;
+  return <div className="view chapter-view chapter-detail-view"><p className="game-disclaimer" role="note">{GAME_DISCLAIMER}</p>{briefing}</div>;
 }
 
 export function LevelPicker(props: LevelPickerProps) {
-  const { ready, loadingId, error, onStart, onBack, cashOptions, defaultCash } = props;
-  const [openId, setOpenId] = useState<string | null>(null);
+  const { ready, availableIds, loadingId, error, onStart, onBack, cashOptions, defaultCash } = props;
+  const [selectedId, setSelectedId] = useState(LEVELS.find((level) => availableIds?.includes(level.id))?.id ?? LEVELS[0]!.id);
   const [cash, setCash] = useState(defaultCash);
-
-  const open = LEVELS.find((l) => l.id === openId) ?? null;
-
-  if (open) {
-    return (
-      <LevelDetail
-        level={open}
-        ready={ready}
-        loading={loadingId !== null}
-        error={error}
-        cash={cash}
-        cashOptions={cashOptions}
-        onCash={setCash}
-        onStart={() => onStart(open, cash)}
-        onBack={() => setOpenId(null)}
-      />
-    );
-  }
+  const selected = LEVELS.find((level) => level.id === selectedId) ?? LEVELS[0]!;
+  const isAvailable = (id: string) => ready && (availableIds == null || availableIds.includes(id));
 
   return (
-    <div className="view">
-      <p className="game-disclaimer" role="note">
-        {`⚠️ ${GAME_DISCLAIMER}`}
-      </p>
+    <div className="view chapter-view">
+      <header className="chapter-page-heading">
+        <div>
+          <span className="chapter-kicker">HISTORICAL REPLAY / 传奇模式</span>
+          <h1>选择你的历史章节<span>.</span></h1>
+          <p>回到真实的市场。只看当时的信息，亲手做出每一次决定。</p>
+        </div>
+        <button type="button" className="chapter-back" onClick={onBack}>← 返回游戏大厅</button>
+      </header>
 
-      <Card
-        title="传奇模式 · 10 个历史时刻"
-        subtitle="选一段真实的历史，从它发生之前开始"
-        right={
-          <button type="button" className="btn btn-ghost btn-tiny" onClick={onBack}>
-            返回
-          </button>
-        }
-      >
-        <Notice tone="info">
-          每一关都是真实发生过的一段日子。你从事件<strong>之前</strong>的某一天进场，
-          一天一步往前走。
-        </Notice>
+      <div className="chapter-mode-strip">
+        <span><strong>{LEVELS.length}</strong> 个历史时刻</span>
+        <span>公开日期</span>
+        <span>次日开盘成交</span>
+        <span>支持快进</span>
+      </div>
 
-        {!ready ? (
-          <Notice tone="warn">
-            站点的 <code>history/</code> 目录里还没有关卡数据，只能看名单。可以先玩随机模式。
-          </Notice>
-        ) : null}
+      {!ready ? <Notice tone="warn">当前还没有关卡数据，您仍可查看章节简报。可以先返回游戏大厅玩随机模式。</Notice> : null}
 
-        <ol className="level-list">
-          {LEVELS.map((l) => (
-            <li key={l.id}>
-              <button type="button" className="level-item" onClick={() => setOpenId(l.id)}>
-                <span className="level-order">{l.order}</span>
-                <span className="level-main">
-                  <span className="level-title">{l.title}</span>
-                  <span className="level-sub">{l.subtitle}</span>
-                </span>
-                <span className="level-date">{l.startDate}</span>
-              </button>
-            </li>
-          ))}
-        </ol>
-
-        <RichP className="hint">
-          节点按「大幅波动或成交异常」筛出，不代表这些日子容易赚钱。
-        </RichP>
-      </Card>
+      <div className="chapter-layout">
+        <section className="chapter-catalog" aria-label="历史章节列表">
+          <div className="chapter-catalog-heading"><h2>章节目录</h2><span><span className="chapter-swipe-hint">左右滑动 · </span>{LEVELS.length} CHAPTERS</span></div>
+          <ol className="chapter-grid">
+            {LEVELS.map((level) => (
+              <li key={level.id}>
+                <button type="button" className={`chapter-card${level.id === selectedId ? " is-selected" : ""}`} aria-pressed={level.id === selectedId} onClick={() => setSelectedId(level.id)} disabled={loadingId !== null}>
+                  <span className="chapter-card-top"><span className="chapter-number">{String(level.order).padStart(2, "0")}</span><span className="chapter-year">{level.startDate.slice(0, 4)}</span></span>
+                  <span className="chapter-card-title">{level.title}</span>
+                  <span className="chapter-card-subtitle">{level.subtitle}</span>
+                  <span className="chapter-card-footer"><span>{level.startDate}</span><span>{level.days} 交易日</span></span>
+                  <span className="chapter-card-status">{!isAvailable(level.id) ? "行情待就绪" : level.id === selectedId ? "查看中的章节" : "查看简报"}<span aria-hidden="true">{level.id === selectedId ? "●" : "↗"}</span></span>
+                </button>
+              </li>
+            ))}
+          </ol>
+          <p className="chapter-catalog-note">节点按大幅波动或成交异常筛出，不代表这些日子容易赚钱。</p>
+        </section>
+        <div className="chapter-mission-panel">
+          <LevelDetail level={selected} ready={isAvailable(selected.id)} loading={loadingId !== null} error={error} cash={cash} cashOptions={cashOptions} onCash={setCash} onStart={() => onStart(selected, cash)} onBack={onBack} inline />
+        </div>
+      </div>
+      <p className="game-disclaimer chapter-disclaimer" role="note">{GAME_DISCLAIMER}</p>
     </div>
   );
 }

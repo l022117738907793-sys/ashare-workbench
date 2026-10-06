@@ -34,7 +34,8 @@ import {
   type GameState,
 } from "../lib/game";
 import { fmtNum, fmtPct } from "../lib/helpers";
-import { Card, EmptyHint, KV, Notice, RichP, StateBadge } from "./common";
+import { Card, EmptyHint, KV, Notice, StateBadge } from "./common";
+import "./game-view.css";
 import { NewsPanel } from "./NewsPanel";
 import { AwayCard } from "./AwayCard";
 import { ReviewBlock } from "./ReviewBlock";
@@ -114,13 +115,54 @@ function Metric({ k, v, tone }: { k: string; v: string; tone?: "good" | "bad" | 
   );
 }
 
-/**
- * 「历史推演」的入口卡。
- *
- * 开局之后也要留着 —— 玩家常常先开一局实时模式，过一会儿才想试试推演。
- * 这张卡以前只画在未开局的那张界面上，一开局入口就没了，想玩推演只能把实时
- * 那份存档重置掉（用户就是这么踩到的）。
- */
+/** 装饰性行情插画，不代表当前股票报价或任何策略收益。 */
+function MarketIllustration() {
+  const candles = [
+    [39, 125, 156, 120, 167, false], [62, 123, 147, 111, 159, true],
+    [85, 111, 139, 104, 148, true], [108, 117, 136, 109, 151, false],
+    [131, 96, 126, 87, 141, true], [154, 84, 117, 74, 129, true],
+    [177, 91, 112, 81, 124, false], [200, 75, 99, 61, 115, true],
+    [223, 62, 84, 52, 99, true], [246, 70, 91, 58, 103, false],
+    [269, 47, 78, 39, 94, true], [292, 42, 65, 28, 74, true],
+    [315, 37, 61, 27, 70, false], [338, 24, 48, 13, 64, true],
+  ];
+  return (
+    <div className="game-art" aria-label="历史行情示意插画，非实时数据" role="img">
+      <div className="game-art-top"><span className="game-art-dot" /> MARKET REPLAY <span>历史行情示意</span></div>
+      <svg viewBox="0 0 380 215" aria-hidden="true">
+        <defs>
+          <linearGradient id="game-chart-glow" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#f5a45b" stopOpacity=".22" />
+            <stop offset="100%" stopColor="#f5a45b" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {[40, 80, 120, 160, 200].map((y) => <line key={y} x1="14" x2="366" y1={y} y2={y} stroke="#343a3e" strokeWidth=".6" />)}
+        {[40, 100, 160, 220, 280, 340].map((x) => <line key={x} x1={x} x2={x} y1="12" y2="200" stroke="#343a3e" strokeWidth=".6" />)}
+        <path d="M14 178 C38 168 41 161 60 158 S96 165 119 139 S156 126 176 116 S207 108 229 95 S266 77 287 72 S320 53 366 32 L366 200 L14 200Z" fill="url(#game-chart-glow)" />
+        <path d="M14 178 C38 168 41 161 60 158 S96 165 119 139 S156 126 176 116 S207 108 229 95 S266 77 287 72 S320 53 366 32" fill="none" stroke="#f5a45b" strokeWidth="2.5" />
+        {candles.map(([x, top, bottom, high, low, up]) => (
+          <g key={String(x)} stroke={up ? "#c97854" : "#508b7a"} fill={up ? "#c97854" : "#508b7a"}>
+            <line x1={Number(x)} x2={Number(x)} y1={Number(high)} y2={Number(low)} />
+            <rect x={Number(x) - 5} y={Number(top)} width="10" height={Number(bottom) - Number(top)} rx="1" />
+          </g>
+        ))}
+        <circle cx="366" cy="32" r="4" fill="#f5a45b" />
+        <circle cx="366" cy="32" r="9" fill="none" stroke="#f5a45b" strokeOpacity=".35" />
+      </svg>
+      <div className="game-art-bottom"><span>只看当时的信息</span><strong>决定，由您来做。</strong></div>
+    </div>
+  );
+}
+
+function ModeIcon({ mode }: { mode: "legend" | "live" | "random" }) {
+  return (
+    <svg viewBox="0 0 32 32" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      {mode === "legend" ? <><path d="M7 7h18v4c0 8-4 12-9 14C11 23 7 19 7 11Z" /><path d="m16 10 1.8 3.7 4.2.6-3 2.9.7 4.1-3.7-1.9-3.7 1.9.7-4.1-3-2.9 4.2-.6Z" /></> : mode === "live" ? <><path d="M5 23V9m0 14h23" /><path d="m8 18 6-7 5 4 8-10" /><path d="M22 5h5v5" /></> : <><rect x="6" y="6" width="20" height="20" rx="5" /><circle cx="11" cy="11" r="1" /><circle cx="21" cy="11" r="1" /><circle cx="16" cy="16" r="1" /><circle cx="11" cy="21" r="1" /><circle cx="21" cy="21" r="1" /></>}
+    </svg>
+  );
+}
+
+/** 实时账户与历史账户仍使用原来的两个独立存档。 */
 function ReplayEntryCard(props: {
   cashChoice: number;
   replayReady: boolean;
@@ -131,63 +173,24 @@ function ReplayEntryCard(props: {
 }) {
   const { cashChoice, replayReady, replayInProgress, onResumeReplay, onStartReplay, onOpenLegend } = props;
   return (
-    <Card title="历史推演" subtitle="把你放回真实的某一天，一天走一步">
-      {replayInProgress ? (
-        /*
-         * 已经有一局在跑时不能再开一局 —— 那会把那一局冲掉。
-         *
-         * 两边各有各的存档（aw.game.v1 / aw.replay.v1），本来就能同时进行，
-         * 所以这里给的是「回去」，不是「重开」。
-         */
-        <>
-          <Notice tone="info">
-            你已经有一局历史推演在跑。它和实时模式各存各的，互不影响。
-          </Notice>
-          <div className="btn-row">
-            <button type="button" className="btn btn-primary" onClick={onResumeReplay}>
-              回到正在跑的那一局
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <RichP className="rule-body">
-            从<strong>过去</strong>的某个交易日开局，每点一次「走一天」推进一步，
-            走的全是真实发生过的行情。
-          </RichP>
-          <RichP className="rule-body">
-            今天下单<strong>按次一交易日的开盘价成交</strong> ——
-            你看到的是一整天的完整走势。
-          </RichP>
-
-          <div className="kv-list">
-            <KV k="初始资金" v={`${cashChoice / 10000} 万（沿用上面的选择）`} />
-            <KV k="结算方式" v="真实历史日线，按当时的规则（费率、涨跌停、T+1 都按那一天算）" />
-            <KV k="快进" v="1.5 秒一天，快进期间照常可以挂单" />
-          </div>
-
-          {replayReady ? (
-            <div className="btn-row">
-              <button type="button" className="btn btn-primary" onClick={onOpenLegend}>
-                传奇模式 · 10 个历史时刻
-              </button>
-              <button type="button" className="btn btn-ghost" onClick={() => onStartReplay(cashChoice)}>
-                随机开局（不显示日期）
-              </button>
-            </div>
-          ) : (
-            <Notice tone="warn">
-              当前这份快照里没有开盘价，暂时做不了历史推演。等下一次每日快照更新后再来。
-            </Notice>
-          )}
-
-          <p className="field-hint">
-            <strong>传奇模式</strong>给完整日期和进场简报，<strong>随机模式</strong>不告诉你这是哪一年哪一天 ——
-            差别只在开局那一步。
-          </p>
-        </>
-      )}
-    </Card>
+    <section className="game-replay-entry">
+      <div>
+        <span className="game-eyebrow">另一段市场旅程</span>
+        <h2>{replayInProgress ? "您的历史推演还在继续" : "想让时间走得更快？"}</h2>
+        <p>{replayInProgress ? "历史盘与实时盘各自保存，回去就能接着玩。" : "回到真实历史，以次日开盘价成交。支持 1.5 秒一天快进，期间仍可挂单。"}</p>
+      </div>
+      <div className="btn-row">
+        {replayInProgress ? (
+          <button type="button" className="btn btn-primary" onClick={onResumeReplay}>继续历史推演 →</button>
+        ) : (
+          <>
+            <button type="button" className="btn btn-primary" onClick={onOpenLegend} disabled={!replayReady}>探索传奇关卡 →</button>
+            <button type="button" className="btn btn-ghost" onClick={() => onStartReplay(cashChoice)} disabled={!replayReady}>随机开局</button>
+          </>
+        )}
+      </div>
+      {!replayReady && !replayInProgress && <p className="field-hint">当前快照缺少开盘价，历史推演暂不可用。</p>}
+    </section>
   );
 }
 
@@ -204,6 +207,7 @@ export function GameView(props: GameViewProps) {
 
   const { account, equity } = state;
   const [side, setSide] = useState<Side>("buy");
+  const [selectedMode, setSelectedMode] = useState<"legend" | "live" | "random">(replayInProgress ? "live" : "legend");
   const [cashChoice, setCashChoice] = useState<number>(DEFAULT_INITIAL_CASH);
   const [code, setCode] = useState("");
   const [sharesText, setSharesText] = useState("100");
@@ -297,68 +301,70 @@ export function GameView(props: GameViewProps) {
     }
   }
 
-  // ── 未开局：先设初始资金 ──────────────────────────────────
+  // 未开局：先选玩法，再进入相应的真实游戏流程。
   if (state.status === "idle") {
+    const replayBlocked = selectedMode !== "live" && !replayReady;
+    const startSelected = () => {
+      if (selectedMode === "live") onStart(cashChoice);
+      else if (replayInProgress) onResumeReplay?.();
+      else if (selectedMode === "legend") onOpenLegend();
+      else onStartReplay(cashChoice);
+    };
     return (
-      <div className="view">
-        <p className="game-disclaimer" role="note">
-          ⚠️ {GAME_DISCLAIMER}
-        </p>
-
-        <Card title="实时模式" subtitle="从现在开始，按现实规则结算">
-          <RichP className="rule-body">
-            先选初始资金。A 股一手 100 股 —— 10 万块买不起一手高价股。
-          </RichP>
-
-          <div className="cash-options">
-            {CASH_OPTIONS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                className={`chip${cashChoice === c ? " chip-active" : ""}`}
-                onClick={() => setCashChoice(c)}
-              >
-                {c / 10000} 万
-              </button>
-            ))}
+      <div className="view game-lobby">
+        <section className="game-hero">
+          <div className="game-hero-copy">
+            <span className="game-eyebrow"><span className="game-status-dot" /> 用虚拟资金，体验真实市场</span>
+            <h1>回到市场的<br /><em>关键时刻。</em></h1>
+            <p>行情由真实历史书写，交易由您决定。<span className="game-hero-secondary"><br />在涨跌之间练习判断，在每一次复盘中积累经验。</span></p>
+            <div className="game-hero-facts"><span>真实历史行情</span><i /><span>虚拟资金</span><i /><span>自主决策</span></div>
           </div>
+          <MarketIllustration />
+        </section>
 
-          <div className="kv-list">
-            <KV k="结算方式" v="真实行情，按现实规则（T+1、涨跌停、手续费、滑点）" />
-            <KV k="交易时段" v={`${sessionText} · 非交易时段下单按最近收盘价成交并标注`} />
-            <KV k="成绩基准" v={`跑赢${benchmarkName}才算有效成绩`} />
-            <KV k="数据来源" v="行情：腾讯/东方财富　新闻：东方财富 7x24" />
-          </div>
+        {replayInProgress && (
+          <section className="game-resume">
+            <div><strong>上一次的市场旅程，还等着您。</strong><p>已保存的历史推演可以继续，不影响实时账户。</p></div>
+            <button type="button" className="btn btn-primary" onClick={onResumeReplay}>继续推演 →</button>
+          </section>
+        )}
 
-          <Notice tone="info">
-            开局后账户不可恢复，但可以随时重置重来。所有数据只存在你自己的浏览器里。
-          </Notice>
+        <div className="game-section-heading"><div><span className="game-eyebrow">CHOOSE YOUR PLAY</span><h2>选一种玩法，进入市场</h2></div><button type="button" className="game-text-button" onClick={onOpenRules}>第一次玩？先看规则 ↗</button></div>
+        <div className="game-mode-grid" role="group" aria-label="选择模拟游戏模式">
+          <button type="button" className={`game-mode-card game-mode-legend${selectedMode === "legend" ? " is-selected" : ""}`} aria-pressed={selectedMode === "legend"} disabled={replayInProgress} title={replayInProgress ? "请先继续或结束当前历史推演" : undefined} onClick={() => setSelectedMode("legend")}>
+            <div className="game-mode-top"><ModeIcon mode="legend" /><span className="game-mode-tag">推荐先体验</span></div>
+            <span className="game-mode-number">01 / 历史关卡</span><strong>传奇模式</strong>
+            <p>站在 10 个历史时刻的起点，带着当时的线索作出判断。</p>
+            <span className="game-mode-foot">真实日期 · 开局简报 <span>↗</span></span>
+          </button>
+          <button type="button" className={`game-mode-card${selectedMode === "live" ? " is-selected" : ""}`} aria-pressed={selectedMode === "live"} onClick={() => setSelectedMode("live")}>
+            <div className="game-mode-top"><ModeIcon mode="live" /><span className="game-mode-tag game-mode-tag-quiet">跟随今日市场</span></div>
+            <span className="game-mode-number">02 / 当下进行时</span><strong>实时模式</strong>
+            <p>从今天开始跟随真实行情，适合每天回来观察与交易。</p>
+            <span className="game-mode-foot">真实行情 · 独立账户 <span>↗</span></span>
+          </button>
+          <button type="button" className={`game-mode-card${selectedMode === "random" ? " is-selected" : ""}`} aria-pressed={selectedMode === "random"} disabled={replayInProgress} title={replayInProgress ? "请先继续或结束当前历史推演" : undefined} onClick={() => setSelectedMode("random")}>
+            <div className="game-mode-top"><ModeIcon mode="random" /><span className="game-mode-tag game-mode-tag-quiet">未知的挑战</span></div>
+            <span className="game-mode-number">03 / 隐藏时间</span><strong>随机模式</strong>
+            <p>不告诉您身处哪一年，只凭眼前的信息探索未知行情。</p>
+            <span className="game-mode-foot">隐藏日期 · 自主探索 <span>↗</span></span>
+          </button>
+        </div>
 
-          <div className="btn-row">
-            <button type="button" className="btn btn-primary" onClick={() => onStart(cashChoice)}>
-              以 {cashChoice / 10000} 万开始
-            </button>
-            <button type="button" className="btn btn-ghost" onClick={onOpenRules}>
-              撮合规则说明
-            </button>
-          </div>
-        </Card>
-
-        <ReplayEntryCard
-          cashChoice={cashChoice}
-          replayReady={replayReady}
-          replayInProgress={replayInProgress}
-          onResumeReplay={onResumeReplay}
-          onStartReplay={onStartReplay}
-          onOpenLegend={onOpenLegend}
-        />
-
+        <section className="game-launch-panel">
+          <div className="game-funding"><span className="game-eyebrow">准备您的虚拟本金</span><div className="cash-options">{CASH_OPTIONS.map((c) => <button key={c} type="button" className={`chip${cashChoice === c ? " chip-active" : ""}`} aria-pressed={cashChoice === c} onClick={() => setCashChoice(c)}>{c / 10000} 万</button>)}</div><p>A 股买入一手 100 股，资金量限制可买数量；本金较少时可能买不起一手高价股。</p><p>{selectedMode === "legend" ? "传奇关卡的资金与背景将在选关时确认。" : "仅用于模拟交易 · 账户保存在此浏览器"}</p></div>
+          <div className="game-launch-action"><button type="button" className="btn btn-primary game-launch-button" disabled={replayBlocked && !replayInProgress} onClick={startSelected}>{selectedMode === "live" ? `用 ${cashChoice / 10000} 万开始实时盘` : replayInProgress ? "继续已保存的历史推演" : selectedMode === "legend" ? "选择传奇关卡" : `用 ${cashChoice / 10000} 万随机开局`} <span>→</span></button><p>{selectedMode === "live" ? `当前${sessionText}，非交易时段按最近收盘价成交。` : "今日挂单，下一交易日开盘撮合。"}</p></div>
+        </section>
+        {replayBlocked && !replayInProgress && <Notice tone="warn">当前快照缺少开盘价，历史推演暂不可用。您可以选择实时模式，或等下一次快照更新。</Notice>}
+        <div className="game-how-grid"><div><span>01</span><strong>读懂眼前的信息</strong><p>查看行情、新闻与背景，形成自己的判断。</p></div><div><span>02</span><strong>亲手作出决定</strong><p>选股、设置数量、提交委托，体验真实交易规则。</p></div><div><span>03</span><strong>回看每一次交易</strong><p>对照市场基准与交易记录，理解收益和风险。</p></div></div>
+        <p className="game-disclaimer" role="note">{GAME_DISCLAIMER} · 账户保存在此浏览器，重置后不可恢复。</p>
       </div>
     );
   }
 
   return (
-    <div className="view">
+    <div className="view game-stage">
+      <div className="game-stage-heading"><div><span className="game-eyebrow">LIVE SIMULATION</span><h1>您的实时模拟盘</h1></div><span className="game-session-pill"><span className="game-status-dot" />{sessionText}</span></div>
       {/* 红线要求：常驻且显著 */}
       <p className="game-disclaimer" role="note">
         ⚠️ {GAME_DISCLAIMER}
@@ -389,6 +395,10 @@ export function GameView(props: GameViewProps) {
           <Metric k="可用资金" v={fmtNum(account.cash)} />
           <Metric k="持仓市值" v={fmtNum(holdingsValue)} />
           <Metric k="总收益率" v={fmtPct(totalReturnPct)} tone={pnlTone(totalReturnPct)} />
+        </div>
+        <details className="account-comparison">
+          <summary>市场对照与交易统计 <span>＋</span></summary>
+          <div className="metric-grid">
           <Metric
             k={`同期${benchmarkName}`}
             v={benchmarkReturnPct === null ? "—" : fmtPct(benchmarkReturnPct)}
@@ -407,20 +417,14 @@ export function GameView(props: GameViewProps) {
             走过一个交易日之后，这里会显示同期涨跌和超额收益。
           </p>
         )}
+        </details>
       </Card>
 
       {away && onDismissAway && <AwayCard report={away} onDismiss={onDismissAway} />}
 
-      <NewsPanel
-        items={news.items}
-        source={news.source}
-        degradedReason={news.degradedReason}
-        updatedAt={news.updatedAt}
-        loading={news.loading}
-        onRefresh={news.refresh}
-        holdings={account.holdings.map((h) => ({ code: h.code, name: h.name }))}
-      />
 
+
+      <div className="game-trading-grid">
       <Card
         title="模拟下单"
         subtitle={`一手 ${LOT_SIZE} 股 · T+1：当日买入次日才可卖`}
@@ -488,17 +492,29 @@ export function GameView(props: GameViewProps) {
             value={sharesText}
             onChange={(e) => setSharesText(e.target.value)}
           />
+          <div className="game-quantity-chips">
+            <button type="button" className="chip chip-tiny" onClick={() => setSharesText("100")}>100 股</button>
+            {[0.25, 0.5, 1].map((fraction) => (
+              <button
+                key={fraction}
+                type="button"
+                className="chip chip-tiny"
+                disabled={fraction === 1 ? maxShares <= 0 : maxShares < LOT_SIZE}
+                onClick={() => setSharesText(String(
+                  side === "sell" && fraction === 1
+                    ? maxShares
+                    : Math.floor(maxShares * fraction / LOT_SIZE) * LOT_SIZE || LOT_SIZE,
+                ))}
+              >
+                {fraction === 1 ? (side === "buy" ? "最大可买" : "全部可卖") : fraction === 0.25 ? "1/4" : "1/2"}
+              </button>
+            ))}
+          </div>
           <p className="field-hint">
             {side === "buy" ? "买入" : "卖出"}需为 {LOT_SIZE} 股整数倍
             {side === "sell" && holding ? `，或一次性卖出全部 ${holding.shares} 股` : ""}
             {maxShares > 0 ? ` · 最多约 ${maxShares} 股` : ""}
           </p>
-        </div>
-
-        <div className="btn-row">
-          <button type="button" className="btn btn-primary" onClick={submit}>
-            提交委托
-          </button>
         </div>
 
         {picked && (
@@ -557,6 +573,12 @@ export function GameView(props: GameViewProps) {
             当前为「{sessionText}」，此时委托按最近收盘价成交，并在成交记录中标注。
           </Notice>
         )}
+        <div className="btn-row">
+          <button type="button" className="btn btn-primary" onClick={submit}>
+            提交委托
+          </button>
+        </div>
+
         {feedback && (
           <Notice tone={feedback.ok ? "ok" : "warn"} role={feedback.ok ? "status" : "alert"}>
             {feedback.msg}
@@ -575,7 +597,7 @@ export function GameView(props: GameViewProps) {
                 <li key={h.code} className="stock-row">
                   <div className="row-static">
                     <span className="row-title">
-                      <span className="name">{h.name}</span>
+                      <button type="button" className="game-holding-pick" onClick={() => { setCode(h.code); setFeedback(null); }}>{h.name} <span>↗</span></button>
                       <span className="code">{h.code}</span>
                     </span>
                     <span className="row-metrics">
@@ -600,6 +622,23 @@ export function GameView(props: GameViewProps) {
         )}
       </Card>
 
+      </div>
+
+      <details className="game-detail-section">
+        <summary><span>市场资讯</span><span className="game-detail-hint">展开查看最新资讯与持仓相关信息 <span>＋</span></span></summary>
+      <NewsPanel
+        items={news.items}
+        source={news.source}
+        degradedReason={news.degradedReason}
+        updatedAt={news.updatedAt}
+        loading={news.loading}
+        onRefresh={news.refresh}
+        holdings={account.holdings.map((h) => ({ code: h.code, name: h.name }))}
+      />
+      </details>
+
+      <details className="game-detail-section">
+        <summary><span>成交记录 <small>{account.trades.length} 笔</small></span><span className="game-detail-hint">查看每笔成交 <span>＋</span></span></summary>
       <Card title={`成交记录（${account.trades.length}）`} subtitle="最近 30 笔">
         {account.trades.length === 0 ? (
           <EmptyHint>暂无成交记录。</EmptyHint>
@@ -628,6 +667,8 @@ export function GameView(props: GameViewProps) {
           </ul>
         )}
       </Card>
+
+      </details>
 
       <Card title="赛季结算" subtitle="与基准对照，避免牛市里人人都是股神">
         <div className="btn-row">

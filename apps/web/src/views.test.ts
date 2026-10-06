@@ -24,6 +24,11 @@ function plain(html: string): string {
   return html.replace(/<[^>]*>/g, "");
 }
 
+/** 找到用户能读到指定文案的按钮，以检查实际可用性而不锁死整段 JSX。 */
+function buttonMarkupWithText(html: string, label: string): string | undefined {
+  return html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find((button) => plain(button).includes(label));
+}
+
 import {
   analyzeMarket,
   analyzeSector,
@@ -1079,18 +1084,23 @@ describe("模拟游戏页渲染", () => {
     expect(html).toContain("按最近收盘价成交");
   });
 
-  it("新闻排在交易之前（信息 → 决策的顺序）", () => {
+  it("交易和持仓优先展示，新闻保持可展开查阅", () => {
     const html = renderGame();
     const iAccount = html.indexOf("账户总览");
-    const iNews = html.indexOf("市场快讯");
     const iOrder = html.indexOf("模拟下单");
-    expect(iAccount).toBeGreaterThanOrEqual(0);
-    expect(iNews).toBeGreaterThanOrEqual(0);
-    expect(iOrder).toBeGreaterThanOrEqual(0);
-    // 账户状态 → 新闻 → 下单，顺序不能反：
-    // 新闻是决策依据，放在交易之后会让人先下完单才看到消息
-    expect(iAccount).toBeLessThan(iNews);
-    expect(iNews).toBeLessThan(iOrder);
+    const iHoldings = html.indexOf('class="game-holding-pick"');
+    const iNews = html.indexOf("市场快讯");
+    for (const position of [iAccount, iOrder, iHoldings, iNews]) {
+      expect(position).toBeGreaterThanOrEqual(0);
+    }
+    expect(iAccount).toBeLessThan(iOrder);
+    expect(iOrder).toBeLessThan(iHoldings);
+    expect(iHoldings).toBeLessThan(iNews);
+    // 资讯仍可访问，但默认折叠，避免长列表挡住主要操作。
+    const newsDetails = html.match(/<details\b[^>]*>[\s\S]*?市场快讯[\s\S]*?<\/details>/)?.[0];
+    expect(newsDetails).toBeDefined();
+    expect(newsDetails).toContain("展开查看最新资讯与持仓相关信息");
+    expect(newsDetails?.split(">")[0]).not.toContain("open");
   });
 
   it("无持仓无成交时不崩，给引导文案", () => {
@@ -1108,9 +1118,9 @@ describe("模拟游戏页渲染", () => {
       onOpenLegend: () => {},
     });
     expect(html).toContain("账户总览"); // 确认是「进行中」那张界面
-    expect(html).toContain("历史推演");
-    expect(html).toContain("传奇模式 · 10 个历史时刻");
-    expect(html).toContain("随机开局（不显示日期）");
+    expect(html).toContain('class="game-replay-entry"');
+    expect(buttonMarkupWithText(html, "探索传奇关卡")).not.toContain('disabled');
+    expect(buttonMarkupWithText(html, "随机开局")).not.toContain('disabled');
   });
   it("推演在跑的时候，进行中的这张界面也只给「回去」", () => {
     const html = renderGame({
@@ -1120,8 +1130,9 @@ describe("模拟游戏页渲染", () => {
       onOpenLegend: () => {},
       onResumeReplay: () => {},
     });
-    expect(html).toContain("回到正在跑的那一局");
-    expect(html).not.toContain("传奇模式 · 10 个历史时刻");
+    expect(buttonMarkupWithText(html, "继续历史推演")).not.toContain('disabled');
+    expect(buttonMarkupWithText(html, "探索传奇关卡")).toBeUndefined();
+    expect(buttonMarkupWithText(html, "随机开局")).toBeUndefined();
   });
 
 
@@ -1335,30 +1346,32 @@ describe("模拟游戏开局界面", () => {
     );
   }
 
-  it("给历史推演留了入口（否则整套引擎没有地方进）", () => {
+  it("大厅明确提供三种玩法，不把玩家带进空账户", () => {
     const html = renderSetup();
-    expect(html).toContain("历史推演");
-    expect(html).toContain("把你放回真实的某一天");
+    for (const mode of ["传奇模式", "实时模式", "随机模式"]) {
+      expect(buttonMarkupWithText(html, mode)).toBeDefined();
+    }
+    expect(plain(html)).toContain("回到市场的关键时刻。");
+    expect(html).not.toContain("模拟下单");
   });
 
-  it("快照带开盘价时给得出随机开局按钮", () => {
+  it("快照带开盘价时可选择随机模式，历史主入口也可用", () => {
     const html = renderSetup(true);
-    expect(html).toContain("随机开局");
-    expect(html).not.toContain("没有开盘价");
+    expect(buttonMarkupWithText(html, "随机模式")).not.toContain('disabled');
+    expect(buttonMarkupWithText(html, "选择传奇关卡")).not.toContain('disabled');
+    expect(plain(html)).not.toContain("缺少开盘价");
   });
 
-  it("传奇模式排在随机前面，而且是主按钮", () => {
+  it("传奇模式排在随机前面，并默认选中对应的主入口", () => {
     const html = renderSetup(true);
-    const legend = html.indexOf("传奇模式 · 10 个历史时刻");
-    const random = html.indexOf("随机开局（不显示日期）");
+    const legend = html.indexOf("传奇模式");
+    const random = html.indexOf("随机模式");
     expect(legend).toBeGreaterThan(-1);
     expect(random).toBeGreaterThan(-1);
     expect(legend, "传奇应该排在随机之前").toBeLessThan(random);
-    // 主按钮是 btn-primary；两个按钮各自的那一段里检查
-    const legendTag = html.slice(html.lastIndexOf("<button", legend), legend);
-    const randomTag = html.slice(html.lastIndexOf("<button", random), random);
-    expect(legendTag).toContain("btn-primary");
-    expect(randomTag).not.toContain("btn-primary");
+    expect(buttonMarkupWithText(html, "传奇模式")).toContain('aria-pressed="true"');
+    expect(buttonMarkupWithText(html, "随机模式")).toContain('aria-pressed="false"');
+    expect(buttonMarkupWithText(html, "选择传奇关卡")).toContain("btn-primary");
   });
 
   it("传奇模式已经做好了，页面上不该再出现「还没做」", () => {
@@ -1367,42 +1380,23 @@ describe("模拟游戏开局界面", () => {
     expect(renderSetup(true)).not.toContain("随机模式是它的地基");
   });
 
-  it("两条路的区别说清楚了：传奇给日期，随机不给", () => {
-    // 只断言「这个区别确实写在界面上」，不锁死具体措辞 —— 文案会改，区别不能丢
+  it("两条历史路线的区别说清楚了：传奇给日期，随机隐藏", () => {
     const html = renderSetup(true);
-    expect(html).toContain("给完整日期");
-    expect(html).toContain("不告诉你这是哪一年哪一天");
-    expect(html).toContain("差别只在开局那一步");
+    const legend = buttonMarkupWithText(html, "传奇模式");
+    const random = buttonMarkupWithText(html, "随机模式");
+    expect(legend).toContain("真实日期");
+    expect(legend).toContain("开局简报");
+    expect(random).toContain("隐藏日期");
+    expect(random).toContain("不告诉您身处哪一年");
   });
 
-  it("快照没有开盘价时说明为什么做不了推演", () => {
-    const html = renderToStaticMarkup(
-      createElement(GameView, {
-        state: defaultGameState(),
-        prices: new Map(),
-        quotesByCode: new Map(),
-        stocks: [],
-        resultsByCode: new Map(),
-        onOrder: () => ({ ok: true }),
-        onStart: () => {},
-        onReset: () => {},
-        onSettle: () => null,
-        onOpenRules: () => {},
-        news: stubNews(),
-        sessionText: "已收盘",
-        isTradingNow: false,
-        today: "2026-09-30",
-        benchmarkName: "沪深300",
-        benchmarkReturnPct: null,
-        totalAssets: 0,
-        holdingsValue: 0,
-        replayReady: false,
-        onStartReplay: () => {},
-        onOpenLegend: () => {},
-      }),
-    );
-    expect(plain(html)).toContain("没有开盘价");
-    expect(html).not.toContain("随机开局（不显示日期）");
+  it("快照没有开盘价时解释原因并禁用历史启动动作", () => {
+    const html = renderSetup(false);
+    expect(plain(html)).toContain("缺少开盘价");
+    expect(plain(html)).toContain("历史推演暂不可用");
+    expect(buttonMarkupWithText(html, "选择传奇关卡")).toContain('disabled');
+    // 玩家仍可以切换到实时模式，历史资料缺失不能阻断整个游戏。
+    expect(buttonMarkupWithText(html, "实时模式")).not.toContain('disabled');
   });
 
   it("未开局时显示资金选择，而不是一个空账户", () => {
@@ -1420,34 +1414,38 @@ describe("模拟游戏开局界面", () => {
     expect(renderSetup()).toContain(GAME_DISCLAIMER);
   });
 
-  it("两张卡各叫各的名字，不再写「另一种玩法」", () => {
-    // 用户提的：把「开始一局」改个名字，「另一个玩法：」去掉 ——
-    // 并列的两个入口不需要分主次，标题直接写模式名就够了
+  it("三种模式都有自己的名字和说明", () => {
     const html = renderSetup(true);
-    expect(html).toContain("实时模式");
-    expect(html).toContain("历史推演");
+    for (const mode of ["传奇模式", "实时模式", "随机模式"]) {
+      const card = buttonMarkupWithText(html, mode);
+      expect(card).toBeDefined();
+      expect(card).toContain("<p>");
+    }
     expect(html).not.toContain("开始一局");
     expect(html).not.toContain("另一种玩法");
   });
 
-  it("已经有一局推演在跑时，只给「回去」，不再给开局按钮", () => {
-    // 两边的存档是分开的（aw.game.v1 / aw.replay.v1），实时模式不该被清掉；
-    // 但也不能让玩家顺手再开一局把正在跑的那局冲掉
-    const html = renderSetup(true, true);
-    expect(html).toContain("回到正在跑的那一局");
-    expect(html).toContain("各存各的");
-    expect(html).not.toContain("传奇模式 · 10 个历史时刻");
-    expect(html).not.toContain("随机开局（不显示日期）");
-    // 实时模式那半边照常
-    expect(html).toContain("以 20 万开始");
+  it("已有历史存档时保留继续入口，禁用新的历史模式而允许实时账户", () => {
+    // 历史数据当前不可用也不应遮掉已有存档的继续入口。
+    for (const ready of [false, true]) {
+      const html = renderSetup(ready, true);
+      expect(buttonMarkupWithText(html, "继续推演")).not.toContain('disabled');
+      expect(plain(html)).toContain("不影响实时账户");
+      expect(buttonMarkupWithText(html, "传奇模式")).toContain('disabled');
+      expect(buttonMarkupWithText(html, "随机模式")).toContain('disabled');
+      expect(buttonMarkupWithText(html, "实时模式")).not.toContain('disabled');
+      expect(buttonMarkupWithText(html, "用 20 万开始实时盘")).not.toContain('disabled');
+      expect(buttonMarkupWithText(html, "选择传奇关卡")).toBeUndefined();
+      expect(buttonMarkupWithText(html, "随机开局")).toBeUndefined();
+    }
   });
 
   it("讲清了资金量对选股的限制", () => {
     const html = renderSetup();
     // 「一手」现在是个术语按钮，会被切成两段，所以看读到的文字
     expect(plain(html)).toContain("一手 100 股");
-    // 简化文案时把「为什么要有资金档位」压缩成了一句，但这个事实不能丢
-    expect(plain(html)).toContain("一手 100 股");
+    // 资金档位的实际影响不能被简化文案掩盖。
+    expect(plain(html)).toContain("资金量限制可买数量");
     expect(plain(html)).toContain("买不起一手高价股");
   });
 });

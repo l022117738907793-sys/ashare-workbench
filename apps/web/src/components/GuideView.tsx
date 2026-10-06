@@ -19,6 +19,18 @@ export function GuideView({ onBack }: { onBack: () => void }) {
         <h2 className="back-title">使用说明</h2>
       </div>
 
+      <section className="game-guide-intro">
+        <span className="eyebrow">A SMALL GUIDE TO YOUR FIRST GAME</span>
+        <h2>先玩一局，再慢慢看懂市场。</h2>
+        <p>第一次来，推荐从传奇模式开始。有背景简报，也可以随时暂停。所有委托都使用虚拟资金，您决定方向，系统负责按规则撮合。</p>
+        <button type="button" className="btn btn-primary" onClick={onBack}>回到游戏，选择模式 →</button>
+      </section>
+      <div className="game-guide-steps">
+        <section className="game-guide-step"><b>01 / 选择一段历史</b><h3>先读信息</h3><p>进入传奇关卡，阅读开局简报和当日资讯。选中一只股票，查看截至当前交易日的走势，想一想自己有什么依据。</p></section>
+        <section className="game-guide-step"><b>02 / 提交一笔委托</b><h3>等待下一天</h3><p>选择方向与股数，提交后先看待成交委托。历史推演要点击“走一天”，按下一交易日开盘价撮合；刚获得的股票当天不可出售。</p></section>
+        <section className="game-guide-step"><b>03 / 看清这次结果</b><h3>回看自己的判断</h3><p>对照成交记录、费用和收益。快进时仍能下单，读信息时先暂停。结算可以查看阶段成绩，本局走完后再做完整复盘。</p></section>
+      </div>
+      <details className="guide-reference"><summary>进阶阅读：市场观察、术语、规则与数据来源</summary><div className="view">
       <Notice tone="info">
         这个工具做一件事：把 A 股按「趋势」筛成几类，并告诉你每一类是怎么判断出来的。
         <br />
@@ -40,9 +52,9 @@ export function GuideView({ onBack }: { onBack: () => void }) {
         </RichP>
       </Card>
 
-      <Card title="三个页面" subtitle="底部标签栏">
+      <Card title="三个页面" subtitle="桌面顶部导航 / 手机底部导航">
         <div className="kv-list">
-          <KV k="筛选" v="主页面。大盘环境 → 板块强弱 → 个股分类" />
+          <KV k="筛选" v="市场观察页面。大盘环境 → 板块强弱 → 个股分类" />
           <KV k="个股分析" v="点开一只股票后的七步分析 + 学习模式；页面下半部分是你分析过什么" />
           <KV k="模拟游戏" v="实时模式、历史推演、游戏记录三个入口" />
         </div>
@@ -147,6 +159,7 @@ export function GuideView({ onBack }: { onBack: () => void }) {
       <p className="field-hint" style={{ textAlign: "center", padding: "12px 0" }}>
         数据来源：申万官网（akshare）+ 腾讯行情 + 东方财富。仅供学习研究，不构成投资建议。
       </p>
+      </div></details>
     </div>
   );
 }

@@ -44,6 +44,8 @@ import {
   type Side,
   type Trade,
 } from "@aw/game";
+import { AppIcon } from "./components/AppIcon";
+import { GameCompanion } from "./components/GameCompanion";
 import { AnalysisView } from "./components/AnalysisView";
 import { GameRulesView } from "./components/GameRulesView";
 import { GuideView } from "./components/GuideView";
@@ -131,9 +133,9 @@ type Tab = "workbench" | "analysis" | "game" | "rules" | "guide" | "settings";
 
 // 底部导航只留三条主干。三格比五格好按，也不用再猜「历史」和「设置」算不算主功能。
 const TABS: Array<{ key: Tab; label: string }> = [
-  { key: "workbench", label: "筛选" },
-  { key: "analysis", label: "个股分析" },
-  { key: "game", label: "模拟游戏" },
+  { key: "game", label: "游戏大厅" },
+  { key: "workbench", label: "市场观察" },
+  { key: "analysis", label: "学习笔记" },
 ];
 
 function errText(e: unknown): string {
@@ -152,7 +154,7 @@ function lastClose(close: Maybe[]): number | null {
 }
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("workbench");
+  const [tab, setTab] = useState<Tab>("game");
   const [settings, setSettings] = useState<AppSettings>(() => parseSettings(readLS(LS_SETTINGS)));
   const [store, setStore] = useState<LocalStore>(() => parseStore(readLS(LS_STORE)));
   // 首次访问提示：只在没看过说明时出现，点过就永久收起
@@ -207,6 +209,7 @@ export default function App() {
   const [gamePane, setGamePane] = useState<"live" | "replay" | "history">("live");
   // 传奇模式（模式 2）的关卡选择：只在没开局时出现
   const [legendOpen, setLegendOpen] = useState(false);
+  useEffect(() => { window.scrollTo({ top: 0, behavior: "auto" }); }, [tab, gamePane, legendOpen, game.status]);
   const [legendLoading, setLegendLoading] = useState<string | null>(null);
   const [legendError, setLegendError] = useState<string | null>(null);
   // 站点里发布了哪几关（读 history/index.json）。null = 还没问过。
@@ -883,75 +886,37 @@ export default function App() {
     stockByCode.get(selectedCode ?? "")?.name ?? analysis.stock?.name ?? selectedCode ?? "—";
 
   return (
-    <div className="app">
+    <div className={`app app-${tab}`}>
       <header className="app-head">
         <div className="app-head-row">
-          <h1 className="app-title">A 股趋势筛选工作台</h1>
-          <span className="app-head-actions">
-            <button type="button" className="btn btn-primary btn-tiny" onClick={openGuide}>
-              使用说明
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost btn-tiny icon-btn"
-              onClick={() => setTab("settings")}
-              aria-label="设置"
-              title="设置"
-            >
-              {/* 齿轮用图形而不是文字：底栏里删掉的那一格，在这里只需要一个通用符号 */}
-              <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path
-                  fill="currentColor"
-                  d="M12 8.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2Zm0 5.8a2.2 2.2 0 1 1 0-4.4 2.2 2.2 0 0 1 0 4.4Z"
-                />
-                <path
-                  fill="currentColor"
-                  d="M20.3 13.4c.1-.5.1-1 .1-1.4s0-.9-.1-1.4l2-1.5-1.9-3.3-2.3.9a7.6 7.6 0 0 0-2.4-1.4L15.4 3h-3.8l-.4 2.3c-.9.3-1.7.8-2.4 1.4l-2.3-.9-1.9 3.3 2 1.5a7.5 7.5 0 0 0 0 2.8l-2 1.5 1.9 3.3 2.3-.9c.7.6 1.5 1.1 2.4 1.4l.4 2.3h3.8l.4-2.3c.9-.3 1.7-.8 2.4-1.4l2.3.9 1.9-3.3-2.1-1.5Zm-1.5 2.4-1.8.7-.4.6a5.8 5.8 0 0 1-1.6 1.4l-.6.4-.1.7-.3 1.8h-2l-.3-1.8-.1-.7-.6-.4c-.6-.3-1.1-.8-1.6-1.4l-.4-.6-.7-.2-1.8-.7.7-2 .5-.6-.2-.7a6 6 0 0 1 0-2.2l.2-.7-.5-.6-.7-2 1.8-.7.7-.2.4-.6c.4-.6 1-.9 1.6-1.3l.6-.4.1-.7.3-1.8h2l.3 1.8.1.7.6.4c.6.4 1.2.7 1.6 1.3l.4.6.7.2 1.8.7-.7 2-.5.6.2.7a6 6 0 0 1 0 2.2l-.2.7.2.6.7 2Z"
-                />
-              </svg>
-            </button>
-          </span>
+          <button className="brand" type="button" onClick={() => setTab("game")} aria-label="股市练习场，返回游戏">
+            <span className="brand-mark"><svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M5 21V15M14 21V7M23 21V11" stroke="currentColor" strokeWidth="4" strokeLinecap="round"/><path d="m3 10 8-5 8 3 7-5" stroke="currentColor" strokeWidth="1.5"/></svg></span>
+            <span><strong>股市练习场</strong><small>MARKET PLAYGROUND</small></span>
+          </button>
+          <nav className="topnav" aria-label="主导航">
+            {TABS.map(t => <button key={t.key} className={`topnav-link${tab===t.key ? " active" : ""}`} type="button" onClick={() => setTab(t.key)} aria-current={tab===t.key ? "page" : undefined}><AppIcon name={t.key==="game" ? "game" : t.key==="workbench" ? "chart" : "book"}/>{t.label}</button>)}
+          </nav>
+          <div className="app-head-actions">
+            <button className="head-guide" aria-label="玩法指南" type="button" onClick={openGuide}><AppIcon name="help" size={18}/><span>玩法指南</span></button>
+            <button className="head-settings" type="button" onClick={() => setTab("settings")} aria-label="设置" title="设置"><AppIcon name="settings" size={20}/></button>
+          </div>
         </div>
-        <div className="app-head-meta">
-          <span className={`session session-${session}`}>{sessionText}</span>
-          {/* 随机模式正在玩的时候，快照名和数据日期都会泄露「这是哪一段行情」——
-              日期本身就是这个模式唯一要藏的东西，所以整条换掉 */}
-          {replay?.hideDate ? (
-            <span title="随机模式不显示日期，避免提前知道是哪一段行情">
-              数据日期 已隐藏（随机模式）
-            </span>
-          ) : (
-            <>
-              <span>快照 {bundle?.name ?? "—"}</span>
-              <span>数据日期 {metaAsOf ?? "—"}</span>
-            </>
-          )}
-        </div>
-        <div className="app-head-meta">
-          <span>
-            最后更新 {updatedText} · 来源 {quoteSourceText}
-          </span>
-          {visibleCodes.length > 0 && <span>轮询 {visibleCodes.length} 只</span>}
-        </div>
-        {live.error && (
-          <Notice tone="warn">
-            实时行情不可用：{live.error}
-            <br />
-            页面继续使用本地快照的日线数据，结论不受影响。
-          </Notice>
-        )}
-        {degraded && (
-          <Notice tone="warn">
-            行情降级提示：{degraded}
-            {missingCount > 0 ? `（${missingCount} 只没有实时价，按快照显示）` : ""}
-          </Notice>
-        )}
-        {!live.polling && !live.error && live.result === null && visibleCodes.length > 0 && (
-          <Notice tone="info">当前为「{sessionText}」，已停止实时轮询（不在交易时段不请求行情）。</Notice>
-        )}
       </header>
+      <div className="data-strip">
+        <span className="data-status"><i/> {tab === "game" && gamePane === "replay" && replay ? "历史推演" : sessionText}</span>
+        <span>{tab === "game" && gamePane === "replay" && replay ? (replay.hideDate ? "日期隐藏 · 依据当前可见信息决策" : `模拟日期 ${replay.state.config.calendar[replay.state.dayIndex]}`) : `行情快照 ${metaAsOf ?? "加载中"}`}</span>
+        <span className="data-note">虚拟资金 · 学习与体验</span>
+        <details className="data-details"><summary>数据状态</summary><div className="data-popover">
+          <p>{replay?.hideDate && tab === "game" && gamePane === "replay" ? "随机模式隐藏真实日期。" : `快照 ${bundle?.name ?? "—"} · 更新 ${updatedText}`}</p>
+          <p>实时来源 {quoteSourceText} · {visibleCodes.length}只关注标的</p>
+          {live.error && <Notice tone="warn">实时行情不可用：{live.error}。当前使用本地快照，请留意行情时间。</Notice>}
+          {degraded && <Notice tone="warn">行情降级：{degraded}{missingCount > 0 ? `（${missingCount}只标的按快照显示）` : ""}</Notice>}
+          {!live.polling && !live.error && visibleCodes.length > 0 && <p>当前为{sessionText}，非交易时段不轮询行情。</p>}
+        </div></details>
+      </div>
 
-      <main className="app-main">
+      <main className="app-main" id="main-content">
+        {tab !== "game" && <div className="page-intro"><span className="eyebrow">{tab === "workbench" ? "OBSERVE THE MARKET" : tab === "analysis" ? "LEARN FROM YOUR DECISIONS" : tab === "settings" ? "YOUR PREFERENCES" : "GET TO KNOW THE GAME"}</span><h1>{tab === "workbench" ? "市场观察" : tab === "analysis" ? "学习笔记" : tab === "settings" ? "设置" : tab === "guide" ? "每一次练习，都从看懂开始。" : "交易规则"}</h1><p>{tab === "workbench" ? "从大盘到个股，看看当前市场发生了什么。此处展示的是当前行情。" : tab === "analysis" ? "留下观察依据，回看自己的判断。" : tab === "settings" ? "调整行情刷新、数据来源与学习助手。" : "先熟悉操作，再在真实的市场历史中练习。"}</p></div>}
         {loading && <Notice tone="info">正在加载快照…</Notice>}
         {loadError && (
           <Notice tone="danger" role="alert">
@@ -1071,7 +1036,7 @@ export default function App() {
         */}
         {!loading && tab === "game" && !legendOpen && (
           <div className="view">
-            <div className="chips pane-switch">
+            <div className="chips pane-switch" aria-label="游戏空间">
               <button
                 type="button"
                 className={`chip${gamePane === "live" ? " chip-active" : ""}`}
@@ -1081,7 +1046,7 @@ export default function App() {
                   setLegendOpen(false);
                 }}
               >
-                实时模式
+                {game.status === "playing" ? "实时账户" : "游戏大厅"}
               </button>
               {replay && (
                 <button
@@ -1144,6 +1109,7 @@ export default function App() {
         {!loading && tab === "game" && gamePane === "live" && legendOpen && (
           <LevelPicker
             ready={legendReady}
+            availableIds={legendIds ?? undefined}
             loadingId={legendLoading}
             error={legendError}
             onStart={handleStartLevel}
@@ -1192,7 +1158,7 @@ export default function App() {
 
         {tab === "rules" && <GameRulesView onBack={() => setTab("game")} />}
 
-        {tab === "guide" && <GuideView onBack={() => setTab("workbench")} />}
+        {tab === "guide" && <GuideView onBack={() => { setTab("game"); setGamePane("live"); setLegendOpen(false); }} />}
 
         {/*
           设置不再占底部一格，从页头右上角的齿轮进。
@@ -1204,7 +1170,7 @@ export default function App() {
             settings={settings}
             onChange={setSettings}
             rules={rules}
-            onBack={() => setTab("workbench")}
+            onBack={() => setTab("game")}
             onReload={() => setReloadNonce((n) => n + 1)}
             onClearLocal={clearLocal}
             snapshotName={bundle?.name ?? null}
@@ -1218,6 +1184,8 @@ export default function App() {
             quoteSourceText={quoteSourceText}
           />
         )}
+        {!loading && tab === "game" && <GameCompanion onGuide={openGuide} context={gamePane === "replay" ? "replay" : legendOpen ? "chapter" : game.status === "playing" ? "live" : replay ? "resume" : "lobby"}/>}
+        <footer className="app-footer"><span>MARKET PLAYGROUND</span><span>每一次判断，都值得复盘。</span><span>所有交易均为虚拟模拟</span></footer>
       </main>
 
       <nav className="tabbar" aria-label="主导航">
@@ -1229,6 +1197,7 @@ export default function App() {
             onClick={() => setTab(t.key)}
             aria-current={tab === t.key ? "page" : undefined}
           >
+            <AppIcon name={t.key === "game" ? "game" : t.key === "workbench" ? "chart" : "book"} size={20}/>
             {t.label}
           </button>
         ))}

@@ -28,6 +28,53 @@ export const BOARD_NAME: Record<Board, string> = {
   bse: "北交所",
 };
 
+/**
+ * 市场分组。规则差异不止「哪个板块」，还有「哪个市场」这一层。
+ *
+ * ⚠️ 这里的解析必须和 `@aw/data` 的 `codes.ts` **保持一致**：那边负责把代码写进分片，
+ * 这边负责读出来。两边对不上的症状是「A 股按美股规则成交」—— 而且不会报错，
+ * 只会安静地少收一笔印花税。
+ *
+ * 认不出的一律按 CN：池子里绝大多数是 A 股，猜错的代价最小。
+ */
+export type MarketGroup = "CN" | "HK" | "US";
+
+export function marketGroupOf(code: string): MarketGroup {
+  if (/^\d{4,5}\.HK$/i.test(code)) return "HK";
+  if (/^[A-Z][A-Z0-9.\-]{0,9}\.US$/i.test(code)) return "US";
+  return "CN";
+}
+
+export const MARKET_NAME: Record<MarketGroup, string> = {
+  CN: "A 股",
+  HK: "港股",
+  US: "美股",
+};
+
+/** 用哪个币种报价。账户始终以人民币记账，这里说的是**标的自己的报价币**。 */
+export function currencyOfMarket(market: MarketGroup): "CNY" | "HKD" | "USD" {
+  if (market === "HK") return "HKD";
+  if (market === "US") return "USD";
+  return "CNY";
+}
+
+export const CURRENCY_NAME: Record<"CNY" | "HKD" | "USD", string> = {
+  CNY: "人民币",
+  HKD: "港币",
+  USD: "美元",
+};
+
+/**
+ * 这个市场有没有涨跌停。
+ *
+ * A 股有，港股和美股都没有 —— 一天跌 20% 在美股是寻常事。
+ * 这不是细节：把 ±10% 套到美股上，玩家会发现自己**买不进当天涨了 12% 的英伟达**，
+ * 而现实里那笔单子会正常成交。
+ */
+export function hasPriceLimit(market: MarketGroup): boolean {
+  return market === "CN";
+}
+
 export interface FeeRules {
   /** 佣金费率（双向） */
   commissionRate: number;
