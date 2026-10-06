@@ -214,9 +214,13 @@ summary::-webkit-details-marker { display: none; }
    * 两百多像素，剩下的给标题块，屈指可数。而中文的 min-content 是**一个字**：
    * 「今日信号」竖着排成「今日 / 信号」，「全池 679 只，按信号强度排序」一列一字。
    * 手机上没人会去读这种竖排标题，宁可把 chip 排换到下一行。
+   *
+   * 换行之后 `justify-content` 仍然是 `flex-end`：chip 排与折叠按钮都靠右，
+   * 与桌面端一致。左边对齐会让「展开 ▾」孤零零挂在第二行行首，
+   * 而它明明是整张卡的控件，靠右才落在拇指够得到的那一侧。
    */
   .card-head { flex-direction: column; align-items: stretch; padding: 12px 12px 0; gap: 8px; }
-  .card-head-right { justify-content: flex-start; }
+  .card-head-right { justify-content: flex-end; }
   .card-head-text { min-width: 0; }
   .card-body { padding: 10px 12px 12px; gap: 10px; }
   .game-stage > .card:nth-of-type(1) .metric-grid { gap: 10px; }

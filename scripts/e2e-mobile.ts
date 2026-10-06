@@ -438,6 +438,38 @@ async function main(): Promise<void> {
   await sleep(400);
   check("展开后行回来了", (await signalRows()) === beforeFold, `实际 ${await signalRows()} 行`);
 
+  // 折叠按钮与 chip 排都要贴着卡片的**右边**。
+  // 换行之后 `justify-content` 若是 flex-start，按钮会孤零零挂在第二行行首 ——
+  // 它明明是整张卡的控件，靠右才落在拇指够得到的那一侧。
+  const align = JSON.parse(await evaluate<string>(`
+    const out = [];
+    for (const card of document.querySelectorAll(".card")) {
+      const fold = card.querySelector(".card-fold");
+      if (!fold) continue;
+      const chips = card.querySelector(".chips");
+      const cr = card.getBoundingClientRect();
+      const fr = fold.getBoundingClientRect();
+      out.push({
+        title: (card.querySelector(".card-title") || {}).textContent || "?",
+        foldGap: Math.round(cr.right - fr.right),
+        chipsGap: chips ? Math.round(cr.right - chips.getBoundingClientRect().right) : null,
+      });
+    }
+    return JSON.stringify(out);
+  `)) as Array<{ title: string; foldGap: number; chipsGap: number | null }>;
+  console.log(`    折叠按钮距卡片右边：${align.map((a) => `${a.title} ${a.foldGap}px`).join(" | ")}`);
+  check("四张卡的折叠按钮都靠右", align.length === 4, `实际 ${align.length} 张`);
+  check(
+    "折叠按钮贴着卡片右边（≤ 24px）",
+    align.every((a) => Math.abs(a.foldGap) <= 24),
+    align.map((a) => `${a.title} ${a.foldGap}px`).join(", "),
+  );
+  check(
+    "有 chip 排的那张，chip 也靠右",
+    align.filter((a) => a.chipsGap !== null).every((a) => Math.abs(a.chipsGap as number) <= 24),
+    align.filter((a) => a.chipsGap !== null).map((a) => `${a.title} ${a.chipsGap}px`).join(", "),
+  );
+
   const sizes = JSON.parse(await evaluate<string>(`
     const out = {};
     for (const [k, sel] of Object.entries({
