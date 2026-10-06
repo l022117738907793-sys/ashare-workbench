@@ -42,6 +42,15 @@ function check(name: string, cond: boolean, detail = ""): void {
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** 轮询等待一个条件成立；超时返回 false，由调用方决定算不算失败 */
+async function waitFor(expr: string, tries = 60): Promise<boolean> {
+  for (let i = 0; i < tries; i += 1) {
+    if (await evaluate<boolean>(`return ${expr};`)) return true;
+    await sleep(250);
+  }
+  return false;
+}
+
 if (!existsSync(join(DIST, "index.html"))) {
   console.error("先构建：npm run build --workspace @aw/web");
   process.exit(1);
@@ -139,6 +148,31 @@ const OVERFLOW = `
       .filter((e) => e.getBoundingClientRect().right > window.innerWidth + 1)
       .slice(0, 3)
       .map((e) => (e.className && typeof e.className === "string" ? e.className : e.tagName) + "@" + Math.round(e.getBoundingClientRect().right)),
+  });
+`;
+
+/**
+ * 量第一张卡片的标题栏。
+ *
+ * 报的四个数里 `ratio` 与上下关系是关键：标题块窄到几十像素时，
+ * 中文会在**一个字**处断行（min-content 就是一个字），
+ * 「全池 679 只，按信号强度排序」会竖着排成一列。
+ */
+const CARD_HEAD = `
+  const h = document.querySelector(".card-head");
+  if (!h) return "NO_CARD";
+  const t = h.querySelector(".card-head-text");
+  const r = h.querySelector(".card-head-right");
+  if (!t) return "NO_TEXT";
+  const hb = h.getBoundingClientRect(), tb = t.getBoundingClientRect();
+  const rb = r ? r.getBoundingClientRect() : null;
+  return JSON.stringify({
+    card: Math.round(hb.width),
+    text: Math.round(tb.width),
+    ratio: Math.round((tb.width / hb.width) * 100),
+    rightTop: rb ? Math.round(rb.top) : null,
+    textBottom: Math.round(tb.bottom),
+    title: (h.querySelector(".card-title") || {}).textContent || "",
   });
 `;
 
@@ -324,8 +358,41 @@ async function main(): Promise<void> {
   const shortText = await evaluate<string>(TEXT);
   check("短屏下「下一天」「结束」仍在", shortText.includes("下一天") && shortText.includes("结束"));
 
-  // ── 七、控制台 ─────────────────────────────────────────────
-  console.log("\n七、控制台");
+  // ── 七、卡片标题栏不竖排 ───────────────────────────────────
+  //
+  // 手机上曾出现：`.card-head` 是 flex 行、`.card-head-right` 是 `flex: 0 0 auto`，
+  // 四个信号 chip 占掉两百多像素，标题块被压到几十像素，中文于是**一列一字**。
+  // 修法是窄屏下把标题与 chip 排改成上下叠。这里量的是宽度占比与上下关系，
+  // 不是某一版文案 —— 文案会变，被挤扁这件事不会。
+  console.log("\n七、卡片标题栏不竖排");
+  await resize(390, 844);
+  check("点得到「市场观察」", (await evaluate<string>(CLICK("市场观察"))) === "OK");
+  const gotCard = await waitFor(`document.querySelector(".card-head") !== null`);
+  check("卡片渲染出来了", gotCard);
+  const head = await evaluate<string>(CARD_HEAD);
+  console.log(`    card-head：${head}`);
+  if (typeof head === "string" && head.startsWith("{")) {
+    const h = JSON.parse(head) as { card: number; text: number; ratio: number; rightTop: number | null; textBottom: number; title: string };
+    check("标题块拿到卡片的大部分宽度", h.ratio >= 60, `${h.text}/${h.card} = ${h.ratio}%`);
+    check("标题块至少 240px 宽（放得下一行副标题）", h.text >= 240, `${h.text}px`);
+    check(
+      "chip 排改到标题块下面一行",
+      h.rightTop === null || h.rightTop >= h.textBottom - 1,
+      `chip top ${h.rightTop} vs 标题 bottom ${h.textBottom}`,
+    );
+    check("标题文字还在（今日信号）", h.title.includes("今日信号"), h.title);
+  } else {
+    check("量得到卡片标题栏", false, head);
+  }
+  const marketOverflow = JSON.parse(await evaluate<string>(OVERFLOW)) as { vw: number; sw: number; worst: string[] };
+  check(
+    "390px 市场观察页不横向溢出",
+    marketOverflow.sw <= marketOverflow.vw + 1,
+    `scrollWidth ${marketOverflow.sw} > 视口 ${marketOverflow.vw}${marketOverflow.worst.length ? ` · ${marketOverflow.worst.join(", ")}` : ""}`,
+  );
+
+  // ── 八、控制台 ─────────────────────────────────────────────
+  console.log("\n八、控制台");
   const errors = await evaluate<string[]>(`return window.__e2eErrors || [];`);
   check("没有未捕获异常", errors.length === 0, errors.slice(0, 3).join(" | "));
 

@@ -197,7 +197,18 @@ summary::-webkit-details-marker { display: none; }
   .replay-result-empty strong { font-size: 22px; }
   .replay-result-empty small { font-size: 11px; line-height: 1.55; }
   .game-stage-heading h1 { font-size: 22px; margin: 4px 0; }
-  .card-head { padding: 12px 12px 0; gap: 8px; }
+  /*
+   * 卡片标题栏：标题与右侧 chip 排**上下**叠。
+   *
+   * `.card-head` 是 flex 行，`.card-head-right` 是 `flex: 0 0 auto` —— 它按内容宽度占位、
+   * 一步不让。四个信号 chip（买入 49 / 增持 101 / 减持 5 / 卖出 524）在 402px 上要
+   * 两百多像素，剩下的给标题块，屈指可数。而中文的 min-content 是**一个字**：
+   * 「今日信号」竖着排成「今日 / 信号」，「全池 679 只，按信号强度排序」一列一字。
+   * 手机上没人会去读这种竖排标题，宁可把 chip 排换到下一行。
+   */
+  .card-head { flex-direction: column; align-items: stretch; padding: 12px 12px 0; gap: 8px; }
+  .card-head-right { justify-content: flex-start; }
+  .card-head-text { min-width: 0; }
   .card-body { padding: 10px 12px 12px; gap: 10px; }
   .game-stage > .card:nth-of-type(1) .metric-grid { gap: 10px; }
   .game-stage .card-head { padding: 12px 12px 0; }
