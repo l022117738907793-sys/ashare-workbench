@@ -244,8 +244,8 @@ check("隐藏日期时显示第几天", /第\s*\d+\s*天/.test(hidden), hidden);
 check("隐藏日期时不含年份", !hidden.includes(calendar[START].slice(0, 4)), hidden);
 eq("显示日期时给出具体交易日", displayDate(st, false), replayDate(st));
 
-// ── 9. 撤单与快进 ────────────────────────────────────────────
-console.log("\n九、撤单与快进");
+// ── 9. 撤单与连续推进 ───────────────────────────────────────
+console.log("\n九、撤单与连续推进");
 const withPending = placeOrder(state0, { code: target.code, side: "buy", shares: 100 });
 if (withPending.ok) {
   const id = withPending.state.pending[0].id;
@@ -255,8 +255,8 @@ if (withPending.ok) {
   eq("撤单后推进不产生成交", afterCancel.account.trades.length, 0);
 }
 const ticked = advanceDays(state0, 30);
-eq("快进 30 天走到正确日期", replayDate(ticked), calendar[START + 30]);
-eq("快进每一天都记入权益曲线", ticked.equity.length, 31);
+eq("连续推进 30 天走到正确日期", replayDate(ticked), calendar[START + 30]);
+eq("推进每一天都记入权益曲线", ticked.equity.length, 31);
 
 // ── 10. 全程无建议 ───────────────────────────────────────────
 console.log("\n十、输出里没有买卖建议");

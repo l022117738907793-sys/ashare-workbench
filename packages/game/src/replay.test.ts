@@ -273,7 +273,7 @@ describe("挂单校验", () => {
   });
 });
 
-describe("推进与快进", () => {
+describe("推进", () => {
   it("advanceDay 逐日走，净值曲线一天一个点", () => {
     let s = createReplay(config());
     s = advanceDays(s, 3);

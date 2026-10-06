@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MarketResult, SectorResult, StockMetrics } from "@aw/core";
 import { sourceLabel, type Quote } from "@aw/data";
+import { MARKET_NAME, type MarketGroup } from "@aw/game";
 import {
   fmtNum,
   fmtPct,
@@ -24,6 +25,19 @@ export interface WorkbenchProps {
   metricsByCode: Map<string, StockMetrics>;
   sectorCode: string | null;
   onSelectSector: (code: string | null) => void;
+  /**
+   * 市场分档（「个股分类」的第二种切法，与板块筛选**叠加**）：null = 全部市场。
+   *
+   * 判据是**代码**（`marketGroupOf`），不是快照里的 `market` 字段 —— A 股那批 619 只
+   * 根本没有这个键，而且代码是唯一在选股和下单两边都解析过的东西：界面上分到「港股」
+   * 而成交按 A 股规则走，是这里最难看的一种不一致。
+   */
+  marketFilter: MarketGroup | null;
+  onSelectMarketFilter: (m: MarketGroup | null) => void;
+  /** 池子里**实际有标的**的市场，已按固定顺序排好。只有一个（或没有）时这一排整个不显示。 */
+  marketOptions: MarketGroup[];
+  /** 各市场的只数。**按「还没被市场筛掉」的那份算**，否则点进港股之后其它分档就消失了 */
+  marketCounts: Record<string, number>;
   query: string;
   onQuery: (q: string) => void;
   onOpenStock: (code: string) => void;
@@ -52,6 +66,10 @@ export function WorkbenchView(props: WorkbenchProps) {
     metricsByCode,
     sectorCode,
     onSelectSector,
+    marketFilter,
+    onSelectMarketFilter,
+    marketOptions,
+    marketCounts,
     query,
     onQuery,
     onOpenStock,
@@ -143,11 +161,38 @@ export function WorkbenchView(props: WorkbenchProps) {
   }, [focusStocks]);
   const isOpen = (type: string, idx: number) =>
     closed[type] === undefined ? idx === firstNonEmpty : !closed[type];
-  const toggle = (type: string, idx: number) =>
+  const toggle = (type: string, idx: number) => {
     setClosed((s) => ({ ...s, [type]: isOpen(type, idx) }));
+    // 重新展开时回到「只展开三个」：折起来再打开通常是想换个角度看，
+    // 而不是接着上次看到第几百只。顺带把 DOM 收回去，等于每次展开都重新计时。
+    setShown((r) => ({ ...r, [stockKey(type)]: REVEAL_STEP }));
+  };
+
+  /**
+   * 每次展开只放这么多条，想接着看再点「继续展开」。
+   *
+   * 这不是装饰：③「排除」一组有四百多只，每只下面还挂一串 `ReasonList`，
+   * 一次挂上去就是几千个节点，点「展开」要卡一下。分段渲染把这一下摊成几次。
+   * ② 板块有三十来个，理由一样（每个板块也带着自己的 ReasonList）。
+   */
+  const [shown, setShown] = useState<Record<string, number>>({});
+  const revealCount = (key: string) => shown[key] ?? REVEAL_STEP;
+  const revealMore = (key: string) =>
+    setShown((s) => ({ ...s, [key]: (s[key] ?? REVEAL_STEP) + REVEAL_STEP }));
+
+  /**
+   * 换了筛选条件就让所有「继续展开」退回起点。
+   *
+   * 不退回的话，上一步已经把某个分组摊到第 300 只，换个股池小的筛选条件之后
+   * 一进来就是全展开 —— 优化等于白做，而且是在最没必要的时候白做。
+   */
+  useEffect(() => {
+    setShown({});
+  }, [query, marketFilter]);
 
   const selectedSector = sectors.find((s) => s.code === sectorCode) ?? null;
   const signalByCode = useMemo(() => new Map(signals.map((s) => [s.code, s])), [signals]);
+  const shownSectors = Math.min(revealCount(SECTORS_KEY), sectors.length);
 
   return (
     <div className="view">
@@ -181,8 +226,9 @@ export function WorkbenchView(props: WorkbenchProps) {
         {sectors.length === 0 ? (
           <EmptyHint>快照里没有板块数据。</EmptyHint>
         ) : (
+          <>
           <ul className="sector-list">
-            {sectors.map((s) => {
+            {sectors.slice(0, shownSectors).map((s) => {
               const active = s.code === sectorCode;
               return (
                 <li key={s.code} className={`sector-row${active ? " sector-row-active" : ""}`}>
@@ -218,6 +264,12 @@ export function WorkbenchView(props: WorkbenchProps) {
               );
             })}
           </ul>
+          {shownSectors < sectors.length && (
+            <button type="button" className="btn btn-ghost reveal-more" onClick={() => revealMore(SECTORS_KEY)}>
+              继续展开（还有 {sectors.length - shownSectors} 个板块）
+            </button>
+          )}
+          </>
         )}
       </Card>
 
@@ -258,19 +310,50 @@ export function WorkbenchView(props: WorkbenchProps) {
             onChange={(e) => onQuery(e.target.value)}
             aria-label="按代码或名称筛选个股"
           />
-          {(query !== "" || sectorCode) && (
+          {(query !== "" || sectorCode || marketFilter !== null) && (
             <button
               type="button"
               className="btn btn-ghost"
               onClick={() => {
                 onQuery("");
                 onSelectSector(null);
+                onSelectMarketFilter(null);
               }}
             >
               重置
             </button>
           )}
         </div>
+
+        {/*
+          市场分档。位置在类型 chip 之上：它是「先看哪个市场的股票」，
+          比「看哪一类信号」更靠前一层。
+          只有一个市场（或市场都没识别出来）时整排不显示 —— 一个只能选「全部」的分档
+          占着一行，比没有更碍事。
+        */}
+        {marketOptions.length > 1 && (
+          <div className="chips chips-market">
+            <button
+              type="button"
+              className={`chip${marketFilter === null ? " chip-active" : ""}`}
+              onClick={() => onSelectMarketFilter(null)}
+              aria-pressed={marketFilter === null}
+            >
+              全部市场 {Object.values(marketCounts).reduce((n, v) => n + v, 0)}
+            </button>
+            {marketOptions.map((m) => (
+              <button
+                key={m}
+                type="button"
+                className={`chip${marketFilter === m ? " chip-active" : ""}`}
+                onClick={() => onSelectMarketFilter(marketFilter === m ? null : m)}
+                aria-pressed={marketFilter === m}
+              >
+                {MARKET_NAME[m]} {marketCounts[m] ?? 0}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="chips">
           {groups.map((g, idx) => (
@@ -291,6 +374,8 @@ export function WorkbenchView(props: WorkbenchProps) {
         {groups.map((g, idx) => {
           if (g.items.length === 0) return null;
           const open = isOpen(g.type, idx);
+          const key = stockKey(g.type);
+          const shownItems = Math.min(revealCount(key), g.items.length);
           return (
             <section key={g.type} className="group">
               <button
@@ -308,8 +393,9 @@ export function WorkbenchView(props: WorkbenchProps) {
                 <Notice tone="danger">{NOT_ENOUGH_BANNER} 下列个股可用数据不足，不做任何推断。</Notice>
               )}
               {open && (
+                <>
                 <ul className="stock-list">
-                  {g.items.map((r) => {
+                  {g.items.slice(0, shownItems).map((r) => {
                     const m = metricsByCode.get(r.code);
                     const q = quotesByCode.get(r.code);
                     return (
@@ -345,6 +431,12 @@ export function WorkbenchView(props: WorkbenchProps) {
                     );
                   })}
                 </ul>
+                {shownItems < g.items.length && (
+                  <button type="button" className="btn btn-ghost reveal-more" onClick={() => revealMore(key)}>
+                    继续展开（还有 {g.items.length - shownItems} 只）
+                  </button>
+                )}
+                </>
               )}
             </section>
           );
@@ -362,6 +454,12 @@ const STOCK_LAYER_ID = "layer-stocks";
 /** 闪一下的时长，要和 styles.css 里 `.card-flash` 的 animation-duration 对齐 */
 const FLASH_MS = 1500;
 const SECTOR_LAYER_ID = "layer-sectors";
+
+/** 「继续展开」每点一次多放这么多条 */
+const REVEAL_STEP = 3;
+/** 展开进度在 `shown` 里的键：③ 每个分组各算各的，② 整列共用一个 */
+const stockKey = (type: string) => `stock:${type}`;
+const SECTORS_KEY = "sectors";
 
 /**
  * 把某个元素滚到「粘性顶栏下面」。

@@ -568,6 +568,24 @@ textarea {
   gap: 6px;
 }
 
+/*
+ * 市场分档（全部市场 / A 股 / 港股 / …）压在类型 chip 上面一行。
+ * 用一条下边距把它和下面那排分开，否则两排 chip 长得很像、会被读成同一组。
+ */
+.chips-market {
+  margin-bottom: 8px;
+}
+
+/*
+ * 「继续展开（还有 N 只）」。
+ * 撑满一行：它每次只放三条出来，做小了会被当成某一行的一部分而点不到。
+ */
+.reveal-more {
+  display: block;
+  width: 100%;
+  margin: 8px 0 4px;
+}
+
 /* 游戏页顶部：实时模式 / 历史推演 的切换条。两半分满，像分段控件。 */
 .pane-switch {
   flex-wrap: nowrap;

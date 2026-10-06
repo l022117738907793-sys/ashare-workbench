@@ -127,7 +127,7 @@ try {
   check("简报页出来了", brief.includes("进场那天能看到的"), brief.slice(0, 80));
   const enter = await evaluate<string>(CLICK("进入 2020-01-14"));
   check("点得到「进入」（说明 ready=true，分片清单读到了）", enter === "OK", enter);
-  const inLevel = await waitFor(`document.body.innerText.includes("走一天") && document.body.innerText.includes("待成交委托")`, "关卡载入");
+  const inLevel = await waitFor(`document.body.innerText.includes("下一天") && document.body.innerText.includes("待成交委托")`, "关卡载入");
   check("线上把 2020 年那一关的行情下下来并进去了", inLevel);
 
   const lv = await evaluate<string>(`return document.body.innerText;`);
@@ -136,7 +136,7 @@ try {
   check("选股票池是分片里的 150 只", opts.length === 150, `实际 ${opts.length} 只`);
   check("当年的票在池子里", opts.includes("000725.SZ") && opts.includes("600519.SH"), opts.slice(0, 5).join(", "));
 
-  console.log("\n四、下一单、走一天");
+  console.log("\n四、下一单、下一天");
   await evaluate(`
     const input = document.querySelector('input[list]');
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
@@ -149,7 +149,7 @@ try {
   `);
   await evaluate(CLICK("挂单"));
   await sleep(400);
-  await evaluate(CLICK("走一天"));
+  await evaluate(CLICK("下一天"));
   await sleep(800);
   const after = await evaluate<string>(`return document.body.innerText;`);
   check("成交了，并且注明价格来自当日开盘价", after.includes("开盘价"), after.slice(0, 80));

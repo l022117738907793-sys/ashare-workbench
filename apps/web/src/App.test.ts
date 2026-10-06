@@ -29,6 +29,7 @@ import {
   parseStore,
   pushAnalysed,
   pushLearning,
+  marketsPresent,
   readLS,
   reasonStatus,
   reasonValueText,
@@ -181,6 +182,54 @@ describe("个股过滤", () => {
     expect(filterStockResults(list, byCode, { industryCode: "T1.SI" }).map((r) => r.code)).toEqual(["a"]);
     expect(filterStockResults(list, byCode, { query: "b" }).map((r) => r.code)).toEqual(["b"]);
     expect(filterStockResults(list, byCode, { industryCode: "T1.SI", query: "b" })).toHaveLength(0);
+  });
+
+  /**
+   * 市场分档的判据必须是**代码**，不是快照里的 `market` 字段 ——
+   * 真实快照里 A 股那 619 只根本没有这个键，只有港股/日韩才有。
+   * 按字段筛的话 A 股会整批消失，而且看着像是「今天 A 股没数据」。
+   */
+  it("按市场过滤走代码推断：没有 market 字段的 A 股照样算 A 股", () => {
+    const list = [
+      stockResult("600519.SH", "趋势观察"),
+      stockResult("00700.HK", "趋势观察"),
+      stockResult("7203.JP", "趋势观察"),
+      stockResult("005930.KR", "排除"),
+    ];
+    const byCode = new Map<string, StockData>();
+    expect(filterStockResults(list, byCode, { market: "CN" }).map((r) => r.code)).toEqual(["600519.SH"]);
+    expect(filterStockResults(list, byCode, { market: "HK" }).map((r) => r.code)).toEqual(["00700.HK"]);
+    expect(filterStockResults(list, byCode, { market: "JP" }).map((r) => r.code)).toEqual(["7203.JP"]);
+    expect(filterStockResults(list, byCode, { market: "KR" }).map((r) => r.code)).toEqual(["005930.KR"]);
+    // null = 不分市场，全部留下（这是默认值，老调用方一个字都不用改）
+    expect(filterStockResults(list, byCode, {})).toHaveLength(4);
+    expect(filterStockResults(list, byCode, { market: null })).toHaveLength(4);
+  });
+
+  it("市场分档与板块筛选是叠加的，不是二选一", () => {
+    const list = [stockResult("600519.SH", "趋势观察"), stockResult("00700.HK", "趋势观察")];
+    const byCode = new Map([
+      ["600519.SH", stockData("600519.SH", "T1.SI")],
+      ["00700.HK", stockData("00700.HK", "T1.SI")],
+    ]);
+    expect(
+      filterStockResults(list, byCode, { industryCode: "T1.SI", market: "HK" }).map((r) => r.code),
+    ).toEqual(["00700.HK"]);
+  });
+
+  it("池子里没有的市场不出现在分档里 —— 空分档点进去什么都没有", () => {
+    expect(marketsPresent([stockResult("600519.SH", "趋势观察")])).toEqual(["CN"]);
+    expect(
+      marketsPresent([stockResult("005930.KR", "排除"), stockResult("600519.SH", "趋势观察")]),
+    ).toEqual(["CN", "KR"]);
+    // 顺序固定：本土在前，不按出现顺序
+    expect(
+      marketsPresent([
+        stockResult("7203.JP", "排除"),
+        stockResult("00700.HK", "排除"),
+        stockResult("600519.SH", "排除"),
+      ]),
+    ).toEqual(["CN", "HK", "JP"]);
   });
 });
 

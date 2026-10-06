@@ -10,7 +10,7 @@
  *    交易日、或者抓的时候失败了）。文件不在就返回空，绝不报错、绝不编造 ——
  *    历史推演最不能出的错就是让玩家以为「那天没大事」，实际是我们没数据。
  *    所以界面必须把「抓到了 0 条」和「没抓到这一天」分开说。
- * 2. **一天只拉一次。** 快进是 1.5 秒一天，玩家来回翻也常见，模块级缓存
+ * 2. **一天只拉一次。** 玩家来回翻也常见，模块级缓存
  *    按日期存住，重复访问不再发请求。缓存只在内存里，刷新页面就重来。
  * 3. **不预取未来的日子。** 只拉当前这一天 —— 提前把 26 天全下下来，等于把
  *    后面的新闻放进了内存，哪天有人手滑渲染出来就是剧透。
@@ -56,7 +56,7 @@ export function useDayNews(date: string, enabled = true): DayNewsState {
     let alive = true;
     setState({ news: null, loading: true, missing: false });
     void loadDayNews(key).then((res) => {
-      // 组件卸载了、或者玩家已经快进到别的日子，就不要拿旧结果覆盖新状态
+      // 组件卸载了、或者玩家已经推进到别的日子，就不要拿旧结果覆盖新状态
       if (!alive) return;
       cache.set(key, res);
       setState({ news: res, loading: false, missing: res === null });

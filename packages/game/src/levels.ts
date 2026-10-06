@@ -101,7 +101,7 @@ export const LEVELS: ReplayLevel[] = [
   {
     id: "2020-07-02",
     order: 5,
-    title: "涨得让人坐不住",
+    title: "券商点火",
     subtitle: "2020 年 6–7 月 · 快速拉升的起点",
     startDate: "2020-06-18",
     days: LEVEL_DAYS,
@@ -127,8 +127,8 @@ export const LEVELS: ReplayLevel[] = [
   {
     id: "2021-09-01",
     order: 7,
-    title: "最猛的那一段",
-    subtitle: "2021 年 8–9 月 · 周期股冲顶",
+    title: "周期股冲顶",
+    subtitle: "2021 年 8–9 月 · 上游资源涨到最后一段",
     startDate: "2021-08-20",
     days: LEVEL_DAYS,
     briefing: [

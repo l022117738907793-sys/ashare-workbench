@@ -185,8 +185,8 @@ function ReplayEntryCard(props: {
     <section className="game-replay-entry">
       <div>
         <span className="game-eyebrow">另一段市场旅程</span>
-        <h2>{replayInProgress ? "您的历史推演还在继续" : "想让时间走得更快？"}</h2>
-        <p>{replayInProgress ? "历史盘与实时盘各自保存，回去就能接着玩。" : "回到真实历史，以次日开盘价成交。支持 1.5 秒一天快进，期间仍可挂单。"}</p>
+        <h2>{replayInProgress ? "您的历史推演还在继续" : "想回到真实的某一天？"}</h2>
+        <p>{replayInProgress ? "历史盘与实时盘各自保存，回去就能接着玩。" : "回到真实历史，以次日开盘价成交。看清楚了再推进到下一天，随时可以退出。"}</p>
       </div>
       <div className="btn-row">
         {replayInProgress ? (

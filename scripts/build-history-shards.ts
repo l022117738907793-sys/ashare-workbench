@@ -16,6 +16,17 @@
  * 所以每个市场各自定额（见 MARKET_QUOTA），港股/美股用不完的名额还给 A 股，
  * 每关总数仍然是 --per-level。
  *
+ * ── 价格是**当年盘面价**（不复权），不是前复权 ────────────────────
+ * `data/history-cache/` 现在存的是不复权价：2020-06-17 的贵州茅台是 1405.0，
+ * 就是当年盘口上那个数。前复权那份还在 `data/history-cache-qfq/`，但**本脚本不读它**。
+ * 理由是玩家记得的是当年那个价位 —— 拿今天的复权因子回算出来的 1189.16 谁都不认识。
+ *
+ * 代价必须说清楚：**除权除息日会出现一个跳空缺口**（茅台 6 月的分红日会凭空跌 2%），
+ * 而且这个缺口在「显示的价格」和「账户的盈亏」里是一致的 —— 我们不分红，
+ * 所以持仓确实会少掉那 2%。前复权能抹平这个缺口，但抹平的只是数字，
+ * 分红该给谁还是没给，反而会让「涨跌幅显示 0% 而钱少了」对不上账。
+ * 两害相权取一致：宁可有缺口，不要两处对不上。
+ *
  * ── 境外的「缺」和 A 股不是一回事，必须分开处理 ──────────────────
  * A 股：主日历就是沪深300 的交易日，某天在缓存里查不到 = 停牌或数据缺失
  *       → 收盘价留 null；窗口内缺得太多（> MAX_MISSING_RATIO）整只不要。
@@ -39,6 +50,11 @@ import { join } from "node:path";
 import { LEVELS } from "../packages/game/src/levels";
 
 const ROOT = process.cwd();
+/**
+ * 不复权（当年盘面价）—— 默认口径，也是**唯一**被本脚本读进来的缓存。
+ * 目录里同时躺着 A 股（`market` 字段缺省 = SH）和境外（港股/美股，带 `market`/`currency`），
+ * 境外那 42 个文件是 fetch_overseas.py 写的，从来就没复权过。
+ */
 const CACHE = join(ROOT, "data", "history-cache");
 const FX_CACHE = join(ROOT, "data", "fx-cache");
 const OUT = join(ROOT, "data", "history");
@@ -138,11 +154,11 @@ function lastIndexBefore(sorted: string[], day: string): number {
 /**
  * 四列里非正价格的个数。
  *
- * 为什么需要这个守卫：**前复权（qfq）是从今天往回缩**，高股息老股历年派息累加到一定程度，
- * 历史价会被扣成负数。实测 SBUX 2016 年整条序列是负的（-37.7 起），AVGO/MCD/COST 同理。
- * 而负价格进引擎**不会报错**：负 ÷ 负 的涨跌幅是正数，负数金额又小于可用资金，
- * 一字跌停的边界判定也拦不住 —— 引擎会一路放行，最后在界面上显示一个负的股价。
- * 所以宁可不发这一只，也不能让它进分片。
+ * 这个守卫是为**前复权**写的：qfq 从今天往回缩，高股息老股历年派息累加到一定程度，
+ * 历史价会被扣成负数（实测 SBUX 2016 年整条序列是负的，-37.7 起；AVGO/MCD/COST 同理）。
+ * 换成不复权之后负价格不会再出现，但守卫留着 —— 它挡的是「负价格进引擎」这件事本身：
+ * 负价格不报错（负 ÷ 负 得正涨跌幅、负数金额又小于可用资金），会一路放行到界面上
+ * 显示一个负的股价。这种保险比省一次循环便宜。
  */
 function nonPositiveCount(cols: Array<Array<number | null>>): number {
   let n = 0;
@@ -359,8 +375,8 @@ for (const file of files) {
     if (n === 0) continue;
 
     // 窗口第一天没有「前一天」可比，可玩家进场那天就想看到当天的涨跌幅。
-    // 缓存里有整段历史，顺手把窗口前一天的前复权收盘价也带上 ——
-    // 一个数字，十个分片加起来几百字节。
+    // 缓存里有整段历史，顺手把窗口前一天的收盘价也带上 —— 一个数字，
+    // 十个分片加起来几百字节。（不复权口径下它就是当年的那个价。）
     // 注意用严格早于窗口开头的那一天：境外的 idx[0] 可能落在窗口之前（休市填充），
     // 直接取 idx[0]-1 会取到窗口内的价，涨跌幅就成了 0。
     const beforeIdx = lastIndexBefore(raw.dates, w.dates[0]!);
@@ -380,7 +396,7 @@ for (const file of files) {
 console.log(`读取 ${read} 只（跳过 ${skipped} 个坏文件）\n`);
 
 if (rejectedNegative.length > 0) {
-  console.warn(`⚠ 因非正价格挡掉 ${rejectedNegative.length} 个「股票 × 关卡」组合（前复权把高股息老股扣成负数）：`);
+  console.warn(`⚠ 因非正价格挡掉 ${rejectedNegative.length} 个「股票 × 关卡」组合：`);
   for (const [code, level, n] of rejectedNegative.slice(0, 12)) {
     console.warn(`    ${code} @ ${level}：${n} 个非正值`);
   }
@@ -469,7 +485,7 @@ for (const w of windows) {
     })),
     /** 与 calendar 等长；取不到就是 null，界面不要按 1:1 顶上 */
     fx: fxAligned,
-    note: "价格为新新浪源前复权价（用今天的复权因子回算），收益连续但不是当年的盘面绝对价位。港股/美股按各自本币计价，界面按当日中行折算价折成人民币记账。",
+    note: "价格是不复权的**当年盘面价**（和当时屏幕上看到的一致）。代价是除权除息日会有一个跳空缺口，我们不模拟分红，所以持仓确实会少掉那部分 —— 缺口在价格和盈亏里是一致的，不会两处对不上。港股/美股按各自本币计价，界面按当日中行折算价折成人民币记账。",
     generatedAt: new Date().toISOString(),
   };
 

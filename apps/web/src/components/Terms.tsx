@@ -105,7 +105,7 @@ export function AskBox({ term, context }: { term: string; context: string }) {
       </span>
       {error !== null && (
         <span className="hisui-ask-err">
-          没问上（{error}）。术语解释不受影响，少爷可以继续看上面的内容。
+          没问上（{error}）。术语解释不受影响，可以继续看上面的内容。
         </span>
       )}
       {answer !== null && (

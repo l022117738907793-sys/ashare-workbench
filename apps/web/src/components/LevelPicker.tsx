@@ -60,7 +60,7 @@ export function LevelDetail(props: LevelDetailProps) {
       </div>
 
       <div className="chapter-question">
-        <span>这一局要想清楚的是</span>
+        <span>温馨提示</span>
         <p>{level.theme}</p>
       </div>
 
@@ -90,7 +90,8 @@ export function LevelDetail(props: LevelDetailProps) {
       )}
 
       <RichP className="chapter-price-note">
-        价格用前复权（按今天的复权因子回算）：收益连续，但绝对价位和当年不一样。
+        价格是当年的盘面价，和那会儿屏幕上看到的一样。除权除息日会有一个跳空缺口 ——
+        我们不分红，所以那天持仓确实会少掉一点。
       </RichP>
       {!inline ? <button type="button" className="chapter-back" onClick={onBack}>← 返回关卡列表</button> : null}
     </section>
@@ -122,7 +123,7 @@ export function LevelPicker(props: LevelPickerProps) {
         <span><strong>{LEVELS.length}</strong> 个历史时刻</span>
         <span>公开日期</span>
         <span>次日开盘成交</span>
-        <span>支持快进</span>
+        <span>按天推进</span>
       </div>
 
       {!ready ? <Notice tone="warn">当前还没有关卡数据，您仍可查看章节简报。可以先返回游戏大厅玩随机模式。</Notice> : null}

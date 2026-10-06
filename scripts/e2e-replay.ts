@@ -275,7 +275,7 @@ try {
   check("点得到「用 10 万随机开局」按钮", clicked === "OK", clicked);
   await sleep(600);
   const opened = await waitFor(
-    `document.body.innerText.includes("待成交委托") && document.body.innerText.includes("走一天")`,
+    `document.body.innerText.includes("待成交委托") && document.body.innerText.includes("下一天")`,
     "推演界面出现",
   );
   check("进入了推演界面", opened);
@@ -290,7 +290,7 @@ try {
     await evaluate<boolean>(`return document.body.innerText.includes("不构成投资建议");`),
   );
 
-  console.log("\n四、挂单 → 走一天 → 成交");
+  console.log("\n四、挂单 → 下一天 → 成交");
   const before = await evaluate<string>(`return document.body.innerText;`);
   const cashBefore = Number((before.match(/可用现金\s*¥?([\d,]+(?:\.\d+)?)/) ?? [])[1]?.replace(/,/g, "") ?? NaN);
 
@@ -341,11 +341,11 @@ try {
     `填的是 ${fillCode} ${fillName}`,
   );
 
-  const step = await evaluate<string>(CLICK("走一天"));
-  check("点得到「走一天」", step === "OK", step);
+  const step = await evaluate<string>(CLICK("下一天"));
+  check("点得到「下一天」", step === "OK", step);
   await sleep(600);
   const after = await evaluate<string>(`return document.body.innerText;`);
-  check("走一天后日志里出现了成交记录", /推演日志/.test(after) && /买入|卖出/.test(after) && after !== before);
+  check("下一天后日志里出现了成交记录", /推演日志/.test(after) && /买入|卖出/.test(after) && after !== before);
   check(
     "成交价注明了来自开盘价",
     after.includes("开盘价"),
@@ -364,7 +364,7 @@ try {
   await evaluate(CLICK("游戏大厅"));
   await sleep(600);
   const resumed = await waitFor(
-    `document.body.innerText.includes("走一天") && document.body.innerText.includes("推演日志")`,
+    `document.body.innerText.includes("下一天") && document.body.innerText.includes("推演日志")`,
     "推演被还原",
   );
   check("刷新后回到推演界面而不是开局页", resumed);
@@ -396,10 +396,10 @@ try {
   );
 
   console.log("\n七、传奇模式：选一关 → 开局简报 → 带日期推演");
-  // 「退出推演」会弹 confirm；无头浏览器默认返回 false，先把它改掉
+  // 「退出游戏」会弹 confirm；无头浏览器默认返回 false，先把它改掉
   await evaluate(`window.confirm = () => true; return "OK";`);
-  const exited = await evaluate<string>(CLICK("退出推演"));
-  check("点得到「退出推演」", exited === "OK", exited);
+  const exited = await evaluate<string>(CLICK("退出游戏"));
+  check("点得到「退出游戏」", exited === "OK", exited);
   await sleep(700);
   check(
     "退出后回到开局界面",
@@ -435,7 +435,7 @@ try {
   const enter = await evaluate<string>(CLICK(`进入 ${level.startDate}`));
   check("点得到「进入」按钮", enter === "OK", enter);
   const inLevel = await waitFor(
-    `document.body.innerText.includes("待成交委托") && document.body.innerText.includes("走一天")`,
+    `document.body.innerText.includes("待成交委托") && document.body.innerText.includes("下一天")`,
     "关卡载入",
   );
   check("载入了这一关的行情并进入推演", inLevel);
@@ -545,10 +545,10 @@ try {
   check("关卡里填得进标的与股数", !lvCode.startsWith("NO_"), lvCode);
   await evaluate(CLICK("挂出"));
   await sleep(400);
-  await evaluate(CLICK("走一天"));
+  await evaluate(CLICK("下一天"));
   await sleep(700);
   const lvAfter = await evaluate<string>(`return document.body.innerText;`);
-  check("走一天后成交，并注明价格来自开盘价", lvAfter.includes("开盘价"), lvAfter.slice(0, 100));
+  check("下一天后成交，并注明价格来自开盘价", lvAfter.includes("开盘价"), lvAfter.slice(0, 100));
 
   console.log("\n九、刷新后回到同一关（存档里存了 levelId）");
   await send("Page.enable");
@@ -559,7 +559,7 @@ try {
   await sleep(800);
   check(
     "刷新后还在推演里，没有退回关卡列表",
-    await waitFor(`document.body.innerText.includes("走一天")`, "关卡被还原"),
+    await waitFor(`document.body.innerText.includes("下一天")`, "关卡被还原"),
   );
   const restored = await evaluate<string>(`return document.body.innerText;`);
   check("还原的是同一关（能看到这一关的日期）", restored.includes(level.startDate));
@@ -568,7 +568,7 @@ try {
   console.log("\n十、回到模拟游戏：你不在的这段时间");
   // 回到模拟游戏页（前面几节都在历史推演里）
   await evaluate(`window.confirm = () => true; return true;`);
-  await evaluate(CLICK("退出推演"));
+  await evaluate(CLICK("退出游戏"));
   await sleep(600);
   await evaluate(CLICK("游戏大厅"));
   await sleep(600);
@@ -964,7 +964,7 @@ try {
   check(
     "推演开局成功",
     await waitFor(
-      `document.body.innerText.includes("待成交委托") && document.body.innerText.includes("走一天")`,
+      `document.body.innerText.includes("待成交委托") && document.body.innerText.includes("下一天")`,
       "推演界面",
       60,
     ),
@@ -1107,7 +1107,7 @@ try {
     ghReceipt.slice(0, 200),
   );
 
-  // 推演那边也下一单（挂单 → 走一天才成交）
+  // 推演那边也下一单（挂单 → 下一天才成交）
   await evaluate(CLICK("历史推演"));
   check(
     "切到历史推演",
@@ -1130,7 +1130,7 @@ try {
   const ghPlaced = await evaluate<string>(CLICK("挂出"));
   check("推演里也挂得上单", ghPlaced === "OK", ghPlaced);
   await sleep(400);
-  await evaluate(CLICK("走一天"));
+  await evaluate(CLICK("下一天"));
   await sleep(700);
 
   await evaluate(CLICK("游戏记录"));
@@ -1472,7 +1472,7 @@ try {
     hkRules.body.replace(/\n/g, " / ").slice(0, 200),
   );
 
-  // 真买 100 股，走一天，看引擎给的可卖数量 —— T+0 的话买完当天就是全部可卖
+  // 真买 100 股，下一天，看引擎给的可卖数量 —— T+0 的话买完当天就是全部可卖
   await evaluate<boolean>(`
     const btn = [...document.querySelectorAll(".replay-quantity-buttons button")].find((b) => b.innerText.includes("100"));
     if (btn) btn.click();
@@ -1481,7 +1481,7 @@ try {
   await sleep(200);
   await evaluate<string>(CLICK("挂出"));
   await sleep(400);
-  await evaluate(CLICK("走一天"));
+  await evaluate(CLICK("下一天"));
   await sleep(600);
   const hkHolding = await evaluate<string>(`
     const row = [...document.querySelectorAll(".replay-holding-row")].find((r) => r.innerText.includes("腾讯"));

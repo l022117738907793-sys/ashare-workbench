@@ -425,7 +425,7 @@ export function advanceDay(state: ReplayState): ReplayState {
   };
 }
 
-/** 连续推进 n 个交易日（快进用；每一天的委托照常成交） */
+/** 连续推进 n 个交易日（「结束」按钮用；每一天的委托照常成交） */
 export function advanceDays(state: ReplayState, n: number): ReplayState {
   let next = state;
   for (let i = 0; i < n && !next.finished; i += 1) next = advanceDay(next);

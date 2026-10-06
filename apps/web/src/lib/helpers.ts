@@ -13,6 +13,9 @@ import {
   type StockData,
   type StockResult,
 } from "@aw/core";
+// 市场一律从代码推断（`marketGroupOf`），与下单、费率、涨跌停用的是同一个函数 ——
+// 界面上分到「港股」而成交按 A 股规则走，是这类项目最难看的一种不一致。
+import { marketGroupOf, type MarketGroup } from "@aw/game";
 
 // ─────────────────────────── 数据不足提示 ───────────────────────────
 //
@@ -204,6 +207,14 @@ export function sortSectors(list: SectorResult[]): SectorResult[] {
 
 export const STOCK_TYPE_ORDER = ["启动观察", "趋势观察", "回调观察", "高位观察", "排除", "数据不足"] as const;
 
+/**
+ * 市场分档的顺序：本土在前，其余按我们接进来的先后。
+ *
+ * 这是「个股分类」的第二种切法（第一种是上面的信号类型）。
+ * 池子里没有的市场不会出现在界面上 —— 见 `marketsPresent`。
+ */
+export const MARKET_ORDER: readonly MarketGroup[] = ["CN", "HK", "US", "JP", "KR"];
+
 export interface StockGroup {
   type: string;
   items: StockResult[];
@@ -263,18 +274,34 @@ export function matchStockQuery(code: string, name: string, query: string): bool
 export function filterStockResults(
   list: StockResult[],
   byCode: Map<string, StockData>,
-  opts: { query?: string; industryCode?: string | null } = {},
+  opts: { query?: string; industryCode?: string | null; market?: MarketGroup | null } = {},
 ): StockResult[] {
   const query = opts.query ?? "";
   const industryCode = opts.industryCode ?? null;
+  const market = opts.market ?? null;
   return list.filter((r) => {
     if (!matchStockQuery(r.code, r.name, query)) return false;
     if (industryCode) {
       const s = byCode.get(r.code);
       if (!s || s.industryCode !== industryCode) return false;
     }
+    // 市场一律从**代码**推断，不读快照里的 market 字段：A 股那批根本没有这个键，
+    // 而代码是唯一在两个包（codes.ts / rules.ts）里都解析过的东西。
+    if (market !== null && marketGroupOf(r.code) !== market) return false;
     return true;
   });
+}
+
+/**
+ * 池子里**实际出现过**的市场，按固定顺序返回。
+ *
+ * 「如果有的话」：快照里没有美股就一个美股的分档都不显示 —— 空分档点进去
+ * 什么都没有，比不显示更让人以为坏了。
+ */
+export function marketsPresent(list: StockResult[]): MarketGroup[] {
+  const seen = new Set<MarketGroup>();
+  for (const r of list) seen.add(marketGroupOf(r.code));
+  return MARKET_ORDER.filter((m) => seen.has(m));
 }
 
 // ───────────────────────────── 实时轮询代码集合 ─────────────────────────────

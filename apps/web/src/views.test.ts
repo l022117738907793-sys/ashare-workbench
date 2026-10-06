@@ -39,10 +39,11 @@ import {
   deriveSignal,
   deriveSignals,
   learningQuestions,
+  type SectorResult,
   type Snapshot,
   type StockData,
 } from "@aw/core";
-import { advanceDay, createReplay, LEVELS, placeOrder, type Trade } from "@aw/game";
+import { advanceDay, createReplay, LEVELS, marketGroupOf, placeOrder, type Trade } from "@aw/game";
 import { AnalysisView } from "./components/AnalysisView";
 import type { NewsItem } from "@aw/data";
 import { GameRulesView } from "./components/GameRulesView";
@@ -71,10 +72,12 @@ import {
   EMPTY_STORE,
   filterStockResults,
   groupStockResults,
+  marketsPresent,
   NOT_ENOUGH_BANNER,
   parseSettings,
   sortSectors,
   stockTypeCounts,
+  type StockGroup,
 } from "./lib/helpers";
 
 /** fixture 用 `?raw` 内联，避免为了读文件引入 node:fs（也就不需要 @types/node） */
@@ -116,6 +119,14 @@ function renderWorkbench(
       metricsByCode: metrics,
       sectorCode: null,
       onSelectSector: () => {},
+      marketFilter: null,
+      onSelectMarketFilter: () => {},
+      marketOptions: marketsPresent(results),
+      marketCounts: results.reduce<Record<string, number>>((acc, r) => {
+        const m = marketGroupOf(r.code);
+        acc[m] = (acc[m] ?? 0) + 1;
+        return acc;
+      }, {}),
       query: "",
       onQuery: () => {},
       onOpenStock: () => {},
@@ -307,6 +318,93 @@ describe("筛选页渲染", () => {
   });
 
   it("不出现任何红线词", () => {
+  });
+});
+
+/**
+ * 「市场观察」这一页有两处**每次只放三个**的分段展开（② 板块、③ 每个分组），
+ * 以及一排市场分档。「排除」一组有四百多只、每只下面还挂着判断依据，
+ * 一次全挂上去点「展开」要卡一下 —— 所以这三个行为都值得钉住。
+ */
+describe("市场观察：市场分档与分段展开", () => {
+  /** 造一组 10 只，用来验「每次只放三个」 */
+  const bigGroup: StockGroup = {
+    type: "排除",
+    items: Array.from({ length: 10 }, (_, i) => ({
+      code: `60000${i}.SH`,
+      name: `样本${i}`,
+      type: "排除",
+      reasons: [],
+      subtype: null,
+      atr: { available: false, flag: "", atr: null, band5: null, move5: null },
+    })),
+  };
+
+  const manySectors: SectorResult[] = Array.from({ length: 5 }, (_, i) => ({
+    code: `T${i}.SI`,
+    name: `板块${i}`,
+    state: "趋势",
+    reasons: [],
+    breadth20: null,
+    strongCount: 0,
+    strongestMembers: [],
+  }));
+
+  /**
+   * 注意数的不是 `class="stock-row"`：整页顶上的「交易信号」摘要用的是同一套行样式
+   * （它渲染的也是 stock-row，只是不可点），一起数会把 5 条信号算成个股。
+   * 「打开七步分析」是 ③ 每条个股独有的。
+   */
+  const stockRows = (html: string) => (html.match(/打开七步分析/g) ?? []).length;
+
+  it("每个分组一次只放三个，剩下的交给「继续展开」", () => {
+    const html = renderWorkbench(devSnapshot, { groups: [bigGroup], counts: { 排除: 10 } });
+    expect(stockRows(html)).toBe(3);
+    expect(plain(html)).toContain("继续展开（还有 7 只）");
+  });
+
+  it("收起的那组一条都不渲染，展开的那组也只有三个", () => {
+    const second: StockGroup = { ...bigGroup, type: "数据不足" };
+    // 默认只展开第一个非空分组（`isOpen` 的第一条分支），第二组是收起的
+    const html = renderWorkbench(devSnapshot, {
+      groups: [bigGroup, second],
+      counts: { 排除: 10, 数据不足: 10 },
+    });
+    expect(stockRows(html)).toBe(3);
+    // 收起不等于丢内容：两组的表头都在，只是第二组没铺开
+    expect((html.match(/class="group-head"/g) ?? []).length).toBe(2);
+    const text = plain(html);
+    expect(text).toContain("排除 10");
+    expect(text).toContain("数据不足 10");
+  });
+
+  it("② 板块一次也只放三个，并说明还剩几个", () => {
+    const html = renderWorkbench(devSnapshot, { sectors: manySectors });
+    expect((html.match(/class="sector-row/g) ?? []).length).toBe(3);
+    expect(plain(html)).toContain("继续展开（还有 2 个板块）");
+    expect(plain(html)).toContain("板块2");
+    expect(plain(html)).not.toContain("板块3");
+  });
+
+  it("市场分档：只数先于市场筛选算，所以选中港股之后其它分档还在", () => {
+    const html = renderWorkbench(devSnapshot, {
+      marketOptions: ["CN", "HK", "JP", "KR"],
+      marketCounts: { CN: 61, HK: 20, JP: 20, KR: 20 },
+      marketFilter: "HK",
+    });
+    const text = plain(html);
+    expect(text).toContain("全部市场 121");
+    expect(text).toContain("A 股 61");
+    expect(text).toContain("港股 20");
+    expect(text).toContain("日股 20");
+    expect(text).toContain("韩股 20");
+    // 当前选中的那个才有 chip-active：全都亮着就等于没有选中状态
+    expect(buttonMarkupWithText(html, "港股 20")).toContain("chip-active");
+    expect(buttonMarkupWithText(html, "A 股 61")).not.toContain("chip-active");
+  });
+
+  it("池子里只有一个市场时整排不显示 —— 只能选「全部」的分档比没有更碍事", () => {
+    expect(plain(renderWorkbench(devSnapshot))).not.toContain("全部市场");
   });
 });
 
@@ -1665,11 +1763,14 @@ describe("历史推演视图（ReplayView）", () => {
     expect(html).toContain("开盘价");
   });
 
-  it("提供走一天、快进与结算入口", () => {
+  it("提供下一天、结束与结算入口，且没有快进", () => {
     const html = renderReplay();
-    expect(html).toContain("走一天");
-    expect(html).toContain("快进");
+    expect(html).toContain("下一天");
+    expect(html).toContain("结束");
     expect(html).toContain("结算");
+    // 快进已删除：按钮、文案都不该再出现
+    expect(html).not.toContain("快进");
+    expect(html).not.toContain("走一天");
   });
 
   it("藏日期时，日志里的真实日期也要被换成第几天", () => {

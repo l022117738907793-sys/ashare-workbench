@@ -40,6 +40,8 @@ import {
   executeOrder,
   holdingsValue as calcHoldingsValue,
   MARKET_NAME,
+  marketGroupOf,
+  type MarketGroup,
   rolloverTradingDay,
   settleSeason,
   totalAssets as calcTotalAssets,
@@ -111,6 +113,7 @@ import {
   LS_SETTINGS,
   LS_STORE,
   LS_TAB,
+  marketsPresent,
   mergeRules,
   parseSettings,
   parseStore,
@@ -354,6 +357,13 @@ export default function App() {
   }, [snapshot]);
 
   const [sectorCode, setSectorCode] = useState<string | null>(null);
+  /**
+   * 「个股分类」的第二种切法：按市场分档。null = 全部市场。
+   *
+   * 与板块筛选是**叠加**关系，不是二选一：先按板块缩小，再按市场看。
+   * 之所以从代码推断而不是读快照的 market 字段，见 helpers.ts 里 filterStockResults 的注释。
+   */
+  const [marketFilter, setMarketFilter] = useState<MarketGroup | null>(null);
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
   /**
    * 「去筛选」的跳转信号：每加一，筛选页就滚到「③ 个股分类」并闪一下。
@@ -540,7 +550,29 @@ export default function App() {
     [liveStocks, stockByCode, query, sectorCode],
   );
 
-  const groups = useMemo(() => groupStockResults(filteredStocks, liveRet20), [filteredStocks, liveRet20]);
+  /**
+   * 分档统计必须先于市场筛选算：筛掉港股之后，「港股 20」这个数字还得看得见，
+   * 否则点进任何一个市场分档，其它分档就消失了，人就换不回去了。
+   */
+  const marketOptions = useMemo(() => marketsPresent(filteredStocks), [filteredStocks]);
+  const marketCounts = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const r of filteredStocks) {
+      const m = marketGroupOf(r.code);
+      out[m] = (out[m] ?? 0) + 1;
+    }
+    return out;
+  }, [filteredStocks]);
+
+  const visibleStocks = useMemo(
+    () =>
+      marketFilter === null
+        ? filteredStocks
+        : filterStockResults(filteredStocks, stockByCode, { market: marketFilter }),
+    [filteredStocks, stockByCode, marketFilter],
+  );
+
+  const groups = useMemo(() => groupStockResults(visibleStocks, liveRet20), [visibleStocks, liveRet20]);
   const counts = useMemo(() => stockTypeCounts(groups), [groups]);
 
   const mainIndexText = useMemo(() => {
@@ -638,6 +670,7 @@ export default function App() {
     setStore(parseStore(null));
     setSelectedCode(null);
     setSectorCode(null);
+    setMarketFilter(null);
     setQuery("");
     setTab("workbench");
     setReloadNonce((n) => n + 1);
@@ -1091,12 +1124,16 @@ export default function App() {
             metricsByCode={liveMetrics}
             sectorCode={sectorCode}
             onSelectSector={setSectorCode}
+            marketFilter={marketFilter}
+            onSelectMarketFilter={setMarketFilter}
+            marketOptions={marketOptions}
+            marketCounts={marketCounts}
             query={query}
             onQuery={setQuery}
             onOpenStock={openStock}
             quotesByCode={quotesByCode}
             totalStocks={snapshot.stocks.length}
-            filteredStocks={filteredStocks.length}
+            filteredStocks={visibleStocks.length}
             mainIndexText={mainIndexText}
             signals={liveSignals}
             focusStocks={focusStocks}

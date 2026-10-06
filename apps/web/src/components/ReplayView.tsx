@@ -94,9 +94,6 @@ export interface ReplayViewProps {
   onExit: () => void;
 }
 
-/** 快进速度：1.5 秒一天（用户指定）。快进期间照常可以下单。 */
-export const FAST_FORWARD_MS = 1500;
-
 /** 序列里的第 i 项，不是有限数就当没有（分片里可能是 null）。 */
 function numOrNull(v: number | null | undefined): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
@@ -126,7 +123,6 @@ export function ReplayView(props: ReplayViewProps) {
   const [code, setCode] = useState(() => accountFirstCode(state, stocks));
   const [sharesText, setSharesText] = useState("100");
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [playing, setPlaying] = useState(false);
   const [lastSeason, setLastSeason] = useState<SeasonResult | null>(null);
   const [lastSeasonDay, setLastSeasonDay] = useState(0);
   const [showStocks, setShowStocks] = useState(false);
@@ -197,17 +193,7 @@ export function ReplayView(props: ReplayViewProps) {
   const totalReturnPct = account.initialCash > 0 ? (assets / account.initialCash - 1) * 100 : 0;
   const pnlTone = (v: number) => (v >= 0 ? "good" : "bad");
 
-  // 快进：1.5 秒一天。玩家可以在播放中继续下单——挂单会在各自的开盘时点成交。
-  useEffect(() => {
-    if (!playing || state.finished) return;
-    const t = setInterval(() => onAdvance(1), FAST_FORWARD_MS);
-    return () => clearInterval(t);
-  }, [playing, state.finished, onAdvance]);
-
-  // 本局走完就自动停下，不然按钮会一直在"播放中"卡住
-  useEffect(() => {
-    if (state.finished) setPlaying(false);
-  }, [state.finished]);
+  // 推进只由「下一天」「结束」两个按钮触发，没有定时器，所以没有需要清理的副作用。
 
   function submit() {
     setFeedback(null);
@@ -228,7 +214,6 @@ export function ReplayView(props: ReplayViewProps) {
     const { result } = settleReplay(state, `${label} · ${displayDate(state, hideDate)}`);
     setLastSeason(result);
     setLastSeasonDay(dayNo);
-    setPlaying(false);
   }
 
   const pending = state.pending;
@@ -251,24 +236,21 @@ export function ReplayView(props: ReplayViewProps) {
         <div className="replay-mission-meta">
           <span className="replay-date">{hideDate ? `第 ${dayNo} 天` : date}</span>
           <button type="button" className="btn btn-ghost btn-tiny" onClick={() => {
-            setPlaying(false);
-            if (confirm("退出本局历史推演？当前账户与成交记录将清空，不可恢复。")) onExit();
-          }}>退出推演 ↗</button>
+            if (confirm("退出本局？当前账户与成交记录将清空，不可恢复。")) onExit();
+          }}>退出游戏 ↗</button>
         </div>
       </header>
 
       <div className="replay-timebar">
         <div className="replay-day-status">
-          <span className={`replay-status-dot${playing ? " is-playing" : ""}`}/>
-          <div><strong>{state.finished ? "推演完成" : playing ? "快进中 · 仍可挂单" : "时间已暂停"}</strong><span>第 {dayNo} / {totalDays} 个交易日</span></div>
+          <span className="replay-status-dot"/>
+          <div><strong>{state.finished ? "推演完成" : "当前交易日"}</strong><span>第 {dayNo} / {totalDays} 个交易日</span></div>
         </div>
         <div className="replay-time-actions">
-          <button type="button" className="btn btn-primary" disabled={state.finished || playing} onClick={() => onAdvance(1)}>走一天 →</button>
-          <button type="button" className={`btn${playing ? " replay-pause" : ""}`} disabled={state.finished} onClick={() => setPlaying((p) => !p)} aria-label={playing ? "暂停快进" : `快进（${FAST_FORWARD_MS / 1000} 秒/天）`}>{playing ? "Ⅱ 暂停" : <>▷ 快进<span className="replay-speed">（{FAST_FORWARD_MS / 1000} 秒/天）</span></>}</button>
+          <button type="button" className="btn btn-primary" disabled={state.finished} onClick={() => onAdvance(1)}>下一天 →</button>
           <button type="button" className="btn btn-ghost replay-skip" disabled={state.finished} onClick={() => {
-            setPlaying(false);
             if (confirm("直接推进到本局最后一天？期间的委托将照常撮合。")) onAdvance(totalDays - dayNo);
-          }}>走到结束 »</button>
+          }}>结束 »</button>
         </div>
         <div className="replay-progress" role="progressbar" aria-label="推演进度" aria-valuemin={0} aria-valuemax={totalDays} aria-valuenow={dayNo}><span style={{ width: `${progress}%` }}/></div>
       </div>
@@ -351,7 +333,7 @@ export function ReplayView(props: ReplayViewProps) {
             </div>
           </section>
 
-          <section className="replay-panel replay-pending-panel"><header className="replay-panel-head"><h2>待成交委托</h2><span className="replay-count">{pending.length}</span></header><div className="replay-pending-body"><p className="replay-next-open">下次撮合：{nextDayLabel}</p>{pending.length === 0 ? <EmptyHint>暂无挂单。提交委托后，走一天等待成交。</EmptyHint> : <ul className="replay-order-list">{pending.map((o) => <li key={o.id}><div><strong><span className={`replay-side-label ${o.side}`}>{o.side === "buy" ? "买" : "卖"}</span>{o.name}</strong><span>{o.shares} 股 · {maskDate(state, o.placedAt, hideDate)}挂出</span></div><button type="button" className="btn btn-ghost btn-tiny" onClick={() => onCancel(o.id)}>撤单</button></li>)}</ul>}<p className="field-hint">次日无开盘价（停牌或数据缺失）时作废；请查看推演日志。</p></div></section>
+          <section className="replay-panel replay-pending-panel"><header className="replay-panel-head"><h2>待成交委托</h2><span className="replay-count">{pending.length}</span></header><div className="replay-pending-body"><p className="replay-next-open">下次撮合：{nextDayLabel}</p>{pending.length === 0 ? <EmptyHint>暂无挂单。提交委托后，点「下一天」等待成交。</EmptyHint> : <ul className="replay-order-list">{pending.map((o) => <li key={o.id}><div><strong><span className={`replay-side-label ${o.side}`}>{o.side === "buy" ? "买" : "卖"}</span>{o.name}</strong><span>{o.shares} 股 · {maskDate(state, o.placedAt, hideDate)}挂出</span></div><button type="button" className="btn btn-ghost btn-tiny" onClick={() => onCancel(o.id)}>撤单</button></li>)}</ul>}<p className="field-hint">次日无开盘价（停牌或数据缺失）时作废；请查看推演日志。</p></div></section>
         </aside>
       </div>
 
@@ -362,7 +344,7 @@ export function ReplayView(props: ReplayViewProps) {
       })}</div>}</section>
 
       <div className="replay-bottom-grid">
-        <section className="replay-panel replay-results"><header className="replay-panel-head"><div><p className="replay-eyebrow">PERFORMANCE / 本局表现</p><h2>{state.finished ? "本局结算" : "阶段成绩"}</h2></div><button type="button" className="btn btn-primary btn-tiny" onClick={finish}>{state.finished ? "结算本局" : "查看阶段结算"}</button></header><div className="replay-results-body">{state.finished ? <p className="replay-result-note">已走完最后一个交易日。查看成绩后，可退出推演开始新一局。</p> : <p className="replay-result-note">阶段结算只查看当前成绩，您仍可继续推进和下单。</p>}{lastSeason ? <><p className="replay-snapshot-date">截至第 {lastSeasonDay} 天{lastSeasonDay !== dayNo ? " · 可重新查看最新成绩" : ""}</p><div className="kv-list"><KV k="本局区间" v={hideDate ? `第 1 天 → 第 ${lastSeasonDay} 天` : `${lastSeason.startDate} → ${lastSeason.endDate}`}/><KV k="期末总资产" v={`${fmtNum(lastSeason.finalAssets)} 元`}/><KV k="总收益率" v={fmtPct(lastSeason.totalReturnPct)}/><KV k={`同期${benchmarkName}`} v={fmtPct(lastSeason.benchmarkReturnPct)}/><KV k="超额收益" v={fmtPct(lastSeason.excessReturnPct)}/><KV k="最大回撤" v={fmtPct(-lastSeason.maxDrawdownPct)}/><KV k="胜率" v={lastSeason.winRatePct === null ? "—（无平仓）" : fmtPct(lastSeason.winRatePct)}/><KV k="成交笔数" v={`${lastSeason.tradeCount} 笔`}/></div></> : <div className="replay-result-empty"><span>{account.trades.length} 笔成交</span><strong className={`tone-${pnlTone(totalReturnPct)}`}>{fmtPct(totalReturnPct)}</strong><small>查看结算，对照同期{benchmarkName}、回撤与胜率。</small></div>}</div></section>
+        <section className="replay-panel replay-results"><header className="replay-panel-head"><div><p className="replay-eyebrow">PERFORMANCE / 本局表现</p><h2>{state.finished ? "本局结算" : "阶段成绩"}</h2></div><button type="button" className="btn btn-primary btn-tiny" onClick={finish}>{state.finished ? "结算本局" : "查看阶段结算"}</button></header><div className="replay-results-body">{state.finished ? <p className="replay-result-note">已走完最后一个交易日。查看成绩后，可退出游戏开始新一局。</p> : <p className="replay-result-note">阶段结算只查看当前成绩，您仍可继续推进和下单。</p>}{lastSeason ? <><p className="replay-snapshot-date">截至第 {lastSeasonDay} 天{lastSeasonDay !== dayNo ? " · 可重新查看最新成绩" : ""}</p><div className="kv-list"><KV k="本局区间" v={hideDate ? `第 1 天 → 第 ${lastSeasonDay} 天` : `${lastSeason.startDate} → ${lastSeason.endDate}`}/><KV k="期末总资产" v={`${fmtNum(lastSeason.finalAssets)} 元`}/><KV k="总收益率" v={fmtPct(lastSeason.totalReturnPct)}/><KV k={`同期${benchmarkName}`} v={fmtPct(lastSeason.benchmarkReturnPct)}/><KV k="超额收益" v={fmtPct(lastSeason.excessReturnPct)}/><KV k="最大回撤" v={fmtPct(-lastSeason.maxDrawdownPct)}/><KV k="胜率" v={lastSeason.winRatePct === null ? "—（无平仓）" : fmtPct(lastSeason.winRatePct)}/><KV k="成交笔数" v={`${lastSeason.tradeCount} 笔`}/></div></> : <div className="replay-result-empty"><span>{account.trades.length} 笔成交</span><strong className={`tone-${pnlTone(totalReturnPct)}`}>{fmtPct(totalReturnPct)}</strong><small>查看结算，对照同期{benchmarkName}、回撤与胜率。</small></div>}</div></section>
         <section className="replay-panel replay-log-panel"><header className="replay-panel-head"><h2>推演日志</h2><span className="replay-count">最近 {recentLog.length} 条</span></header><div className="replay-log-body">{recentLog.length === 0 ? <EmptyHint>尚无成交记录。推进交易日后，撮合结果会记录在这里。</EmptyHint> : <ul className="replay-log-list">{recentLog.map((e, i) => <li key={`${e.date}-${e.code}-${i}`}><span className={`replay-log-dot${e.ok ? " is-ok" : ""}`}/><p className={e.ok ? "" : "tone-muted"}>{maskDatesIn(state, e.text, hideDate)}</p></li>)}</ul>}</div></section>
       </div>
       <p className="game-disclaimer replay-disclaimer" role="note">{`⚠️ ${GAME_DISCLAIMER}`}</p>
