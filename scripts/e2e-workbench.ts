@@ -113,6 +113,15 @@ const STOCK_ROWS = `
     .filter(b => (b.textContent || "").includes("打开七步分析"))
     .map(b => (b.textContent || "").replace(/\\s+/g, " ").trim());
 `;
+/** 只在「排除」那一组里数行 —— 整页计数会把别的组算进来 */
+const EXCLUDE_SECTION = `
+  const sec = [...document.querySelectorAll("section.group")]
+    .find(s => ((s.querySelector(".group-title") || {}).textContent || "").includes("排除"));
+  if (!sec) return null;
+  const rows = (sec.innerHTML.match(/打开七步分析/g) ?? []).length;
+  const more = sec.querySelector("button.reveal-more");
+  return { rows, more: more ? more.textContent.trim() : "" };
+`;
 /** 市场分档 chip 的文字与选中状态，顺序不变 —— 用来验证「数字是筛之前的」 */
 const CHIPS = `
   const wrap = document.querySelector(".chips-market");
@@ -202,7 +211,6 @@ try {
   const onDefault = (chips ?? []).filter((c) => c.on);
   check("默认亮着的是「全部市场」", onDefault.length === 1 && onDefault[0]!.text.includes("全部市场"),
     JSON.stringify(onDefault));
-  const allRows = await evaluate<string[]>(STOCK_ROWS);
   const base = (chips ?? []).map((c) => c.text).join("|");
 
   // ── 三、分段展开：每次只放三个 ────────────────────────────
@@ -210,8 +218,11 @@ try {
   const before = await evaluate<number>(ROWS);
   console.log(`    展开前个股行：${before}`);
   check("默认只展开第一组，所以只有 3 条个股行", before === 3, `实际 ${before}`);
-  const moreButtons = await evaluate<number>(`return document.querySelectorAll("button.reveal-more").length;`);
-  check("页面上有「继续展开」按钮", moreButtons > 0, `实际 ${moreButtons}`);
+  const moreLabels = await evaluate<string[]>(`
+    return [...document.querySelectorAll("button.reveal-more")].map(b => (b.textContent || "").trim());
+  `);
+  check("页面上有「继续展开」按钮", moreLabels.length > 0, `实际 ${moreLabels.length}`);
+  console.log(`    还剩多少：${moreLabels.join(" / ")}`);
   const sectorMore = await evaluate<string>(MORE("sector"));
   if (sectorMore === "OK") {
     await sleep(400);
@@ -226,6 +237,38 @@ try {
   const after = await evaluate<number>(ROWS);
   console.log(`    点一次之后个股行：${after}`);
   check("点一次多放三个（3 → 6）", after === before + 3, `实际 ${after}`);
+
+  // 「排除」是最大的一组（引擎的兜底桶），也正是用户说「展开有点慢」的那一个
+  const openExclude = await evaluate<string>(`
+    const head = [...document.querySelectorAll("button.group-head")]
+      .find(b => (b.textContent || "").includes("排除"));
+    if (!head) return "NOT_FOUND";
+    head.click(); return "OK";
+  `);
+  check("点得到「排除」分组的表头", openExclude === "OK", openExclude);
+  await sleep(900);
+  const ex1 = await evaluate<{ rows: number; more: string } | null>(EXCLUDE_SECTION);
+  check("找得到「排除」那一组", ex1 !== null);
+  console.log(`    排除组：${ex1?.rows} 行，${ex1?.more}`);
+  check("「排除」展开后只有 3 行（这一组是引擎的兜底桶，几百只）", ex1?.rows === 3, `实际 ${ex1?.rows}`);
+  check("并且说明还剩多少只", /还有 \d+ 只/.test(ex1?.more ?? ""), ex1?.more ?? "(无)");
+  const t0 = Date.now();
+  const moreExclude = await evaluate<string>(`
+    const sec = [...document.querySelectorAll("section.group")]
+      .find(s => ((s.querySelector(".group-title") || {}).textContent || "").includes("排除"));
+    const b = sec && sec.querySelector("button.reveal-more");
+    if (!b) return "NOT_FOUND";
+    b.click(); return "OK";
+  `);
+  await sleep(500);
+  const ex2 = await evaluate<{ rows: number; more: string } | null>(EXCLUDE_SECTION);
+  console.log(`    再放三个用了 ${Date.now() - t0}ms：${ex2?.rows} 行，${ex2?.more}`);
+  check("再点一次多放三个（3 → 6）", moreExclude === "OK" && ex2?.rows === 6,
+    `${moreExclude} / ${ex2?.rows}`);
+  // 这一组到底有多大：从「继续展开（还有 N 只）」反推 —— 用户说的「展开有点慢」就是这一组
+  const rest = Number(/还有 (\d+) 只/.exec(ex2?.more ?? "")?.[1] ?? -1);
+  console.log(`    「排除」一组共 ${rest + 6} 只（已放 6 只，还剩 ${rest} 只）`);
+  check("「排除」确实是最大的一组（>100 只）", rest + 6 > 100, `实际 ${rest + 6}`);
 
   // ── 四、点分档：数字不能跟着筛 ───────────────────────────
   console.log("\n四、选中一个市场之后，其它分档的数字还得在");
@@ -265,10 +308,12 @@ try {
   console.log(`    回来后：${backRows.map((r) => r.slice(0, 24)).join(" / ")}`);
   // 不逐字比：分组是按「近 20 日涨幅」算的，实时轮询一到，同一只票会换组，
   // 比文本会偶发假失败。要比的是「判据回来了没有」—— A 股又出现在列表里了。
+  // 不比长度：点 chip 会把每组的展开进度重置回三个（`useEffect(..., [query, marketFilter])`），
+  // 长度本来就该变。要比的是「判据回来了没有」—— A 股又出现在列表里了。
   check(
     "列表恢复成多市场（A 股又回来了）",
-    backRows.length === allRows.length && backRows.some((r) => /\.(SH|SZ|BJ)/.test(r)),
-    backRows.join(" | ").slice(0, 200),
+    backRows.length > 0 && backRows.some((r) => /\.(SH|SZ|BJ)/.test(r)),
+    backRows.join(" | ").slice(0, 160),
   );
 
   // ── 五、当年价：茅台在 2020-06-18 那天就是 1405 ──────────
