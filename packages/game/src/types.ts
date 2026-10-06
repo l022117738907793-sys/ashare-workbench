@@ -5,6 +5,8 @@
  * 「今天是哪天」「现在几点」都由调用方传入，这样撮合逻辑才可单测。
  */
 
+import type { MarketGroup } from "./rules";
+
 export type Side = "buy" | "sell";
 
 export interface Holding {
@@ -83,6 +85,20 @@ export interface OrderRequest {
   typeAtTrade?: string;
   /** 该股当前是否停牌 */
   suspended?: boolean;
+  /**
+   * 市场。缺省从 `code` 推（`.HK` / `.US`），一般不用传。
+   *
+   * 只有在代码认不出市场、或想故意用错规则时才显式指定。
+   */
+  market?: MarketGroup;
+  /**
+   * 这只标的计价币种兑人民币的汇率（人民币 / 本币）。
+   *
+   * **只有「最低佣金」用得上**：港股最低 100 港币，而引擎里的金额全是人民币，
+   * 不折回去就变成「最低 100 元」。缺省按 1:1——A 股本来就该如此，
+   * 境外标的漏传会让小单多收约 15%。
+   */
+  fx?: number | null;
 }
 
 export type OrderResult =

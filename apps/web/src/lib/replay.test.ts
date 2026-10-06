@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  convertShardToCny,
   isLevelShard,
   loadLevelIndex,
   loadLevelShard,
@@ -240,5 +241,83 @@ describe("用分片还原一局", () => {
     const back = restoreLevelReplay(goodShard(), save);
     expect(back.dayIndex).toBe(DAYS.length - 1);
     expect(back.finished).toBe(true);
+  });
+});
+
+/** 一份带港股的关卡：腾讯按港币计价，汇率取 1 港币 = 0.9 人民币 */
+function hkShard(): LevelShard {
+  const shard = goodShard();
+  shard.fx = [{ currency: "HKD", code: "HKDCNY", name: "港币兑人民币", rate: [0.9, 0.9, 0.91, 0.91] }];
+  shard.instruments.push({
+    code: "00700.HK",
+    name: "腾讯控股",
+    isST: false,
+    market: "HK",
+    currency: "HKD",
+    prevClose: 300,
+    open: [300, 310, 305, 300],
+    close: [305, 308, 300, 295],
+    high: [310, 315, 310, 300],
+    low: [298, 305, 295, 290],
+    volume: [1000, 1200, 900, 1500],
+  });
+  return shard;
+}
+
+describe("境外价格折成人民币", () => {
+  it("汇率列和日历长短对不上就不算合格分片", () => {
+    const s = hkShard();
+    s.fx = [{ currency: "HKD", code: "HKDCNY", name: "港币兑人民币", rate: [0.9, 0.9] }];
+    // 短一格就会「第 k 天用错价」，而且不会报错
+    expect(isLevelShard(s)).toBe(false);
+  });
+
+  it("港股价格按当天汇率折算，股数一根手指都不碰", () => {
+    const hk = convertShardToCny(hkShard()).instruments.find((i) => i.code === "00700.HK");
+    expect(hk?.open[0]).toBe(270); // 300 × 0.9
+    expect(hk?.close[0]).toBeCloseTo(274.5, 4); // 305 × 0.9
+    expect(hk?.prevClose).toBe(270); // 300 × 0.9
+    expect(hk?.volume[0]).toBe(1000); // 股数跟币种无关
+    expect(hk?.currency).toBe("HKD"); // 原币种留着，界面要用它标注
+  });
+
+  it("A 股原样不动", () => {
+    const cn = convertShardToCny(hkShard()).instruments.find((i) => i.code === "600519.SH");
+    expect(cn?.close).toEqual([1005, 1008, 995, 985]);
+  });
+
+  it("汇率哪天空着就沿用上一个已知值——不是跳过，也不是按 1:1", () => {
+    const s = hkShard();
+    s.fx![0]!.rate = [0.9, null, null, 0.91];
+    const hk = convertShardToCny(s).instruments.find((i) => i.code === "00700.HK");
+    expect(hk?.close[0]).toBeCloseTo(274.5, 4); // × 0.9
+    expect(hk?.close[1]).toBeCloseTo(277.2, 4); // × 0.9（沿用）
+    expect(hk?.close[2]).toBeCloseTo(270, 4); // × 0.9（沿用）
+    expect(hk?.close[3]).toBeCloseTo(268.45, 4); // × 0.91
+  });
+
+  it("没有境外标的就原样返回，不凭空造一段汇率", () => {
+    const s = goodShard();
+    expect(convertShardToCny(s)).toBe(s);
+  });
+
+  it("有境外标的却没有汇率就抛错，绝不按 1:1 硬跑", () => {
+    // 港币和人民币差约 13%，按 1:1 顶替等于让玩家看到的成本凭空少一成多
+    const s = hkShard();
+    delete s.fx;
+    expect(() => convertShardToCny(s)).toThrow(/汇率序列/);
+  });
+
+  it("缺的正好是这个币种的汇率，同样抛错", () => {
+    const s = hkShard();
+    s.fx = [{ currency: "USD", code: "USDCNY", name: "美元兑人民币", rate: [7, 7, 7, 7] }];
+    expect(() => convertShardToCny(s)).toThrow(/HKD/);
+  });
+
+  it("读分片时自动折算——这是境外价格进引擎的唯一入口", async () => {
+    const got = await loadLevelShard("2020-02-03", {
+      fetchImpl: stubFetch({ ok: true, status: 200, json: async () => hkShard() }),
+    });
+    expect(got.instruments.find((i) => i.code === "00700.HK")?.open[0]).toBe(270);
   });
 });

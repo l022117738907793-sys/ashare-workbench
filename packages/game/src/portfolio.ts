@@ -14,9 +14,13 @@ import type { Account, Holding, OrderRequest, OrderResult, QuoteInput, Trade } f
 import {
   boardOf,
   feeRulesAt,
+  hasPriceLimit,
+  isTPlusOne,
   isValidBuyQuantity,
   limitPctAt,
   lotRulesAt,
+  marketGroupOf,
+  type MarketGroup,
 } from "./rules";
 
 export const COMMISSION_RATE = 0.00025;
@@ -38,13 +42,36 @@ export interface FeeBreakdown {
 /**
  * 计算单笔费用。
  *
- * `date` 是成交交易日，必须传 —— 税率在 2023-08-28 变过（印花税减半）。
- * 不传时退化为常量（仅供旧调用点与测试使用，新代码不要这样调）。
+ * `date` 是成交交易日，必须传 —— 税率变过（印花税 2023-08-28 减半，港股 2021-08-01
+ * 与 2023-11-17 各调过一次）。不传时退化为 A 股常量（仅供旧调用点与测试使用）。
+ *
+ * `opts.market` 换一整套费率（见 rules.ts 的 `feeRulesAt`）。`opts.fx` 是该标的计价
+ * 币种兑人民币的汇率，**只有「最低佣金」用得上**：港股最低 100 港币，而这里经手的
+ * 金额已经是人民币了，不折回去就变成「最低 100 元」，小单会多收约 15%。
+ * 费率本身是百分比，折与不折一个样。
  */
-export function calcFee(side: "buy" | "sell", amount: number, date?: string): FeeBreakdown {
-  const r = date ? feeRulesAt(date) : { commissionRate: COMMISSION_RATE, commissionMin: COMMISSION_MIN, stampDutyRate: STAMP_DUTY_RATE, transferFeeRate: TRANSFER_FEE_RATE };
-  const commission = Math.max(amount * r.commissionRate, r.commissionMin);
-  const stampDuty = side === "sell" ? amount * r.stampDutyRate : 0;
+export function calcFee(
+  side: "buy" | "sell",
+  amount: number,
+  date?: string,
+  opts: { market?: MarketGroup; fx?: number | null } = {},
+): FeeBreakdown {
+  const market = opts.market ?? "CN";
+  // 缺汇率就按 1:1：A 股本来就该如此；境外调用方必须传 fx（见上）
+  const fx = typeof opts.fx === "number" && Number.isFinite(opts.fx) && opts.fx > 0 ? opts.fx : 1;
+  const r = date
+    ? feeRulesAt(date, market)
+    : {
+        commissionRate: COMMISSION_RATE,
+        commissionMin: COMMISSION_MIN,
+        stampDutyRate: STAMP_DUTY_RATE,
+        stampDutyBothSides: false,
+        transferFeeRate: TRANSFER_FEE_RATE,
+      };
+  // 回到本币去比最低佣金，算完再折回人民币
+  const local = amount / fx;
+  const commission = Math.max(local * r.commissionRate, r.commissionMin) * fx;
+  const stampDuty = side === "sell" || r.stampDutyBothSides ? amount * r.stampDutyRate : 0;
   const transferFee = amount * r.transferFeeRate;
   return {
     commission: round2(commission),
@@ -125,10 +152,14 @@ export function validateOrder(account: Account, req: OrderRequest): string | nul
   const holding = findHolding(account, req.code);
 
   const board = boardOf(req.code);
-  const lot = lotRulesAt(board);
+  // 市场从代码推（`.HK` / `.US`），不让调用方传：多一个能传错的地方，就多一种
+  // 「按错市场收费」的 bug。汇率推不出来，只能由调用方从分片里带进来。
+  const market = req.market ?? marketGroupOf(req.code);
+  const fx = req.fx ?? null;
+  const lot = lotRulesAt(board, market);
 
   if (side === "buy") {
-    if (!isValidBuyQuantity(board, shares)) {
+    if (!isValidBuyQuantity(board, shares, market)) {
       return lot.increment === 1
         ? `买入至少 ${lot.minShares} 股（${board === "star" ? "科创板" : "该板块"}）`
         : `买入必须是 ${lot.minShares} 股的整数倍`;
@@ -136,20 +167,22 @@ export function validateOrder(account: Account, req: OrderRequest): string | nul
   } else {
     if (!holding || holding.shares <= 0) return "没有该股持仓";
     // 卖出允许不足一手，但必须是全部剩余（A 股零股规则）
-    if (!isValidBuyQuantity(board, shares) && shares !== holding.shares) {
+    if (!isValidBuyQuantity(board, shares, market) && shares !== holding.shares) {
       return `卖出需符合 ${lot.minShares} 股起、${lot.increment} 股递增，或一次性卖出全部持仓`;
     }
     if (shares > holding.sellable) {
       const locked = holding.shares - holding.sellable;
-      return locked > 0
-        ? `T+1 限制：当日买入的 ${locked} 股需次一交易日才能卖出`
-        : "可卖数量不足";
+      // 只有 A 股是 T+1。港股美股当日买入当日可卖，锁住只会让玩家以为系统坏了
+      if (isTPlusOne(market) && locked > 0) {
+        return `T+1 限制：当日买入的 ${locked} 股需次一交易日才能卖出`;
+      }
+      return "可卖数量不足";
     }
   }
 
-  // 涨跌停
+  // 涨跌停：只有 A 股有。给港股美股套上会凭空拦住合法委托
   const prev = quote.prevClose;
-  if (prev !== null && prev !== undefined && prev > 0) {
+  if (hasPriceLimit(market) && prev !== null && prev !== undefined && prev > 0) {
     // 按成交日与板块取涨跌幅：创业板 20% 是 2020-08-24 起才生效
     const limit = limitPctAt(req.date, board, req.isST ?? false);
     const upper = round2(prev * (1 + limit));
@@ -162,7 +195,7 @@ export function validateOrder(account: Account, req: OrderRequest): string | nul
   if (side === "buy") {
     const execPrice = round2(quote.price * (1 + DEFAULT_SLIPPAGE));
     const amount = round2(execPrice * shares);
-    const need = round2(amount + calcFee("buy", amount, req.date).total);
+    const need = round2(amount + calcFee("buy", amount, req.date, { market, fx }).total);
     if (need > account.cash) {
       return `可用资金不足：需要 ${need.toFixed(2)} 元，仅有 ${account.cash.toFixed(2)} 元`;
     }
@@ -192,10 +225,11 @@ export function previewOrder(
   side: "buy" | "sell",
   shares: number,
   date?: string,
+  opts: { market?: MarketGroup; fx?: number | null } = {},
 ): { price: number; amount: number; fee: FeeBreakdown } {
   const price = round2(side === "buy" ? rawPrice * (1 + DEFAULT_SLIPPAGE) : rawPrice * (1 - DEFAULT_SLIPPAGE));
   const amount = round2(price * shares);
-  return { price, amount, fee: calcFee(side, amount, date) };
+  return { price, amount, fee: calcFee(side, amount, date, opts) };
 }
 
 /**
@@ -205,11 +239,14 @@ export function executeOrder(account: Account, req: OrderRequest): OrderResult {
   const invalid = validateOrder(account, req);
   if (invalid !== null) return { ok: false, reason: invalid };
 
+  const market = req.market ?? marketGroupOf(req.code);
+  const tPlusOne = isTPlusOne(market);
   const { price: execPrice, amount, fee } = previewOrder(
     req.quote.price as number,
     req.side,
     req.shares,
     req.date,
+    { market, fx: req.fx ?? null },
   );
 
   const note = req.isTradingNow
@@ -244,15 +281,15 @@ export function executeOrder(account: Account, req: OrderRequest): OrderResult {
         ...h,
         shares: newShares,
         avgCost: round4((h.avgCost * h.shares + totalCost) / newShares),
-        // T+1：新买入的部分不可卖
-        sellable: h.sellable,
+        // T+1：新买入的部分不可卖。港股美股是 T+0，当日买入当日就能卖
+        sellable: tPlusOne ? h.sellable : newShares,
       };
     } else {
       holdings.push({
         code: req.code,
         name: req.name,
         shares: req.shares,
-        sellable: 0,
+        sellable: tPlusOne ? 0 : req.shares,
         avgCost: round4(totalCost / req.shares),
       });
     }

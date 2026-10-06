@@ -26,6 +26,8 @@ import {
   type ReplayState,
   type SeasonResult,
   type Side,
+  type Currency,
+  type ConfigFx,
 } from "@aw/game";
 import type { Snapshot, StockData as CoreStock } from "@aw/core";
 
@@ -307,8 +309,24 @@ export interface LevelShard {
   calendar: string[];
   benchmark: { code: string; name: string; close: Array<number | null> };
   instruments: ReplayInstrument[];
+  /**
+   * 境外标的用的汇率序列（纯 A 股的关卡没有这一段）。
+   *
+   * 账户是人民币记账的，所以境外价格必须在进引擎之前折成人民币。
+   * 缺了它就只能按本币计价，而港币和人民币差约 13%、美元差约 7 倍——
+   * 见 `convertShardToCny`，那种情况会直接抛错而不是硬跑。
+   */
+  fx?: ShardFx[];
   note: string;
   generatedAt?: string;
+}
+
+/** 分片顶层的一条汇率：`currency` 兑人民币，与 `calendar` 等长 */
+export interface ShardFx {
+  currency: Currency;
+  code: string;
+  name: string;
+  rate: Array<number | null>;
 }
 
 /** 分片合不合法。宁可当场说「没有这一关」，也不要拿半截数据开局。 */
@@ -319,9 +337,95 @@ export function isLevelShard(raw: unknown): raw is LevelShard {
   if (!Array.isArray(s.instruments) || s.instruments.length === 0) return false;
   const n = s.calendar.length;
   // 每一列都必须与日历等长——引擎靠这个长度对齐，对不上会被当成「没有开盘价」
-  return s.instruments.every(
+  const colsOk = s.instruments.every(
     (i) => Array.isArray(i.open) && i.open.length === n && Array.isArray(i.close) && i.close.length === n,
   );
+  if (!colsOk) return false;
+  // 汇率列同样必须与日历等长：短一格就会「第 k 天用错价」，而且不会报错
+  if (s.fx !== undefined) {
+    if (!Array.isArray(s.fx)) return false;
+    if (!s.fx.every((f) => Array.isArray(f?.rate) && f.rate.length === n)) return false;
+  }
+  return true;
+}
+
+/** 折算后的价格保留 4 位小数：够精确到分，又不会拖一串浮点尾巴 */
+function round4(v: number): number {
+  return Math.round(v * 1e4) / 1e4;
+}
+
+/**
+ * 把一条本币价格列折成人民币。
+ *
+ * 汇率缺的那一天（外盘开市、中行没报价）沿用**上一个已知汇率**——不是跳过，
+ * 也不是按 1:1。整条序列从头就一次汇率都拿不到时返回 `null`，交给调用方拒绝开局。
+ */
+function cnyColumn(
+  col: Array<number | null>,
+  rate: Array<number | null>,
+  firstRate: number,
+): Array<number | null> {
+  const out: Array<number | null> = [];
+  let last: number = firstRate;
+  for (let k = 0; k < col.length; k += 1) {
+    const r = rate[k];
+    if (typeof r === "number" && Number.isFinite(r) && r > 0) last = r;
+    const v = col[k];
+    out.push(v === null || v === undefined ? null : round4(v * last));
+  }
+  return out;
+}
+
+/**
+ * 把分片里境外标的的价格折成人民币。**折算必须发生在数据进引擎之前。**
+ *
+ * 账户是人民币记账的（`Account.cash`、`Trade.amount`、`avgCost` 全是 ¥），
+ * 折完之后 `price × shares === amount`、费用按 amount 算、跨标的求和的权益曲线
+ * 这几条不变式一条都不用改，`replayPrices` 直接返回 ¥，四个 `totalAssets` 调用点
+ * 也全都不用动。
+ *
+ * 代价是港美股的涨跌幅里会混进汇率变动。这不是 bug——一个持有美股的中国投资者，
+ * 人民币口径的收益本来就把汇率算在内，界面上标注一句说明即可。
+ *
+ * 换不到汇率就**抛错**，不退回本币接着跑：那等于假装港币就是人民币，
+ * 玩家看到的成本会凭空少 13%，而且全程没有任何提示。
+ */
+export function convertShardToCny(shard: LevelShard): LevelShard {
+  const fx = shard.fx;
+  const overseas = shard.instruments.filter((i) => i.currency && i.currency !== "CNY");
+  if (overseas.length === 0) return shard;
+  if (!fx || fx.length === 0) {
+    throw new Error(`${shard.levelId} 里有境外标的，却没有汇率序列（fx），无法折成人民币`);
+  }
+
+  const byCurrency = new Map<Currency, Array<number | null>>();
+  for (const f of fx) byCurrency.set(f.currency, f.rate);
+
+  const instruments = shard.instruments.map((inst) => {
+    const cur = inst.currency;
+    if (!cur || cur === "CNY") return inst;
+    const rate = byCurrency.get(cur);
+    if (!rate) {
+      throw new Error(`${shard.levelId} 的 ${inst.code} 按 ${cur} 计价，但分片里没有 ${cur} 的汇率`);
+    }
+    const firstRate = rate.find((r): r is number => typeof r === "number" && Number.isFinite(r) && r > 0);
+    if (firstRate === undefined) {
+      throw new Error(`${shard.levelId} 的 ${inst.code} 换不到 ${cur} 汇率，拒绝按本币继续跑`);
+    }
+    return {
+      ...inst,
+      open: cnyColumn(inst.open, rate, firstRate),
+      close: cnyColumn(inst.close, rate, firstRate),
+      high: cnyColumn(inst.high, rate, firstRate),
+      low: cnyColumn(inst.low, rate, firstRate),
+      // prevClose 是窗口**前一天**的价，那天的汇率没在序列里，用首日汇率近似。
+      // 差一天，对首日涨跌幅的影响是万分之一量级，比拿窗口内的价硬顶强得多。
+      prevClose:
+        typeof inst.prevClose === "number" ? round4(inst.prevClose * firstRate) : (inst.prevClose ?? null),
+      // volume 不折：它是股数，跟币种无关
+    };
+  });
+  return { ...shard, instruments };
 }
 
 /**
@@ -358,7 +462,7 @@ export async function loadLevelShard(
   if (!res.ok) throw new Error(`读取 ${url} 失败：HTTP ${res.status}`);
   const raw: unknown = await res.json();
   if (!isLevelShard(raw)) throw new Error(`${url} 不是一份完整的关卡数据`);
-  return raw;
+  return convertShardToCny(raw);
 }
 
 // ── 那一天的资讯（历史推演专用） ──────────────────────────────
@@ -426,13 +530,25 @@ export async function loadDayNews(
   }
 }
 
-/** 用一份关卡分片开局。玩家总是从这一关的第 1 天进场，所以 startIndex 恒为 0。 */export function startLevelReplay(shard: LevelShard, initialCash: number, label?: string): ReplayState {
+/**
+ * 分片顶层的汇率 → 引擎配置里的汇率。
+ *
+ * 引擎只需要「哪个币种、哪一天什么价」——`code` 和 `name` 是给人看的，不进引擎。
+ */
+function configFx(shard: LevelShard): ConfigFx[] | undefined {
+  if (!shard.fx || shard.fx.length === 0) return undefined;
+  return shard.fx.map((f) => ({ currency: f.currency, rate: f.rate }));
+}
+
+/** 用一份关卡分片开局。玩家总是从这一关的第 1 天进场，所以 startIndex 恒为 0。 */
+export function startLevelReplay(shard: LevelShard, initialCash: number, label?: string): ReplayState {
   return createReplay({
     calendar: [...shard.calendar],
     startIndex: 0,
     initialCash,
     instruments: shard.instruments,
     benchmarkClose: shard.benchmark?.close,
+    fx: configFx(shard),
     label: label ?? shard.levelId,
   });
 }
@@ -445,6 +561,7 @@ export function restoreLevelReplay(shard: LevelShard, save: ReplaySave): ReplayS
     initialCash: save.initialCash,
     instruments: shard.instruments,
     benchmarkClose: shard.benchmark?.close,
+    fx: configFx(shard),
     label: save.label,
   };
   return applySave(config, shard.calendar, save);

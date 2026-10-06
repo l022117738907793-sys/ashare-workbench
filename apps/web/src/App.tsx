@@ -6,7 +6,7 @@
  *   实时报价 → applyLivePrices(bundle) → liveSnapshot → 展示用漏斗 / 七步报告
  * 基础漏斗必须独立算一次：否则"报价 → 快照 → 漏斗 → 轮询代码 → 报价"会自我循环。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   analyzeMarket,
   analyzeSector,
@@ -104,6 +104,7 @@ import {
   LS_GUIDE_SEEN,
   LS_SETTINGS,
   LS_STORE,
+  LS_TAB,
   mergeRules,
   parseSettings,
   parseStore,
@@ -138,6 +139,19 @@ const TABS: Array<{ key: Tab; label: string }> = [
   { key: "analysis", label: "学习笔记" },
 ];
 
+/**
+ * 刷新之后能恢复的页面，只有底部那三条主干。
+ *
+ * 设置、规则、说明都是「进去看一眼就出来」的子页面 —— 刷新后停在那里，
+ * 玩家会以为自己被困住了。所以它们只在内存里活着。
+ */
+const RESTORABLE_TABS: readonly Tab[] = ["game", "workbench", "analysis"];
+
+function loadTab(): Tab {
+  const v = readLS(LS_TAB);
+  return v !== null && (RESTORABLE_TABS as readonly string[]).includes(v) ? (v as Tab) : "game";
+}
+
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -154,7 +168,7 @@ function lastClose(close: Maybe[]): number | null {
 }
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("game");
+  const [tab, setTab] = useState<Tab>(loadTab);
   const [settings, setSettings] = useState<AppSettings>(() => parseSettings(readLS(LS_SETTINGS)));
   const [store, setStore] = useState<LocalStore>(() => parseStore(readLS(LS_STORE)));
   // 首次访问提示：只在没看过说明时出现，点过就永久收起
@@ -167,6 +181,10 @@ export default function App() {
 
   useEffect(() => writeLS(LS_SETTINGS, serializeSettings(settings)), [settings]);
   useEffect(() => writeLS(LS_STORE, serializeStore(store)), [store]);
+  // 只记三条主干；进设置/规则/说明时不覆盖，免得下次刷新被带到子页面
+  useEffect(() => {
+    if (RESTORABLE_TABS.includes(tab)) writeLS(LS_TAB, tab);
+  }, [tab]);
 
   // ── 模拟游戏账户（纯本地，无后端）──────────────────────────────
   const [game, setGame] = useState<GameState>(() => parseGameState(readLS(LS_GAME)));
@@ -209,7 +227,17 @@ export default function App() {
   const [gamePane, setGamePane] = useState<"live" | "replay" | "history">("live");
   // 传奇模式（模式 2）的关卡选择：只在没开局时出现
   const [legendOpen, setLegendOpen] = useState(false);
-  useEffect(() => { window.scrollTo({ top: 0, behavior: "auto" }); }, [tab, gamePane, legendOpen, game.status]);
+  /*
+   * 换页回到顶部。
+   *
+   * 必须用 useLayoutEffect，不能用 useEffect。React 的 effect 是子组件先跑、父组件后跑，
+   * 而「去筛选」的跳转（WorkbenchView 里那个 useEffect）用的是 behavior:"smooth"，
+   * 是**动画**：父组件随后这句 scrollTo({top:0}) 会当场把它取消掉，玩家点了「去筛选」
+   * 却停在页首。layout effect 整批先于 passive effect 执行，顺序就对了。
+   */
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [tab, gamePane, legendOpen, game.status]);
   const [legendLoading, setLegendLoading] = useState<string | null>(null);
   const [legendError, setLegendError] = useState<string | null>(null);
   // 站点里发布了哪几关（读 history/index.json）。null = 还没问过。

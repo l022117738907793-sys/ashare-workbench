@@ -28,3 +28,9 @@ data/history-cache/
 # 历史资讯抓取时存下来的整页 HTML，只为断点续抓和复查用。
 # data/history/news/（按天切好的标题）才是要进仓库的发布产物。
 data/news-cache/
+
+# 汇率缓存（港币/美元兑人民币的逐日中行折算价），和 history-cache 同类：
+# 中间产物，跑 fetch_overseas.py 生成。切分脚本会把 history-cache 里每个
+# .json 当成一只股票读，汇率序列没有 open/high/low，所以**必须单独放一个目录**，
+# 不能混进 history-cache。
+data/fx-cache/

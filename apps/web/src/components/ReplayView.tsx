@@ -10,6 +10,8 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import {
+  boardOf,
+  describeRules,
   LOT_SIZE,
   totalAssets,
   type ReplayState,
@@ -27,6 +29,9 @@ import { DayNewsCard } from "./DayNewsCard";
 import { ReplayChart } from "./ReplayChart";
 import "./replay-view.css";
 
+/** 市场的中文名，界面各处复用 */
+const MARKET_NAME: Record<string, string> = { CN: "A 股", HK: "港股", US: "美股" };
+
 export interface ReplayViewProps {
   state: ReplayState;
   /** 模式 3（随机）为 true：只显示第几天，结算时才揭晓真实日期 */
@@ -43,8 +48,22 @@ export interface ReplayViewProps {
   stocks: Array<{
     code: string;
     name: string;
-    /** 申万一级行业，用于候选清单分组。老分片没有这一列 */
+    /** 申万一级行业，用于候选清单分组。老分片没有这一列。境外的填市场名（港股/美股） */
     industry?: string;
+    /**
+     * 标的所属市场。
+     *
+     * 缺省按 `"CN"` —— 老分片里没有这一列，而那些分片全是 A 股。
+     * 界面靠它决定写「T+1」还是「T+0」、提示几股起买。
+     */
+    market?: "CN" | "HK" | "US";
+    /**
+     * 计价币种。
+     *
+     * **价格已经折成人民币了**（折算发生在分片加载时），这一列只用来在界面上标注一句
+     * 「原以港币计价、已折成人民币」，引擎全程只认人民币。
+     */
+    currency?: "CNY" | "HKD" | "USD";
     /** 与日历对齐的收盘价，算当日涨跌幅用 */
     close?: Array<number | null>;
     /** 与日历对齐的成交量，算当日成交额用 */
@@ -150,6 +169,21 @@ export function ReplayView(props: ReplayViewProps) {
   }, [stocks, state.dayIndex]);
   const stockByCode = useMemo(() => new Map(stocks.map((s) => [s.code, s])), [stocks]);
   const picked = code ? stockByCode.get(code) : undefined;
+
+  /**
+   * 市场决定三件事：当天能不能卖、几股起买、有没有涨跌停。
+   *
+   * 这三条必须和引擎里 `packages/game/src/rules.ts` 的判断一致 ——
+   * 界面写「T+1」而引擎按 T+0 放行，玩家会以为自己卖不掉，白等一天。
+   */
+  const pickedMarket = picked?.market ?? "CN";
+  const isOverseas = pickedMarket !== "CN";
+  const tPlusOne = pickedMarket === "CN";
+  const minLot = pickedMarket === "US" ? 1 : 100;
+  /** 快捷股数：A 股一手 100 股，港股一手，美股 1 股起 */
+  const quickShares = pickedMarket === "US" ? [1, 10, 100] : [100, 300, 500];
+  /** A 股的后缀是噪音，港美股的 `.HK` / `.US` 是信息 —— 只剥前者 */
+  const shortCode = (c: string) => c.replace(/\.(SH|SZ|BJ)$/, "");
   const holding = account.holdings.find((h) => h.code === code);
   const shares = Number(sharesText);
 
@@ -262,11 +296,11 @@ export function ReplayView(props: ReplayViewProps) {
         <div className="replay-market-column">
           <section className="replay-panel replay-market-panel">
             <header className="replay-panel-head">
-              <div><p className="replay-eyebrow">MARKET / 当时的市场</p><h2>{picked?.name ?? "选择观察标的"}<span className="replay-stock-code">{picked?.code.replace(/\.(SH|SZ|BJ)$/, "")}</span></h2></div>
+              <div><p className="replay-eyebrow">MARKET / 当时的市场</p><h2>{picked?.name ?? "选择观察标的"}<span className="replay-stock-code">{picked ? shortCode(picked.code) : ""}</span></h2></div>
               <div className="replay-quote"><strong>{selectedPrice === null ? "—" : fmtNum(selectedPrice)}</strong><span className={selectedRow?.changePct === null || selectedRow?.changePct === undefined ? "tone-muted" : `tone-${pnlTone(selectedRow.changePct)}`}>{fmtPct(selectedRow?.changePct ?? null)} <small>当日涨跌</small></span></div>
             </header>
             <ReplayChart state={state} code={code} hideDate={hideDate}/>
-            <p className="replay-data-note">{picked?.industry ? `${picked.industry} · ` : ""}历史行情 · 红涨绿跌 · 买卖标记按真实成交日显示</p>
+            <p className="replay-data-note">{picked?.industry ? `${picked.industry} · ` : ""}历史行情 · 红涨绿跌 · 买卖标记按真实成交日显示{isOverseas ? ` · 原以${picked?.currency === "HKD" ? "港币" : "美元"}计价，此处已按当日汇率折成人民币` : ""}</p>
           </section>
 
           <div className="replay-information">
@@ -278,16 +312,28 @@ export function ReplayView(props: ReplayViewProps) {
               <summary><span>当天资讯<small>{dayNews.loading ? "正在读取归档" : dayNews.news?.items.length ? `${dayNews.news.items.length} 条历史归档` : "当前日期暂无资讯归档"}</small></span><span className="replay-expand">展开 +</span></summary>
               <div className="replay-details-body"><DayNewsCard loading={dayNews.loading} missing={dayNews.missing} items={dayNews.news?.items ?? []} source={dayNews.news?.source} mask={(t) => maskDatesIn(state, t, hideDate)}/></div>
             </details>
+            {picked && (
+              // 每个市场的规则不一样，而这正是加港美股的意义：
+              // 同一个「买 100 股」的动作，三个市场付的费用、能不能当天卖、几股起买全都不同。
+              // 默认给境外标的展开，因为差异最多、玩家最容易按 A 股的习惯去操作。
+              <details className="replay-details" open={isOverseas}>
+                <summary><span>{MARKET_NAME[pickedMarket]}交易规则<small>和 A 股逐条对照</small></span><span className="replay-expand">展开 +</span></summary>
+                <div className="replay-details-body">
+                  <ul className="briefing-list">{describeRules(date, boardOf(picked.code), pickedMarket).map((line, i) => <li key={i}>{line}</li>)}</ul>
+                  <RichP className="hint">费用按{hideDate ? "当时" : date}的规则计算。港股与美股按本币原价成交，界面上的金额已折成人民币；汇率变动也会计入您的收益。</RichP>
+                </div>
+              </details>
+            )}
           </div>
         </div>
 
         <aside className="replay-trade-column">
           <section className="replay-panel replay-order-panel">
-            <header className="replay-panel-head"><div><p className="replay-eyebrow">YOUR MOVE / 您的决策</p><h2>模拟下单</h2></div><span className="replay-rule-tag">T+1</span></header>
+            <header className="replay-panel-head"><div><p className="replay-eyebrow">YOUR MOVE / 您的决策</p><h2>模拟下单</h2></div><span className="replay-rule-tag">{tPlusOne ? "T+1" : "T+0"}</span></header>
             <div className="replay-order-body">
               <div className="replay-side-tabs" aria-label="委托方向"><button type="button" className={side === "buy" ? "is-active" : ""} aria-pressed={side === "buy"} onClick={() => { setSide("buy"); setFeedback(null); }}>买入</button><button type="button" className={side === "sell" ? "is-active" : ""} aria-pressed={side === "sell"} onClick={() => { setSide("sell"); setFeedback(null); }}>卖出</button></div>
               <div className="replay-order-stock"><span>当前标的</span><strong>{picked ? picked.name : "请先选择股票"}</strong></div>
-              <div className="field"><label className="field-label" htmlFor="replay-shares">委托股数</label><input id="replay-shares" className="text-input text-input-num" type="number" min={1} step={LOT_SIZE} value={sharesText} onChange={(e) => setSharesText(e.target.value)}/><div className="replay-quantity-buttons">{[100, 300, 500].map((n) => <button key={n} type="button" onClick={() => setSharesText(String(n))}>{n} 股</button>)}{side === "sell" && holding && <button type="button" disabled={holding.sellable === 0} onClick={() => setSharesText(String(holding.sellable))}>可卖全部</button>}</div><p className="field-hint">常规一手 {LOT_SIZE} 股 · 科创板至少 200 股{holding ? ` · 持有 ${holding.shares} / 可卖 ${holding.sellable}` : ""}</p></div>
+              <div className="field"><label className="field-label" htmlFor="replay-shares">委托股数</label><input id="replay-shares" className="text-input text-input-num" type="number" min={1} step={minLot} value={sharesText} onChange={(e) => setSharesText(e.target.value)}/><div className="replay-quantity-buttons">{quickShares.map((n) => <button key={n} type="button" onClick={() => setSharesText(String(n))}>{n} 股</button>)}{side === "sell" && holding && <button type="button" disabled={holding.sellable === 0} onClick={() => setSharesText(String(holding.sellable))}>可卖全部</button>}</div><p className="field-hint">{pickedMarket === "US" ? "美股 1 股起买 · 无涨跌停 · 当日买入当日可卖" : pickedMarket === "HK" ? "港股按手交易，本模拟统一按 100 股一手 · 无涨跌停 · 当日买入当日可卖" : `常规一手 ${LOT_SIZE} 股 · 科创板至少 200 股 · 当日买入次日才可卖`}{holding ? ` · 持有 ${holding.shares} / 可卖 ${holding.sellable}` : ""}</p></div>
               <div className="replay-order-estimate"><span>按收盘价参考金额</span><strong>{selectedPrice !== null && shares > 0 && Number.isFinite(shares) ? `¥ ${fmtNum(selectedPrice * shares)}` : "—"}</strong></div>
               <div className="replay-matching-note"><span aria-hidden="true">◷</span><p>今天挂单，按<strong>次一交易日开盘价</strong>撮合。金额以实际成交价、滑点和费用为准。</p></div>
               <button type="button" className="btn btn-primary replay-submit" disabled={state.finished} onClick={submit}>{state.finished ? "推演已结束" : `挂出${side === "buy" ? "买" : "卖"}单 →`}</button>
@@ -299,10 +345,10 @@ export function ReplayView(props: ReplayViewProps) {
         </aside>
       </div>
 
-      <section className="replay-panel replay-holdings-panel"><header className="replay-panel-head"><div><h2>我的持仓 <span className="replay-count">{account.holdings.length}</span></h2><p>按{hideDate ? "当前交易日" : date}收盘价估值 · 当日买入次日才可卖</p></div></header>{account.holdings.length === 0 ? <div className="replay-empty-holdings"><span aria-hidden="true">◇</span><div><strong>还没有持仓</strong><p>挂出买单，再推进一个交易日。成交的股票会出现在这里。</p></div></div> : <div className="replay-holding-list">{account.holdings.map((h) => {
+      <section className="replay-panel replay-holdings-panel"><header className="replay-panel-head"><div><h2>我的持仓 <span className="replay-count">{account.holdings.length}</span></h2><p>按{hideDate ? "当前交易日" : date}收盘价估值 · A 股当日买入次日才可卖，港美股当日可卖 · 境外标的已折成人民币</p></div></header>{account.holdings.length === 0 ? <div className="replay-empty-holdings"><span aria-hidden="true">◇</span><div><strong>还没有持仓</strong><p>挂出买单，再推进一个交易日。成交的股票会出现在这里。</p></div></div> : <div className="replay-holding-list">{account.holdings.map((h) => {
         const price = prices[h.code] ?? null;
         const pnl = price === null ? null : (price - h.avgCost) * h.shares;
-        return <div key={h.code} className="replay-holding-row"><div className="replay-holding-name"><strong>{h.name}</strong><span>{h.code.replace(/\.(SH|SZ|BJ)$/, "")}</span></div><div><span>持有 / 可卖</span><strong>{h.shares} / {h.sellable}</strong></div><div><span>成本 / 收盘</span><strong>{fmtNum(h.avgCost)} / {price === null ? "—" : fmtNum(price)}</strong></div><div><span>持仓盈亏</span><strong className={pnl === null ? "tone-muted" : `tone-${pnlTone(pnl)}`}>{pnl === null ? "—" : fmtNum(pnl)}</strong></div><button type="button" className="btn btn-ghost btn-tiny" onClick={() => { setCode(h.code); setSide("sell"); setSharesText(String(h.sellable || 100)); setFeedback(null); document.getElementById("replay-shares")?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>查看 / 卖出 ↗</button></div>;
+        return <div key={h.code} className="replay-holding-row"><div className="replay-holding-name"><strong>{h.name}</strong><span>{shortCode(h.code)}</span></div><div><span>持有 / 可卖</span><strong>{h.shares} / {h.sellable}</strong></div><div><span>成本 / 收盘</span><strong>{fmtNum(h.avgCost)} / {price === null ? "—" : fmtNum(price)}</strong></div><div><span>持仓盈亏</span><strong className={pnl === null ? "tone-muted" : `tone-${pnlTone(pnl)}`}>{pnl === null ? "—" : fmtNum(pnl)}</strong></div><button type="button" className="btn btn-ghost btn-tiny" onClick={() => { setCode(h.code); setSide("sell"); setSharesText(String(h.sellable || 100)); setFeedback(null); document.getElementById("replay-shares")?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>查看 / 卖出 ↗</button></div>;
       })}</div>}</section>
 
       <div className="replay-bottom-grid">

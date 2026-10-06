@@ -141,7 +141,7 @@ async function evaluate<T = unknown>(expr: string): Promise<T> {
  *
  * **必须把术语按钮（`button.term`）排除掉。** 术语高亮会把界面里的专业词都包成
  * 一个按钮，而它的文字就是那个词本身 —— 比如「待成交委托」卡的空提示写着
- * 「还没有挂单」，于是 `CLICK("挂单")` 会点到那个**解释**按钮上，真正的「挂单」
+ * 「还没有挂单」，于是 `CLICK("挂出")` 会点到那个**解释**按钮上，真正的「挂单」
  * 提交按钮一次都没被按，而 `CLICK` 照样返回 OK。这类按钮不是动作，别让它参与匹配。
  */
 const CLICK = (text: string) => `
@@ -185,7 +185,7 @@ try {
   await send("Page.reload", { ignoreCache: true });
   await sleep(1500);
   const loaded = await waitFor(
-    `document.body.innerText.includes("A 股趋势筛选工作台")`,
+    `document.body.innerText.includes("股市练习场")`,
     "标题出现",
   );
   check("页面渲染出标题", loaded);
@@ -207,8 +207,8 @@ try {
   `);
   check("底栏只剩三条", tabs.length === 3, tabs.join(" | "));
   check(
-    "底栏是筛选 / 个股分析 / 模拟游戏",
-    tabs.join("|") === "筛选|个股分析|模拟游戏",
+    "底栏是游戏大厅 / 市场观察 / 学习笔记",
+    tabs.join("|") === "游戏大厅|市场观察|学习笔记",
     tabs.join(" | "),
   );
   check(
@@ -233,26 +233,46 @@ try {
   );
   await evaluate(CLICK("← 返回"));
   check(
-    "返回之后回到筛选页",
-    await waitFor(`document.body.innerText.includes("① 大盘环境")`, "筛选页", 60),
+    // 重设计之后落地页是游戏大厅（底栏第一格），进设置之前就在这一页，返回自然回这里
+    "返回之后回到进来之前的那一页（落地页是游戏大厅）",
+    await waitFor(`document.body.innerText.includes("选一种玩法")`, "游戏大厅", 60),
   );
 
-  console.log("\n二、进入模拟游戏");
-  await evaluate(CLICK("模拟游戏"));
+  console.log("\n二、进入游戏大厅");
+  await evaluate(CLICK("游戏大厅"));
   await sleep(400);
   const inGame = await waitFor(
-    `document.body.innerText.includes("模拟游戏")`,
-    "模拟游戏页出现",
+    `document.body.innerText.includes("选一种玩法")`,
+    "游戏大厅出现",
   );
-  check("切到模拟游戏页", inGame);
+  check("切到游戏大厅", inGame);
+  /**
+   * 开局入口是「选玩法卡片 + 底下一个启动按钮」两步。
+   *
+   * 老版本是两张入口卡（一张叫「历史推演」），重设计后换成三张玩法卡，
+   * 随机/传奇两条路都要先点卡片再按启动 —— 所以这里查的是三张卡都在。
+   */
+  const modeText = await evaluate<string>(`
+    return [...document.querySelectorAll('.game-mode-card')].map(c => c.innerText.replace(/\\s+/g, " ")).join(" || ");
+  `);
   check(
-    "看到历史推演入口",
-    await evaluate<boolean>(`return document.body.innerText.includes("历史推演");`),
+    "三种玩法都摆出来了（传奇 / 实时 / 随机）",
+    ["传奇模式", "实时模式", "随机模式"].every((m) => modeText.includes(m)),
+    modeText.slice(0, 160),
   );
 
-  console.log("\n三、开局");
+  console.log("\n三、随机模式开局");
+  // 落地默认选中「传奇模式」，所以必须先切到随机模式，启动按钮才会变成「用 X 万随机开局」
+  const pickedRandom = await evaluate<string>(`
+    const card = [...document.querySelectorAll('.game-mode-card')].find(c => c.innerText.includes("随机模式"));
+    if (!card) return "NO_CARD";
+    card.click();
+    return "OK";
+  `);
+  check("点得到「随机模式」卡片", pickedRandom === "OK", pickedRandom);
+  await sleep(300);
   const clicked = await evaluate<string>(CLICK("随机开局"));
-  check("点得到「随机开局」按钮", clicked === "OK", clicked);
+  check("点得到「用 10 万随机开局」按钮", clicked === "OK", clicked);
   await sleep(600);
   const opened = await waitFor(
     `document.body.innerText.includes("待成交委托") && document.body.innerText.includes("走一天")`,
@@ -278,12 +298,18 @@ try {
   //
   // 这里**点榜单的第一行**来填，而不是直接往输入框塞代码 —— 选股清单就是为
   // 「玩家不知道买什么」而做的，所以端到端就该从它那里走一遍。
+  //
+  // 重设计之后这份清单默认是收着的（怕把下单卡撑得太长），要先按「更换股票」展开。
+  await evaluate(CLICK("更换股票"));
+  await sleep(250);
   const fillRaw = await evaluate<string>(`
     const codeInput = document.querySelector('input[placeholder*="代码"], input[placeholder*="名称"]');
     if (!codeInput) return "NO_CODE_INPUT";
     const row = document.querySelector('.pick-row');
     if (!row) return "NO_PICK_ROW";
-    const name = row.innerText.split("\\n")[0].trim();
+    // 名字要单独取：.pick-name 里嵌着一个 .pick-code，直接读 innerText 会连成「沃森生物300142」
+    const nameEl = row.querySelector(".pick-name");
+    const name = (nameEl ? nameEl.childNodes[0].textContent : row.innerText.split("\\n")[0]).trim();
     row.click();
     // 点一下只是改 React state，输入框的值要等这次渲染落地；
     // 同步读会读到空字符串，那是时机问题不是功能问题。
@@ -303,7 +329,7 @@ try {
   const fillName = fillRaw.split(":")[2] ?? "";
   const fillCode = fillRaw.split(":")[1] ?? "";
 
-  const placed = await evaluate<string>(CLICK("挂单"));
+  const placed = await evaluate<string>(CLICK("挂出"));
   check("点得到「挂单」按钮", placed === "OK", placed);
   await sleep(400);
   const pendingText = await evaluate<string>(`return document.body.innerText;`);
@@ -334,8 +360,8 @@ try {
   await send("Page.enable");
   await send("Page.reload", { ignoreCache: true });
   await sleep(1800);
-  await waitFor(`document.body.innerText.includes("A 股趋势筛选工作台")`, "重新加载");
-  await evaluate(CLICK("模拟游戏"));
+  await waitFor(`document.body.innerText.includes("股市练习场")`, "重新加载");
+  await evaluate(CLICK("游戏大厅"));
   await sleep(600);
   const resumed = await waitFor(
     `document.body.innerText.includes("走一天") && document.body.innerText.includes("推演日志")`,
@@ -352,8 +378,9 @@ try {
   );
 
   console.log("\n六、结算");
-  const settle = await evaluate<string>(CLICK("结算本局"));
-  check("点得到「结算本局」", settle === "OK", settle);
+  // 这一局还没走完，按钮写的是「查看阶段结算」；走完了才变成「结算本局」
+  const settle = await evaluate<string>(CLICK("查看阶段结算"));
+  check("点得到「查看阶段结算」", settle === "OK", settle);
   await sleep(600);
   const settled = await evaluate<string>(`return document.body.innerText;`);
   check("结算后给出收益率", /收益率|总收益/.test(settled), settled.slice(0, 120));
@@ -380,7 +407,11 @@ try {
   );
 
   const openLegend = await evaluate<string>(CLICK("传奇模式"));
-  check("点得到「传奇模式」入口", openLegend === "OK", openLegend);
+  check("点得到「传奇模式」卡片", openLegend === "OK", openLegend);
+  await sleep(300);
+  // 重设计之后进关卡列表是两步：先点玩法卡片，再按底下的「选择传奇关卡」
+  const goLevels = await evaluate<string>(CLICK("选择传奇关卡"));
+  check("点得到「选择传奇关卡」按钮", goLevels === "OK", goLevels);
   check(
     "关卡列表出来了",
     await waitFor(`document.body.innerText.includes("2016-11-01")`, "关卡列表"),
@@ -435,6 +466,9 @@ try {
   ) as Array<{ code: string; name: string }>;
   const notYet = snapshotStocks.find((s) => !shardCodes.has(s.code));
 
+  // 同样先展开选股清单，否则这里量到的是「收着」而不是「没有候选」
+  await evaluate(CLICK("更换股票"));
+  await sleep(250);
   const pickCount = await evaluate<number>(`return document.querySelectorAll('.pick-row').length;`);
   check("下单卡里列出了候选股票（不是让人对着空白框发呆）", pickCount > 0, `${pickCount} 行`);
 
@@ -509,7 +543,7 @@ try {
     return code;
   `);
   check("关卡里填得进标的与股数", !lvCode.startsWith("NO_"), lvCode);
-  await evaluate(CLICK("挂单"));
+  await evaluate(CLICK("挂出"));
   await sleep(400);
   await evaluate(CLICK("走一天"));
   await sleep(700);
@@ -520,8 +554,8 @@ try {
   await send("Page.enable");
   await send("Page.reload", { ignoreCache: true });
   await sleep(2000);
-  await waitFor(`document.body.innerText.includes("A 股趋势筛选工作台")`, "重新加载");
-  await evaluate(CLICK("模拟游戏"));
+  await waitFor(`document.body.innerText.includes("股市练习场")`, "重新加载");
+  await evaluate(CLICK("游戏大厅"));
   await sleep(800);
   check(
     "刷新后还在推演里，没有退回关卡列表",
@@ -536,7 +570,7 @@ try {
   await evaluate(`window.confirm = () => true; return true;`);
   await evaluate(CLICK("退出推演"));
   await sleep(600);
-  await evaluate(CLICK("模拟游戏"));
+  await evaluate(CLICK("游戏大厅"));
   await sleep(600);
 
   /**
@@ -580,7 +614,7 @@ try {
   await send("Page.reload", { ignoreCache: true });
   await sleep(1800);
   await waitFor(`!document.body.innerText.includes("正在加载")`, "加载完成");
-  await evaluate(CLICK("模拟游戏"));
+  await evaluate(CLICK("游戏大厅"));
   await sleep(800);
 
   const awayShown = await waitFor(
@@ -656,7 +690,7 @@ try {
   check("复盘里至少列出那一笔成交", Number(JSON.parse(reviewMeta)) >= 1, reviewMeta);
 
   console.log("\n十二、板块跳转：点板块跳到该板块的个股");
-  await evaluate(CLICK("筛选"));
+  await evaluate(CLICK("市场观察"));
   await sleep(600);
   // 先滚到板块卡，再点第一个板块 —— 否则本来就在页面顶部，跳不跳看不出来
   await evaluate(`
@@ -718,7 +752,7 @@ try {
 
   console.log("\n十三、卡片可折叠");
   const foldBtn = (label: string) => `[...document.querySelectorAll("button.card-fold")].find(b => b.textContent.includes(${JSON.stringify(label)}))`;
-  await evaluate(CLICK("筛选"));
+  await evaluate(CLICK("市场观察"));
   await sleep(500);
   const h0 = await evaluate<number>(`return document.body.scrollHeight;`);
   const fold2 = await evaluate<string>(`
@@ -806,7 +840,7 @@ try {
   await waitFor(`document.body.innerText.includes("① 大盘环境")`, "清空后回到筛选页", 60);
   await sleep(1500); // 快照会重新加载
 
-  await evaluate(CLICK("个股分析"));
+  await evaluate(CLICK("学习笔记"));
   check(
     "清空之后个股分析页是空状态",
     await waitFor(`document.body.innerText.includes("还没有选中个股")`, "个股分析空状态", 60),
@@ -844,13 +878,13 @@ try {
     return "OK";
   `);
   check("先折起个股分类", await waitFor(FOLDED, "第三层折起来"));
-  await evaluate(CLICK("个股分析"));
+  await evaluate(CLICK("学习笔记"));
   await waitFor(`document.body.innerText.includes("还没有选中个股")`, "再次进入个股分析空状态", 60);
   await evaluate(CLICK("去筛选"));
   check("折着跳过去会自动展开，并照常闪", await waitFor(FLASHING, "展开了并且在闪"));
   check("展开之后不再是折着的", !(await evaluate<boolean>(`return ${FOLDED};`)));
 
-  console.log("\n十三之三、两局并存：实时模式和历史推演互不清空");
+  console.log("\n十三之三、两局并存：实时账户和历史推演互不清空");
 
   /**
    * 用户提的：先开一局实时模式，中途想玩传奇模式，又不想丢掉实时那边的存档。
@@ -870,16 +904,24 @@ try {
   await send("Page.enable");
   await send("Page.reload", { ignoreCache: true });
   await sleep(1800);
-  await waitFor(`document.body.innerText.includes("A 股趋势筛选工作台")`, "重新加载");
-  await evaluate(CLICK("模拟游戏"));
+  await waitFor(`document.body.innerText.includes("股市练习场")`, "重新加载");
+  await evaluate(CLICK("游戏大厅"));
   check(
     "两边都是空的，回到开局界面",
-    await waitFor(`document.body.innerText.includes("以 20 万开始")`, "开局界面", 60),
+    await waitFor(`document.body.innerText.includes("选一种玩法")`, "开局界面", 60),
   );
 
   // 选 10 万，和默认的 20 万分开，免得后面把「没被动过」看成「被重置了」
   await evaluate(CLICK("10 万"));
-  await evaluate(CLICK("以 10 万开始"));
+  // 重设计之后开局是两步：先点「实时模式」卡片，再按底下的启动按钮。
+  // 刚清过存档，默认选中的是传奇模式，不点这张卡片按钮会一直是「选择传奇关卡」。
+  await evaluate(`
+    const card = [...document.querySelectorAll('.game-mode-card')].find(c => c.innerText.includes("实时模式"));
+    if (card) card.click();
+    return "OK";
+  `);
+  await sleep(300);
+  await evaluate(CLICK("开始实时盘"));
   check(
     "实时模式开局成功",
     await waitFor(`document.body.innerText.includes("账户总览")`, "账户总览"),
@@ -907,7 +949,11 @@ try {
 
   // 再开一局历史推演 —— 实时那边不该被动到
   const coexistLevel = LEVELS.find((l) => l.id === "2024-09-25")!;
-  await evaluate(CLICK("传奇模式"));
+  // 现在人在实时账户那一屏，玩法卡片不在这 —— 要先按「探索传奇关卡 →」回大厅
+  await evaluate(CLICK("探索传奇关卡"));
+  await sleep(400);
+  // 两步走：卡片只负责选中，还要按「选择传奇关卡」才真的进关卡列表
+  await evaluate(CLICK("选择传奇关卡"));
   check(
     "关卡列表出来了",
     await waitFor(`document.body.innerText.includes("${coexistLevel.startDate}")`, "关卡列表"),
@@ -927,18 +973,19 @@ try {
   const coChips = await evaluate<string[]>(`
     return [...document.querySelectorAll(".pane-switch .chip")].map((b) => b.innerText.trim());
   `);
-  // 三格：实时模式 / 历史推演（有推演时才出现）/ 游戏记录（一直在）
+  // 三格：实时账户 / 历史推演（有推演时才出现）/ 游戏记录（一直在）
+  // 第一个 chip 的文案跟着状态走：没开局时写「游戏大厅」，开着实时盘时写「实时账户」
   check("顶上出现了三条切换", coChips.length === 3, coChips.join(" | "));
   check(
     "切换条把两边都写清楚了，外加游戏记录",
-    coChips.some((c) => c.includes("实时模式")) &&
+    coChips.some((c) => c.includes("实时账户")) &&
       coChips.some((c) => c.includes("历史推演")) &&
       coChips.some((c) => c.includes("游戏记录")),
     coChips.join(" | "),
   );
 
   // 切回实时模式：账户必须还是刚才那一局
-  await evaluate(CLICK("实时模式"));
+  await evaluate(CLICK("实时账户"));
   check(
     "切得回实时模式",
     await waitFor(`document.body.innerText.includes("账户总览")`, "实时模式的账户总览"),
@@ -949,12 +996,13 @@ try {
     "已经有一局推演在跑时，不再给开局按钮",
     await evaluate<boolean>(`
       const t = document.body.innerText;
-      return t.includes("回到正在跑的那一局") && !t.includes("传奇模式 · 10 个历史时刻");
+      // 入口的文案跟着状态走：有推演在跑时给「继续历史推演 →」，不再给「探索传奇关卡 →」
+      return t.includes("继续历史推演") && !t.includes("探索传奇关卡");
     `),
   );
 
   // 再切回去
-  await evaluate(CLICK("回到正在跑的那一局"));
+  await evaluate(CLICK("继续历史推演"));
   check(
     "从卡片上的按钮也能回到推演",
     await waitFor(`document.body.innerText.includes("待成交委托")`, "回到推演界面"),
@@ -964,8 +1012,8 @@ try {
   await send("Page.enable");
   await send("Page.reload", { ignoreCache: true });
   await sleep(1800);
-  await waitFor(`document.body.innerText.includes("A 股趋势筛选工作台")`, "重新加载");
-  await evaluate(CLICK("模拟游戏"));
+  await waitFor(`document.body.innerText.includes("股市练习场")`, "重新加载");
+  await evaluate(CLICK("游戏大厅"));
   check(
     "刷新后回到的是推演，不是开局页",
     await waitFor(`document.body.innerText.includes("待成交委托")`, "推演被还原", 60),
@@ -974,7 +1022,7 @@ try {
     "刷新后切换条还在",
     (await evaluate<number>(`return document.querySelectorAll(".pane-switch .chip").length;`)) === 3,
   );
-  await evaluate(CLICK("实时模式"));
+  await evaluate(CLICK("实时账户"));
   await waitFor(`document.body.innerText.includes("账户总览")`, "实时模式的账户总览");
   const coCash2 = await evaluate<string>(`return ${COEXIST_CASH};`);
   check("刷新之后实时模式的存档也还在", coCash2 === coCash0, coCash2);
@@ -993,7 +1041,9 @@ try {
     if (!codeInput) return "NO_CODE_INPUT";
     const row = document.querySelector('.pick-row');
     if (!row) return "NO_PICK_ROW";
-    const name = row.innerText.split("\\n")[0].trim();
+    // 名字要单独取：.pick-name 里嵌着一个 .pick-code，直接读 innerText 会连成「沃森生物300142」
+    const nameEl = row.querySelector(".pick-name");
+    const name = (nameEl ? nameEl.childNodes[0].textContent : row.innerText.split("\\n")[0]).trim();
     row.click();
     return new Promise((r) => setTimeout(() => {
       const numInput = [...document.querySelectorAll('input[type="number"]')].pop();
@@ -1077,7 +1127,7 @@ try {
       r("OK");
     }, 250));
   `);
-  const ghPlaced = await evaluate<string>(CLICK("挂单"));
+  const ghPlaced = await evaluate<string>(CLICK("挂出"));
   check("推演里也挂得上单", ghPlaced === "OK", ghPlaced);
   await sleep(400);
   await evaluate(CLICK("走一天"));
@@ -1130,8 +1180,8 @@ try {
   check(
     "点一行跳到个股分析",
     await waitFor(
-      `document.querySelector(".tabbar .tab-active") && document.querySelector(".tabbar .tab-active").innerText.trim() === "个股分析"`,
-      "个股分析页出现",
+      `document.querySelector(".tabbar .tab-active") && document.querySelector(".tabbar .tab-active").innerText.trim() === "学习笔记"`,
+      "个股分析页出现（底栏标签叫「学习笔记」）",
       60,
     ),
   );
@@ -1142,7 +1192,7 @@ try {
   );
 
   // 回到游戏记录，再从横幅回推演
-  await evaluate(CLICK("模拟游戏"));
+  await evaluate(CLICK("游戏大厅"));
   await sleep(500);
   await evaluate(CLICK("游戏记录"));
   check(
@@ -1167,7 +1217,7 @@ try {
    * 一屏解释，那是功能没做完而不是功能多。
    */
   // 回到筛选页：这一页术语最密，而且和上一节留下的游戏状态无关
-  await evaluate(CLICK("筛选"));
+  await evaluate(CLICK("市场观察"));
   await sleep(600);
   const termBefore = await evaluate<number>(`return document.querySelectorAll(".term-panel").length;`);
   check("没点之前一个解释都不展开", termBefore === 0, `实际 ${termBefore} 个`);
@@ -1240,14 +1290,34 @@ try {
    * 所以另抓了一份按天的离线归档。这里验的是**它真的接上了**，不是「代码里有这个
    * 组件」—— 所以要求卡片里出现具体条数，而不只是标题。
    */
-  await evaluate(CLICK("模拟游戏"));
+  await evaluate(CLICK("游戏大厅"));
   await sleep(600);
   const toReplay = await evaluate<string>(CLICK("历史推演"));
   check("推演还开着，切换条上点得回去", toReplay === "OK", toReplay);
+  /*
+   * 资讯收在「当天资讯」这个折叠块里（重设计时怕把左栏撑太长）。
+   * 摘要行折着也看得见，先验它 —— 摘要写着条数，就等于证明归档真的接上了，
+   * 而不是「代码里有这个组件」。正文再展开读。
+   */
+  const newsSummary = await evaluate<string>(`
+    const d = [...document.querySelectorAll("details.replay-details")].find(x => x.textContent.includes("当天资讯"));
+    return d ? d.querySelector("summary").innerText : "NOT_FOUND";
+  `);
   check(
     "推演界面回来了",
-    await waitFor(`document.body.innerText.includes("那一天的资讯")`, "那一天的资讯卡片", 60),
+    await waitFor(`(function () {
+      const d = [...document.querySelectorAll("details.replay-details")].find(x => x.textContent.includes("当天资讯"));
+      return !!d;
+    })()`, "那一天的资讯卡片", 60),
   );
+  check("摘要行就写明有几条历史归档（折着也看得见）", /\d+ 条历史归档/.test(newsSummary), newsSummary);
+  await evaluate(`
+    const d = [...document.querySelectorAll("details.replay-details")].find(x => x.textContent.includes("当天资讯"));
+    if (!d) return "NOT_FOUND";
+    d.open = true;
+    return "OK";
+  `);
+  await sleep(300);
   const dayNews = await evaluate<string>(`
     const card = [...document.querySelectorAll("section.card")].find(s => s.textContent.includes("那一天的资讯"));
     return card ? card.innerText : "NO_CARD";
@@ -1298,6 +1368,177 @@ try {
     nested.length === 0,
     JSON.stringify(nested).slice(0, 240),
   );
+
+  console.log("\n十三之七、港股与美股：同一个动作，三个市场不一样");
+
+  /**
+   * 加港美股的意义全在**规则差异**上：同一句「买 100 股」，
+   * 三个市场付的钱、能不能当天卖、几股起买都不一样。
+   *
+   * 所以这一节不验「界面上能出现港股」这种摆设，而是逐条把差异验出来 ——
+   * 而且验的是**引擎真算出来的行为**（可卖数量、成交记录），不是只有文案。
+   * 界面说的和引擎做的不一致，玩家就会照 A 股的习惯操作，然后白等一天。
+   *
+   * 用腾讯（00700.HK）和苹果（AAPL.US）：十个关卡里都有，
+   * 所以不管前面进的是哪一关，这一节都跑得起来。
+   */
+  const pickReplayStock = async (keyword: string, label: string): Promise<string> => {
+    // 往输入框里打字本身就会把清单展开（ReplayView 的 onChange 里 setShowStocks(true)）。
+    // 注意得打**名字的一部分**：打了完整代码的话 picked 立刻成立，清单会切回榜单。
+    const typed = await evaluate<boolean>(`
+      const input = document.getElementById("replay-code");
+      if (!input) return false;
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      setter.call(input, ${JSON.stringify(keyword)});
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    `);
+    if (!typed) return "NO_CODE_INPUT";
+    await sleep(400);
+    /*
+     * 打的是**全名**时（ReplayView 的 onChange 里有 `stocks.find(s => s.name === v)`），
+     * React 当场就把代码填好了、清单也收回去 —— 这时没有行可点，输入框里已经是答案。
+     * 打的是名字的一部分才需要从清单里挑一行。
+     */
+    const direct = await evaluate<string>(`return document.getElementById("replay-code").value;`);
+    if (direct !== keyword) return direct;
+    const clicked = await evaluate<string>(`
+      const rows = [...document.querySelectorAll(".pick-row")];
+      const row = rows.find((r) => r.innerText.includes(${JSON.stringify(label)}));
+      if (!row) return "NO_ROW:" + rows.length;
+      row.click();
+      return "OK";
+    `);
+    if (clicked !== "OK") return clicked;
+    await sleep(400);
+    return await evaluate<string>(`
+      const input = document.getElementById("replay-code");
+      return input ? input.value : "NO_INPUT";
+    `);
+  };
+
+  /** 某只票选中之后，下单卡上的那几个说法 */
+  const orderPanel = async () =>
+    await evaluate<string>(`
+      const tag = document.querySelector(".replay-rule-tag");
+      const note = document.querySelector(".replay-data-note");
+      const hint = [...document.querySelectorAll(".replay-order-panel .field-hint")].map((e) => e.innerText).join(" | ");
+      const quick = [...document.querySelectorAll(".replay-quantity-buttons button")].map((b) => b.innerText).join(",");
+      return JSON.stringify({
+        tag: tag ? tag.innerText : "",
+        note: note ? note.innerText : "",
+        hint,
+        quick,
+      });
+    `).then((raw) => JSON.parse(raw) as Record<string, string>);
+
+  /** 折叠块里那块「XX 交易规则」面板 */
+  const rulesPanel = async () =>
+    await evaluate<string>(`
+      const d = [...document.querySelectorAll("details.replay-details")]
+        .find((x) => (x.querySelector("summary") || x).innerText.includes("交易规则"));
+      if (!d) return JSON.stringify({ open: "", body: "" });
+      return JSON.stringify({
+        open: d.open ? "true" : "false",
+        body: d.querySelector(".replay-details-body") ? d.querySelector(".replay-details-body").innerText : "",
+      });
+    `).then((raw) => JSON.parse(raw) as Record<string, string>);
+
+  // ── 港股：T+0、无涨跌停、100 股一手、双边印花税、价格折成人民币 ──
+  const hkCode = await pickReplayStock("腾讯", "腾讯");
+  check("选得到港股（清单里搜「腾讯」能挑出腾讯控股）", hkCode === "00700.HK", hkCode);
+
+  const hkPanel = await orderPanel();
+  check("港股标着 T+0（不是 A 股的 T+1）", hkPanel.tag === "T+0", hkPanel.tag);
+  check(
+    "写明了港股按手交易、当日可卖、无涨跌停",
+    hkPanel.hint.includes("100 股一手") && hkPanel.hint.includes("当日买入当日可卖") && hkPanel.hint.includes("无涨跌停"),
+    hkPanel.hint,
+  );
+  check(
+    "写明了原以港币计价、已折成人民币",
+    hkPanel.note.includes("原以港币计价") && hkPanel.note.includes("已按当日汇率折成人民币"),
+    hkPanel.note,
+  );
+
+  const hkRules = await rulesPanel();
+  check("选港股时规则面板默认展开（差异最多，不用玩家自己去找）", hkRules.open === "true", hkRules.open);
+  check(
+    "港股规则逐条写清了印花税/佣金/T+0/手数",
+    hkRules.body.includes("印花税") &&
+      hkRules.body.includes("HK$") &&
+      hkRules.body.includes("T+0") &&
+      hkRules.body.includes("100"),
+    hkRules.body.replace(/\n/g, " / ").slice(0, 200),
+  );
+
+  // 真买 100 股，走一天，看引擎给的可卖数量 —— T+0 的话买完当天就是全部可卖
+  await evaluate<boolean>(`
+    const btn = [...document.querySelectorAll(".replay-quantity-buttons button")].find((b) => b.innerText.includes("100"));
+    if (btn) btn.click();
+    return !!btn;
+  `);
+  await sleep(200);
+  await evaluate<string>(CLICK("挂出"));
+  await sleep(400);
+  await evaluate(CLICK("走一天"));
+  await sleep(600);
+  const hkHolding = await evaluate<string>(`
+    const row = [...document.querySelectorAll(".replay-holding-row")].find((r) => r.innerText.includes("腾讯"));
+    return row ? row.innerText.replace(/\\n/g, " ") : "NO_HOLDING";
+  `);
+  check("港股挂单成交后进了持仓", hkHolding !== "NO_HOLDING", hkHolding.slice(0, 80));
+  check(
+    "港股是 T+0：买完当天就全部可卖（A 股这里会是 0）",
+    /持有 \/ 可卖\s*100 \/ 100/.test(hkHolding.replace(/\s+/g, " ")),
+    hkHolding.replace(/\s+/g, " ").slice(0, 120),
+  );
+  check(
+    "持仓行写明了港美股当日可卖、境外标的已折成人民币",
+    await evaluate<boolean>(`
+      const p = document.querySelector(".replay-holdings-panel .replay-panel-head p");
+      return !!p && p.innerText.includes("港美股当日可卖") && p.innerText.includes("境外标的已折成人民币");
+    `),
+  );
+
+  // ── 美股：1 股起买、零佣金、T+0 ──
+  const usCode = await pickReplayStock("苹果", "苹果");
+  check("选得到美股（搜索框认「苹果」这个名字）", usCode === "AAPL.US", usCode);
+
+  const usPanel = await orderPanel();
+  check("美股也标着 T+0", usPanel.tag === "T+0", usPanel.tag);
+  check("美股的快捷股数是 1/10/100（1 股起买）", usPanel.quick.includes("1 股") && usPanel.quick.includes("10 股"), usPanel.quick);
+  check("写明了美股 1 股起买", usPanel.hint.includes("美股 1 股起买"), usPanel.hint);
+  check("写明了原以美元计价", usPanel.note.includes("原以美元计价"), usPanel.note);
+
+  const usRules = await rulesPanel();
+  check("美股规则面板也默认展开", usRules.open === "true", usRules.open);
+  check(
+    "美股写明零佣金、无印花税、无涨跌停",
+    usRules.body.includes("无印花税") && usRules.body.includes("零佣金") && usRules.body.includes("无涨跌停"),
+    usRules.body.replace(/\n/g, " / ").slice(0, 200),
+  );
+
+  // 买 1 股：A 股会以「至少 100 股」被拒，美股必须放行
+  await evaluate<boolean>(`
+    const btn = [...document.querySelectorAll(".replay-quantity-buttons button")].find((b) => b.innerText.trim() === "1 股");
+    if (btn) btn.click();
+    return !!btn;
+  `);
+  await sleep(200);
+  const usPlaced = await evaluate<string>(CLICK("挂出"));
+  await sleep(400);
+  const usFeedback = await evaluate<string>(`
+    const f = document.querySelector(".replay-feedback");
+    const pending = [...document.querySelectorAll(".replay-order-list li")].map((li) => li.innerText).join(" | ");
+    return JSON.stringify({ f: f ? f.innerText : "", fOk: f ? f.className.includes("is-ok") : false, pending });
+  `);
+  const usRes = JSON.parse(usFeedback) as { f: string; fOk: boolean; pending: string };
+  check("美股买 1 股挂得上（A 股会以「至少 100 股」被拒）", usPlaced === "OK" && usRes.fOk, `${usPlaced} / ${usRes.f}`);
+  check("那 1 股挂在待成交列表里", usRes.pending.includes("苹果"), usRes.pending.slice(0, 120));
+
+  // 收尾：把港股那笔卖掉会改成绩单，这里就不动了，留着让后面「控制台没有报错」兜底
+  check("港美股看完之后页面还活着", await evaluate<boolean>(`return document.body.innerText.includes("待成交委托");`));
 
   console.log("\n十四、控制台没有报错");
   const errs = await evaluate<string[]>(`

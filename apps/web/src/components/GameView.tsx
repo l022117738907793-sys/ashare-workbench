@@ -396,7 +396,12 @@ export function GameView(props: GameViewProps) {
           <Metric k="持仓市值" v={fmtNum(holdingsValue)} />
           <Metric k="总收益率" v={fmtPct(totalReturnPct)} tone={pnlTone(totalReturnPct)} />
         </div>
-        <details className="account-comparison">
+        {/*
+          没有可比区间时自动展开。这句解释本来就是为了「别让玩家以为坏了」，
+          折在里面等于没说 —— 刚开局那会儿恰恰是最需要看到它的时候。
+          等到基准出来了（走过一个交易日），它自己收回去。
+        */}
+        <details className="account-comparison" open={benchmarkReturnPct === null}>
           <summary>市场对照与交易统计 <span>＋</span></summary>
           <div className="metric-grid">
           <Metric

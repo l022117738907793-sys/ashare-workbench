@@ -6,7 +6,7 @@ import {
   totalAssets,
   validateOrder,
 } from "./portfolio";
-import { boardOf, isValidBuyQuantity, lotRulesAt } from "./rules";
+import { boardOf, isTPlusOne, isValidBuyQuantity, lotRulesAt, marketGroupOf, type Currency, type MarketGroup } from "./rules";
 import { settleSeason } from "./settlement";
 import type { Account, EquityPoint, OrderRequest, SeasonResult, Side } from "./types";
 
@@ -43,6 +43,21 @@ export interface ReplayInstrument {
    * 当天的涨跌幅 —— 候选榜单在开局第一天会整个空掉，玩家又回到「不知道买什么」。
    */
   prevClose?: number | null;
+  /**
+   * 这只标的属于哪个市场：`"CN"` / `"HK"` / `"US"`。
+   *
+   * 缺省按 `"CN"`（老分片没有这一列）。引擎靠它决定 T+1 还是 T+0、有没有涨跌停、
+   * 按哪套费率收钱——分片生成时**必须**写对，写错不会报错，只会「A 股按美股规则成交」。
+   */
+  market?: MarketGroup;
+  /**
+   * 这只标的的**原**计价币种，只用于界面上标注「港股 / 美股」。
+   *
+   * 注意 `open`/`close`/`high`/`low`/`prevClose` 这几列**已经折成人民币**了
+   * （见 apps/web/src/lib/replay.ts 的 `convertShardToCny`）。引擎全程只认人民币，
+   * 所以它不需要知道币种——这一列是留给界面解释「为什么腾讯显示的是 ¥ 而不是 HK$」。
+   */
+  currency?: Currency;
   open: Array<number | null>;
   close: Array<number | null>;
   high: Array<number | null>;
@@ -59,8 +74,21 @@ export interface ReplayConfig {
   instruments: ReplayInstrument[];
   /** 基准（沪深300）收盘价，与日历对齐；缺省则结算时不报超额收益 */
   benchmarkClose?: Array<number | null>;
+  /**
+   * 境外标的的汇率序列，与日历对齐。
+   *
+   * 只有「最低佣金」用得上（见 `portfolio.calcFee`）：港股的佣金下限是 **100 港币**，
+   * 而引擎里所有金额都是人民币，缺了这条序列就会当成「最低 100 元」，小单多收约 15%。
+   */
+  fx?: ConfigFx[];
   /** 展示用标签，如「2019 年 2 月」「随机开局」 */
   label?: string;
+}
+
+/** 一条与 `ReplayConfig.calendar` 等长的汇率：人民币 / 本币 */
+export interface ConfigFx {
+  currency: Currency;
+  rate: Array<number | null>;
 }
 
 /** 一张还没成交的委托。它不会立即变成持仓——要等次一交易日开盘。 */
@@ -212,8 +240,10 @@ export function placeOrder(
   if (!Number.isInteger(shares) || shares <= 0) return { ok: false, reason: "委托股数必须为正整数" };
 
   const board = boardOf(req.code);
-  if (side === "buy" && !isValidBuyQuantity(board, shares)) {
-    const lot = lotRulesAt(board);
+  // 市场以分片里写的为准，没有这一列（老分片）才从代码后缀推
+  const market = inst.market ?? marketGroupOf(req.code);
+  if (side === "buy" && !isValidBuyQuantity(board, shares, market)) {
+    const lot = lotRulesAt(board, market);
     return {
       ok: false,
       reason: lot.increment === 1
@@ -227,12 +257,11 @@ export function placeOrder(
     if (!holding || holding.shares <= 0) return { ok: false, reason: "没有持仓，无法卖出" };
     if (shares > holding.sellable) {
       const locked = holding.shares - holding.sellable;
-      return {
-        ok: false,
-        reason: locked > 0
-          ? `T+1 限制：当日买入的 ${locked} 股需次一交易日才能卖出`
-          : "可卖数量不足",
-      };
+      // 只有 A 股是 T+1。港股美股当日买入当日可卖，锁住只会让玩家以为系统坏了
+      if (isTPlusOne(market) && locked > 0) {
+        return { ok: false, reason: `T+1 限制：当日买入的 ${locked} 股需次一交易日才能卖出` };
+      }
+      return { ok: false, reason: "可卖数量不足" };
     }
   }
 
@@ -265,12 +294,36 @@ function openTimestamp(date: string): number {
 }
 
 /**
+ * 第 `index` 天、这只标的的汇率（人民币 / 本币）。A 股恒为 1。
+ *
+ * 取不到就返回 `null`，交给 `calcFee` 按 1:1 处理——影响的只是「最低佣金」那一项，
+ * 不会让价格本身算错（价格在分片加载时就已经折成人民币了）。
+ */
+export function rateAt(
+  config: ReplayConfig,
+  inst: ReplayInstrument | undefined,
+  index: number,
+): number | null {
+  const currency = inst?.currency;
+  if (!currency || currency === "CNY") return 1;
+  const series = config.fx?.find((f) => f.currency === currency);
+  if (!series) return null;
+  // 汇率缺的那天沿用上一个已知值（境外假期、中行没报价）
+  for (let k = Math.min(index, series.rate.length - 1); k >= 0; k -= 1) {
+    const r = series.rate[k];
+    if (typeof r === "number" && Number.isFinite(r) && r > 0) return r;
+  }
+  return null;
+}
+
+/**
  * 用次一交易日的开盘价撮合一笔委托。
  *
  * 没有开盘价（停牌、未上市、数据缺失）就**作废并说明**，绝不拿前一日收盘价顶替——
  * 这也是实时模式里「不猜价格」那条规矩在历史里的样子。
  */
 function fillOrder(
+  config: ReplayConfig,
   account: Account,
   order: PendingOrder,
   inst: ReplayInstrument | undefined,
@@ -299,6 +352,8 @@ function fillOrder(
     // 历史推演就是在「当天开盘」成交，用 true 避免被写成「非交易时段按最近收盘价成交」
     isTradingNow: true,
     isST: inst?.isST ?? false,
+    market: inst?.market,
+    fx: rateAt(config, inst, index),
     typeAtTrade: order.typeAtTrade,
   };
 
@@ -352,7 +407,7 @@ export function advanceDay(state: ReplayState): ReplayState {
 
   const log: ReplayLogEntry[] = [];
   for (const order of state.pending) {
-    const res = fillOrder(account, order, map.get(order.code), date, index);
+    const res = fillOrder(state.config, account, order, map.get(order.code), date, index);
     account = res.account;
     log.push(res.entry);
   }

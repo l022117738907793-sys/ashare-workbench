@@ -516,6 +516,14 @@ export const LS_SETTINGS = "aw.settings.v1";
 /** 是否已看过使用说明（用于首次访问提示，看过就不再打扰） */
 export const LS_GUIDE_SEEN = "aw.guideSeen.v1";
 export const LS_STORE = "aw.store.v1";
+/**
+ * 刷新之后停在刚才那一页。
+ *
+ * 不存的话，在「市场观察」里翻到一半按一下刷新就被弹回游戏大厅 —— 移动端上
+ * 刷新很常见（切回浏览器、断网重连），每次都要重新点一遍。设置/规则/说明
+ * 这些「进去看一眼就出来」的页面不记，见 App.tsx 的 RESTORABLE_TABS。
+ */
+export const LS_TAB = "aw.tab.v1";
 
 function asArray(v: unknown): unknown[] {
   return Array.isArray(v) ? v : [];
