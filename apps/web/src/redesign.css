@@ -239,7 +239,9 @@ input:focus,textarea:focus,select:focus {
 }
 .pane-switch .chip {
   flex:0 0 auto;
-  min-height:40px;
+  /* 44px：交接件承诺的「主要操作至少 44px 点击高度」。这排 chip 是唯一的
+     例外 —— 它既是导航也是主操作，40px 在手机上会点空。 */
+  min-height:44px;
   border:0;
   background:transparent;
   border-radius:7px;
@@ -871,7 +873,8 @@ input:focus,textarea:focus,select:focus {
     overflow-x:auto
   }
   .pane-switch .chip {
-    padding:8px 12px;
+    min-height:44px;
+    padding:10px 12px;
     white-space:nowrap
   }
   .game-lobby {
