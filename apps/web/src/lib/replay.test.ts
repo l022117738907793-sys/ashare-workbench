@@ -8,14 +8,20 @@
  * 3. **旧存档兼容**：`levelId` 是我后加的字段，老存档里没有，不能被当成坏数据丢掉。
  */
 import { describe, expect, it } from "vitest";
+import type { Snapshot, StockData } from "@aw/core";
 import {
+  BACKTRACK_DAYS,
+  backtrackOptions,
+  backtrackStocks,
   convertShardToCny,
   isLevelShard,
   loadLevelIndex,
   loadLevelShard,
   parseReplaySave,
+  replayDate,
   restoreLevelReplay,
   startLevelReplay,
+  startReplay,
   toSave,
   type LevelShard,
 } from "./replay";
@@ -319,5 +325,177 @@ describe("境外价格折成人民币", () => {
       fetchImpl: stubFetch({ ok: true, status: 200, json: async () => hkShard() }),
     });
     expect(got.instruments.find((i) => i.code === "00700.HK")?.open[0]).toBe(270);
+  });
+});
+
+// ── 回溯模式（模式 4）──────────────────────────────────────
+//
+// 30 个交易日的假快照：比窗口（22 天）长，才看得出窗口是从**尾部**截的，
+// 而不是「日历有多长就给多长」。
+
+const BT_CAL = Array.from({ length: 30 }, (_, i) => `2026-09-${String(i + 1).padStart(2, "0")}`);
+
+function btStock(code: string, name: string, industry: string): StockData {
+  const n = BT_CAL.length;
+  return {
+    code,
+    name,
+    industry,
+    industryCode: "801080.SI",
+    weight: 1,
+    isST: false,
+    open: BT_CAL.map((_, i) => 10 + i * 0.1),
+    close: BT_CAL.map((_, i) => 10.05 + i * 0.1),
+    high: BT_CAL.map((_, i) => 10.3 + i * 0.1),
+    low: BT_CAL.map((_, i) => 9.8 + i * 0.1),
+    volume: BT_CAL.map(() => 1000),
+  };
+}
+
+/** 2 只 A 股 + 港日韩各一只，用来验证「回溯只放 A 股」 */
+function btSnapshot(): Snapshot {
+  return {
+    meta: {},
+    calendar: [...BT_CAL],
+    indices: [
+      {
+        code: "000300.SH",
+        name: "沪深300",
+        open: BT_CAL.map(() => 4000),
+        close: BT_CAL.map((_, i) => 4000 + i),
+        high: BT_CAL.map(() => 4010),
+        low: BT_CAL.map(() => 3990),
+        volume: BT_CAL.map(() => 1),
+      },
+    ],
+    sectors: [],
+    stocks: [
+      btStock("600519.SH", "贵州茅台", "食品饮料"),
+      btStock("000001.SZ", "平安银行", "银行"),
+      btStock("00700.HK", "腾讯控股", "港股"),
+      btStock("7203.JP", "丰田汽车", "日股"),
+      btStock("005930.KR", "三星电子", "韩股"),
+    ],
+    etfs: [],
+  };
+}
+
+describe("回溯模式：可选的起点", () => {
+  it("窗口是日历最后 22 个交易日，从早到晚", () => {
+    const opts = backtrackOptions(BT_CAL);
+    expect(opts).toHaveLength(BACKTRACK_DAYS);
+    expect(opts[0]!.date).toBe(BT_CAL[BT_CAL.length - BACKTRACK_DAYS]);
+    expect(opts[opts.length - 1]!.date).toBe(BT_CAL[BT_CAL.length - 1]);
+    // 从早到晚。倒过来排的话「能玩满一个月」的那一天会掉到列表最底下
+    expect(opts.map((o) => o.date)).toEqual([...opts].map((o) => o.date).sort());
+  });
+
+  it("每一天都带「还剩几个交易日」，最后一天剩 1", () => {
+    const opts = backtrackOptions(BT_CAL);
+    expect(opts[0]!.remaining).toBe(BACKTRACK_DAYS);
+    expect(opts[opts.length - 1]!.remaining).toBe(1);
+    for (let i = 1; i < opts.length; i += 1) {
+      expect(opts[i]!.remaining).toBe(opts[i - 1]!.remaining - 1);
+    }
+  });
+
+  it("index 是日历下标，不是窗口内的序号", () => {
+    // 传错的话开局会跑到窗口以外的日子去，而界面上看不出任何异常
+    const opts = backtrackOptions(BT_CAL);
+    expect(opts[0]!.index).toBe(BT_CAL.length - BACKTRACK_DAYS);
+    for (const o of opts) expect(BT_CAL[o.index]).toBe(o.date);
+  });
+
+  it("日历比窗口还短时全给出来，不补空", () => {
+    const opts = backtrackOptions(BT_CAL.slice(0, 5));
+    expect(opts).toHaveLength(5);
+    expect(opts[0]!.remaining).toBe(5);
+  });
+
+  it("空日历给空数组（大厅那张卡据此置灰）", () => {
+    expect(backtrackOptions([])).toEqual([]);
+  });
+});
+
+describe("回溯模式：只放 A 股", () => {
+  it("港股 / 日股 / 韩股都不进这一局", () => {
+    const codes = backtrackStocks(btSnapshot()).map((s) => s.code);
+    expect(codes).toEqual(["600519.SH", "000001.SZ"]);
+  });
+
+  it("不显式传 codes 的话，境外标的会被一起放进来按本币当人民币", () => {
+    // 这条钉的是 handleStartBacktrack 里那句 `codes`。哪天有人把它当冗余删掉，
+    // 港股就会按 1:1 混进这一局 —— 玩家的成本凭空少一成多，界面上不会有任何提示。
+    const st = startReplay(btSnapshot(), BT_CAL, { mode: "backtrack", initialCash: 100000, startIndex: 8 });
+    expect(st.config.instruments).toHaveLength(5);
+  });
+});
+
+describe("回溯模式：开局", () => {
+  const start = () => {
+    const snap = btSnapshot();
+    const codes = backtrackStocks(snap).map((s) => s.code);
+    return startReplay(snap, BT_CAL, {
+      mode: "backtrack",
+      initialCash: 100000,
+      startIndex: 20,
+      codes,
+      label: `回溯 · ${BT_CAL[20]} 起`,
+    });
+  };
+
+  it("起点就是玩家挑的那天，股票池只有 A 股", () => {
+    const st = start();
+    expect(st.config.startIndex).toBe(20);
+    expect(replayDate(st)).toBe(BT_CAL[20]);
+    expect(st.config.instruments.map((i) => i.code)).toEqual(["600519.SH", "000001.SZ"]);
+    expect(st.config.label).toBe("回溯 · 2026-09-21 起");
+    expect(st.config.calendar).toEqual(BT_CAL);
+  });
+
+  it("窗口起点也能开：第一天就能下单（有开盘价）", () => {
+    const snap = btSnapshot();
+    const codes = backtrackStocks(snap).map((s) => s.code);
+    const st = startReplay(snap, BT_CAL, { mode: "backtrack", initialCash: 100000, startIndex: 8, codes });
+    expect(st.config.instruments.every((i) => i.open[8] !== null)).toBe(true);
+  });
+});
+
+describe("回溯模式的存档往返", () => {
+  function btSave(mode: unknown) {
+    return parseReplaySave({
+      version: 1,
+      mode,
+      hideDate: false,
+      startIndex: 20,
+      initialCash: 100000,
+      codes: ["600519.SH"],
+      levelId: null,
+      label: "回溯 · 2026-09-21 起",
+      dayIndex: 22,
+      account: { cash: 1, initialCash: 100000, holdings: [] },
+      pending: [],
+      equity: [],
+      log: [],
+      finished: false,
+      seq: 1,
+    });
+  }
+
+  it("mode 存得下、读得回", () => {
+    // 不补 parseReplaySave 那一格的话，回溯局刷新页面会变成**藏日期的随机局**：
+    // 日期没了，但账还是那本账，玩家只会觉得「日期凭空消失了」。
+    expect(btSave("backtrack")?.mode).toBe("backtrack");
+    expect(btSave("backtrack")?.hideDate).toBe(false);
+  });
+
+  it("传奇与随机照旧", () => {
+    expect(btSave("legend")?.mode).toBe("legend");
+    expect(btSave("random")?.mode).toBe("random");
+  });
+
+  it("认不出来的模式仍然退回随机，不把整局丢掉", () => {
+    expect(btSave("something-else")?.mode).toBe("random");
+    expect(btSave(undefined)?.mode).toBe("random");
   });
 });

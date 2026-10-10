@@ -209,6 +209,21 @@ summary::-webkit-details-marker { display: none; }
   /* 手指点得到：这一圈圈出来的都是 48px 起的开关，别让「返回游戏大厅」独独矮一截。 */
   .game-lobby-back { min-height: 44px; font-size: 13px; padding: 0; }
   /*
+   * 回溯模式的起点按钮。桌面端一颗 34px 高就够，手机上一列排下来要点二十来次，
+   * 每颗都得够大 —— 目标是「拇指点得准」，而不只是「塞得下」。
+   * 容器仍然限高：22 天全摊开会把开局按钮推到屏幕外，那才是真的找不到。
+   */
+  .game-backtrack { padding-bottom: 14px; }
+  .game-backtrack-days {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 7px;
+    margin-top: 11px;
+    max-height: 320px;
+  }
+  .game-day { min-height: 52px; padding: 9px 12px; }
+  .game-day-date { font-size: 14px; }
+  .game-day-rest { font-size: 11px; }
+  /*
    * 卡片标题栏：标题与右侧 chip 排**上下**叠。
    *
    * `.card-head` 是 flex 行，`.card-head-right` 是 `flex: 0 0 auto` —— 它按内容宽度占位、

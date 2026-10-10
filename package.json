@@ -14,6 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --pretty",
     "verify:replay": "vite-node scripts/verify-replay.ts",
     "e2e:replay": "vite-node scripts/e2e-replay.ts",
+    "e2e:backtrack": "vite-node scripts/e2e-backtrack.ts",
     "preview:replay": "vite-node scripts/preview-replay.ts",
     "audit:news": "vite-node scripts/audit-news-match.ts",
     "e2e:live": "vite-node scripts/e2e-live-legend.ts"

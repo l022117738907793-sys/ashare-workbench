@@ -19,7 +19,7 @@ import {
   type Side,
 } from "@aw/game";
 import type { Currency, MarketGroup } from "@aw/core";
-import { displayDate, maskDate, maskDatesIn, replayPrices, settleReplay } from "../lib/replay";
+import { displayDate, maskDate, maskDatesIn, replayPrices, settleReplay, type ReplayMode } from "../lib/replay";
 import { fmtNum, fmtPct } from "../lib/helpers";
 import { EmptyHint, KV, RichP } from "./common";
 import { StockPicker } from "./StockPicker";
@@ -87,6 +87,14 @@ export interface ReplayViewProps {
    * 因为你本来就知道后来发生了什么，装不知道才是不诚实的。
    */
   briefing?: { startDate: string; theme: string; lines: string[]; note?: string } | undefined;
+  /**
+   * 这一局是哪种推演。
+   *
+   * 页头那句眉题原来只按 `hideDate` 二分（藏日期 = 随机挑战，否则 = 传奇推演），
+   * 于是回溯模式会被写成「传奇推演」—— 可它根本不是关卡。做法上加了这一列，
+   * 而不是再去拆 `hideDate` 的含义：藏不藏日期和「这是哪一种玩法」是两件事。
+   */
+  mode?: ReplayMode;
   onOrder: (code: string, side: Side, shares: number) => { ok: boolean; reason?: string };
   onCancel: (orderId: string) => void;
   /** 推进 n 个交易日 */
@@ -117,7 +125,7 @@ function Metric({ k, v, tone }: { k: string; v: string; tone?: "good" | "bad" | 
 }
 
 export function ReplayView(props: ReplayViewProps) {
-  const { state, hideDate, label, stocks, benchmarkName, briefing, onOrder, onCancel, onAdvance, onExit } = props;
+  const { state, hideDate, label, stocks, benchmarkName, briefing, mode = "legend", onOrder, onCancel, onAdvance, onExit } = props;
 
   const [side, setSide] = useState<Side>("buy");
   const [code, setCode] = useState(() => accountFirstCode(state, stocks));
@@ -230,9 +238,9 @@ export function ReplayView(props: ReplayViewProps) {
     <div className="view replay-game" data-mobile-pane={mobilePane}>
       <header className="replay-mission">
         <div>
-          <p className="replay-eyebrow">{hideDate ? "RANDOM CHALLENGE / 随机挑战" : "HISTORICAL CAMPAIGN / 传奇推演"}</p>
+          <p className="replay-eyebrow">{mode === "backtrack" ? "RECENT REVIEW / 回溯复盘" : hideDate ? "RANDOM CHALLENGE / 随机挑战" : "HISTORICAL CAMPAIGN / 传奇推演"}</p>
           <h1>{label}</h1>
-          <p className="replay-mission-note">{briefing ? maskDatesIn(state, briefing.theme, hideDate) : "回到一个未知的交易日，用当时的信息作出自己的判断。"}</p>
+          <p className="replay-mission-note">{briefing ? maskDatesIn(state, briefing.theme, hideDate) : mode === "backtrack" ? "从您挑的那一天开始，按当天的真实行情往下走。全程只有 A 股。" : "回到一个未知的交易日，用当时的信息作出自己的判断。"}</p>
         </div>
         <div className="replay-mission-meta">
           <span className="replay-date">{hideDate ? `第 ${dayNo} 天` : date}</span>
@@ -346,7 +354,7 @@ export function ReplayView(props: ReplayViewProps) {
         </aside>
       </div>
 
-      <section className="replay-panel replay-holdings-panel"><header className="replay-panel-head"><div><h2>我的持仓 <span className="replay-count">{account.holdings.length}</span></h2><p>按{hideDate ? "当前交易日" : date}收盘价估值 · A 股当日买入次日才可卖，港美股当日可卖 · 境外标的已折成人民币</p></div></header>{account.holdings.length === 0 ? <div className="replay-empty-holdings"><span aria-hidden="true">◇</span><div><strong>还没有持仓</strong><p>挂出买单，再推进一个交易日。成交的股票会出现在这里。</p></div></div> : <div className="replay-holding-list">{account.holdings.map((h) => {
+      <section className="replay-panel replay-holdings-panel"><header className="replay-panel-head"><div><h2>我的持仓 <span className="replay-count">{account.holdings.length}</span></h2><p>按{hideDate ? "当前交易日" : date}收盘价估值 · A 股当日买入次日才可卖{mode === "backtrack" ? "" : "，港美股当日可卖 · 境外标的已折成人民币"}</p></div></header>{account.holdings.length === 0 ? <div className="replay-empty-holdings"><span aria-hidden="true">◇</span><div><strong>还没有持仓</strong><p>挂出买单，再推进一个交易日。成交的股票会出现在这里。</p></div></div> : <div className="replay-holding-list">{account.holdings.map((h) => {
         const price = prices[h.code] ?? null;
         const pnl = price === null ? null : (price - h.avgCost) * h.shares;
         return <div key={h.code} className="replay-holding-row"><div className="replay-holding-name"><strong>{h.name}</strong><span>{shortCode(h.code)}</span></div><div><span>持有 / 可卖</span><strong>{h.shares} / {h.sellable}</strong></div><div><span>成本 / 收盘</span><strong>{fmtNum(h.avgCost)} / {price === null ? "—" : fmtNum(price)}</strong></div><div><span>持仓盈亏</span><strong className={pnl === null ? "tone-muted" : `tone-${pnlTone(pnl)}`}>{pnl === null ? "—" : fmtNum(pnl)}</strong></div><button type="button" className="btn btn-ghost btn-tiny" onClick={() => { setCode(h.code); setSide("sell"); setSharesText(String(h.sellable || 100)); setFeedback(null); setMobilePane("trade"); requestAnimationFrame(() => document.getElementById("replay-shares")?.scrollIntoView({ behavior: "smooth", block: "center" })); }}>查看 / 卖出 ↗</button></div>;

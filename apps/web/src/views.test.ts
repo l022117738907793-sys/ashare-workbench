@@ -1036,6 +1036,39 @@ describe("模拟游戏页渲染", () => {
     });
   });
 
+  describe("回溯模式（模式 4）在大厅里的入口", () => {
+    const plan = {
+      options: [
+        { index: 98, date: "2026-09-02", remaining: 22 },
+        { index: 99, date: "2026-09-03", remaining: 21 },
+        { index: 119, date: "2026-10-09", remaining: 1 },
+      ],
+      stockCount: 605,
+      span: 22,
+    };
+
+    it("大厅里多出第四张模式卡，位置在随机模式之后", () => {
+      const html = renderGame({ state: defaultGameState(), backtrack: plan });
+      expect(html).toContain("回溯模式");
+      expect(html).toContain("04 / 最近一个月");
+      // 卡片的顺序：01 传奇 → 02 实时 → 03 随机 → 04 回溯
+      expect(html.indexOf("03 / 隐藏时间")).toBeLessThan(html.indexOf("04 / 最近一个月"));
+    });
+
+    it("默认没选这一屏时，起点选择器不渲染", () => {
+      // 默认选中的是传奇模式
+      const html = renderGame({ state: defaultGameState(), backtrack: plan });
+      expect(html).not.toContain("选择起点");
+      expect(html).not.toContain("game-backtrack-days");
+    });
+
+    it("快照没就绪（backtrack 为 null）时那张卡置灰", () => {
+      const html = renderGame({ state: defaultGameState(), backtrack: null });
+      expect(html).toContain("回溯模式");
+      expect(html).toContain("回溯模式暂不可用");
+    });
+  });
+
   describe("结算复盘报告", () => {
     const report = (over: Partial<ReviewReport> = {}): ReviewReport => ({
       season: "2026-09",

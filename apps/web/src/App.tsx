@@ -57,7 +57,7 @@ import { GameCompanion } from "./components/GameCompanion";
 import { AnalysisView } from "./components/AnalysisView";
 import { GameRulesView } from "./components/GameRulesView";
 import { GuideView } from "./components/GuideView";
-import { GameView } from "./components/GameView";
+import { GameView, type BacktrackPlan } from "./components/GameView";
 import { HistoryView } from "./components/HistoryView";
 import { GameHistoryView } from "./components/GameHistoryView";
 import { SettingsView } from "./components/SettingsView";
@@ -86,7 +86,11 @@ import {
   restoreReplay,
   readReplaySave,
   replayAvailable,
+  backtrackOptions,
+  backtrackStocks,
+  BACKTRACK_DAYS,
   LS_REPLAY,
+  type BacktrackOption,
   type ReplaySession,
 } from "./lib/replay";
 import {
@@ -974,6 +978,45 @@ export default function App() {
     [snapshot, calendar],
   );
 
+  /**
+   * 回溯模式要摆出来的东西：可选的起点、这段窗口里有多少只 A 股、窗口有多长。
+   *
+   * 在这里一次算好再传下去，而不是把 `calendar` / `snapshot` 交给 GameView 自己算 ——
+   * 大厅是纯展示组件，让它去认识快照的形状，等于把数据管道的细节漏进界面层。
+   */
+  const backtrackPlan: BacktrackPlan | null = useMemo(() => {
+    if (!snapshot || !calendar || !replayAvailable(snapshot)) return null;
+    const options = backtrackOptions(calendar);
+    if (options.length === 0) return null;
+    return { options, stockCount: backtrackStocks(snapshot).length, span: BACKTRACK_DAYS };
+  }, [snapshot, calendar]);
+
+  /**
+   * 回溯模式开局：起点由玩家在最近一个月里挑。
+   *
+   * 参与标的只放 A 股（理由见 `backtrackStocks`），所以要显式传 `codes` ——
+   * 不传的话 `buildReplayConfig` 会把快照里的港股日股韩股全放进来，按本币当人民币计价。
+   */
+  const handleStartBacktrack = useCallback(
+    (startIndex: number, initialCash: number) => {
+      if (!snapshot || !calendar || !replayAvailable(snapshot)) return;
+      const codes = backtrackStocks(snapshot).map((s) => s.code);
+      if (codes.length === 0) return;
+      const label = `回溯 · ${calendar[startIndex]} 起`;
+      setReplay({
+        state: startReplay(snapshot, calendar, { mode: "backtrack", initialCash, startIndex, codes, label }),
+        mode: "backtrack",
+        // 回溯模式是「看着日历复盘」，日期照实显示（和随机模式正相反）
+        hideDate: false,
+        codes,
+        label,
+        levelId: null,
+      });
+      setGamePane("replay");
+    },
+    [snapshot, calendar],
+  );
+
   // 关卡清单只在页面加载时问一次
   useEffect(() => {
     void loadLevelIndex().then(setLegendIds);
@@ -1242,6 +1285,7 @@ export default function App() {
             state={replay.state}
             hideDate={replay.hideDate}
             label={replay.label}
+            mode={replay.mode}
             // 用这一局自己的池子：传奇模式的票在历史分片里，不在当前快照里
             stocks={replay.state.config.instruments}
             benchmarkName={benchmarkName}
@@ -1316,6 +1360,8 @@ export default function App() {
             onDismissAway={() => setAway(null)}
             onStartReplay={handleStartReplay}
             onOpenLegend={() => setLegendOpen(true)}
+            onStartBacktrack={handleStartBacktrack}
+            backtrack={backtrackPlan}
             replayInProgress={!!replay}
             onResumeReplay={() => {
               setGamePane("replay");

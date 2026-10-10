@@ -35,6 +35,7 @@ import {
   type GameState,
 } from "../lib/game";
 import { fmtNum, fmtPct } from "../lib/helpers";
+import type { BacktrackOption } from "../lib/replay";
 import { Card, EmptyHint, KV, Notice, StateBadge } from "./common";
 import "./game-view.css";
 import { NewsPanel } from "./NewsPanel";
@@ -105,13 +106,29 @@ export interface GameViewProps {
   onStartReplay: (initialCash: number) => void;
   /** 打开传奇模式（模式 2）的关卡列表 */
   onOpenLegend: () => void;
+  /** 回溯模式：按玩家挑的起点（快照日历下标）与资金开局 */
+  onStartBacktrack?: (startIndex: number, initialCash: number) => void;
+  /** 回溯模式的备选起点与说明；快照没就绪时为 null（那张卡会置灰） */
+  backtrack?: BacktrackPlan | null;
   /** 「你不在的这段时间」报告。没有值得说的事时为 null */
   away?: AwayReport | null;
   onDismissAway?: () => void;
 }
 
-/** 序列里的第 i 项，不是有限数就当没有（快照里可能是 null）。 */
-function numOrNull(v: number | null | undefined): number | null {
+/**
+ * 回溯模式在大厅里要摆出来的东西。
+ *
+ * `options` 从早到晚，直接就是一排按钮；`span` 是窗口长度（多少交易日），
+ * `stockCount` 是本局能交易的标的数 —— 界面上要写清「这一屏只做 A 股」，
+ * 免得玩家点了回溯却找不到刚在实时盘里买过的港股。
+ */
+export interface BacktrackPlan {
+  options: BacktrackOption[];
+  stockCount: number;
+  span: number;
+}
+
+/** 序列里的第 i 项，不是有限数就当没有（快照里可能是 null）。 */function numOrNull(v: number | null | undefined): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
@@ -163,10 +180,10 @@ function MarketIllustration() {
   );
 }
 
-function ModeIcon({ mode }: { mode: "legend" | "live" | "random" }) {
+function ModeIcon({ mode }: { mode: "legend" | "live" | "random" | "backtrack" }) {
   return (
     <svg viewBox="0 0 32 32" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-      {mode === "legend" ? <><path d="M7 7h18v4c0 8-4 12-9 14C11 23 7 19 7 11Z" /><path d="m16 10 1.8 3.7 4.2.6-3 2.9.7 4.1-3.7-1.9-3.7 1.9.7-4.1-3-2.9 4.2-.6Z" /></> : mode === "live" ? <><path d="M5 23V9m0 14h23" /><path d="m8 18 6-7 5 4 8-10" /><path d="M22 5h5v5" /></> : <><rect x="6" y="6" width="20" height="20" rx="5" /><circle cx="11" cy="11" r="1" /><circle cx="21" cy="11" r="1" /><circle cx="16" cy="16" r="1" /><circle cx="11" cy="21" r="1" /><circle cx="21" cy="21" r="1" /></>}
+      {mode === "legend" ? <><path d="M7 7h18v4c0 8-4 12-9 14C11 23 7 19 7 11Z" /><path d="m16 10 1.8 3.7 4.2.6-3 2.9.7 4.1-3.7-1.9-3.7 1.9.7-4.1-3-2.9 4.2-.6Z" /></> : mode === "live" ? <><path d="M5 23V9m0 14h23" /><path d="m8 18 6-7 5 4 8-10" /><path d="M22 5h5v5" /></> : mode === "backtrack" ? <><rect x="6" y="7" width="20" height="19" rx="4" /><path d="M6 13h20M11 5v4M21 5v4" /><path d="M20 22v-5m0 0-2.4 2.4M20 17l2.4 2.4" /></> : <><rect x="6" y="6" width="20" height="20" rx="5" /><circle cx="11" cy="11" r="1" /><circle cx="21" cy="11" r="1" /><circle cx="16" cy="16" r="1" /><circle cx="11" cy="21" r="1" /><circle cx="21" cy="21" r="1" /></>}
     </svg>
   );
 }
@@ -209,6 +226,7 @@ export function GameView(props: GameViewProps) {
     onOrder, onStart, onReset, onSettle, onOpenRules, news, sessionText, isTradingNow, today,
     benchmarkName, benchmarkReturnPct, totalAssets, holdingsValue,
     replayReady, onStartReplay, onOpenLegend,
+    onStartBacktrack, backtrack = null,
     replayInProgress = false, onResumeReplay,
     away = null, onDismissAway,
     onPickCode, fxOf,
@@ -216,7 +234,14 @@ export function GameView(props: GameViewProps) {
 
   const { account, equity } = state;
   const [side, setSide] = useState<Side>("buy");
-  const [selectedMode, setSelectedMode] = useState<"legend" | "live" | "random">(replayInProgress ? "live" : "legend");
+  const [selectedMode, setSelectedMode] = useState<"legend" | "live" | "random" | "backtrack">(replayInProgress ? "live" : "legend");
+  /**
+   * 回溯模式选中的起点（快照日历下标）。null = 还没挑，用窗口里最早那天。
+   *
+   * 默认给最早那天，是因为它正好能玩满整个窗口（22 个交易日）；选得越晚，能走的天越少，
+   * 而玩家点开这一屏十有八九是想完整复盘一个月，不是想看两天。
+   */
+  const [backtrackIndex, setBacktrackIndex] = useState<number | null>(null);
   /**
    * 实时盘开局之后，玩家按「返回游戏大厅」把大厅重新调出来。
    *
@@ -349,7 +374,9 @@ export function GameView(props: GameViewProps) {
   // 实时盘开着的时候也能回来看（见 `lobbyOpen`），那时账户不动，只是换了块屏。
   const accountRunning = state.status === "playing";
   if (state.status === "idle" || lobbyOpen) {
-    const replayBlocked = selectedMode !== "live" && !replayReady;
+    const replayBlocked = selectedMode !== "live" && (!replayReady || (selectedMode === "backtrack" && !backtrack));
+    /** 回溯模式当前选中的那一天（没挑过就是窗口最早那天） */
+    const btPick = backtrack ? backtrack.options.find((o) => o.index === backtrackIndex) ?? backtrack.options[0] : null;
     const startSelected = () => {
       if (selectedMode === "live") {
         /*
@@ -365,6 +392,11 @@ export function GameView(props: GameViewProps) {
         onResumeReplay?.();
       }
       else if (selectedMode === "legend") onOpenLegend();
+      else if (selectedMode === "backtrack") {
+        // 没挑过就用窗口里最早那天：它能玩满整个窗口
+        const chosen = backtrackIndex ?? backtrack?.options[0]?.index;
+        if (chosen !== undefined) onStartBacktrack?.(chosen, cashChoice);
+      }
       else onStartReplay(cashChoice);
     };
     return (
@@ -417,12 +449,44 @@ export function GameView(props: GameViewProps) {
             <p>不告诉您身处哪一年，只凭眼前的信息探索未知行情。</p>
             <span className="game-mode-foot">隐藏日期 · 自主探索 <span>↗</span></span>
           </button>
+          <button type="button" className={`game-mode-card${selectedMode === "backtrack" ? " is-selected" : ""}`} aria-pressed={selectedMode === "backtrack"} disabled={replayInProgress || !backtrack} title={replayInProgress ? "请先继续或结束当前历史推演" : !backtrack ? "当前快照缺少开盘价，回溯模式暂不可用" : undefined} onClick={() => setSelectedMode("backtrack")}>
+            <div className="game-mode-top"><ModeIcon mode="backtrack" /><span className="game-mode-tag game-mode-tag-quiet">自选起点</span></div>
+            <span className="game-mode-number">04 / 最近一个月</span><strong>回溯模式</strong>
+            <p>在最近一个月里挑一个交易日开局，往后逐日推演到今天。</p>
+            <span className="game-mode-foot">真实日期 · 自选起点 <span>↗</span></span>
+          </button>
         </div>
 
-        <p className="game-mode-description" aria-live="polite">{selectedMode === "legend" ? "站在 10 个历史时刻的起点，带着当时的线索作出判断。" : selectedMode === "live" ? "从今天开始跟随真实行情，适合每天回来观察与交易。" : "不告诉您身处哪一年，只凭眼前的信息探索未知行情。"}</p>
+        <p className="game-mode-description" aria-live="polite">{selectedMode === "legend" ? "站在 10 个历史时刻的起点，带着当时的线索作出判断。" : selectedMode === "live" ? "从今天开始跟随真实行情，适合每天回来观察与交易。" : selectedMode === "random" ? "不告诉您身处哪一年，只凭眼前的信息探索未知行情。" : "在最近一个月里挑一个交易日开局，往后逐日推演到今天。"}</p>
         <section className={`game-launch-panel${selectedMode === "legend" ? " is-legend" : ""}`}>
+          {selectedMode === "backtrack" && backtrack && (
+            <div className="game-backtrack">
+              <div className="game-backtrack-head">
+                <span className="game-eyebrow">选择起点</span>
+                <p>
+                  这一段是 <strong>{backtrack.options[0].date}</strong> 到 <strong>{backtrack.options[backtrack.options.length - 1].date}</strong>，
+                  共 {backtrack.options.length} 个交易日。挑一天开局，从那天往后逐日推演。
+                </p>
+                <p className="game-backtrack-note">
+                  本局有 {backtrack.stockCount} 只 A 股可交易。港股/日股/韩股不在其中 —— 回溯窗口里没有逐日汇率，
+                  按最新汇率折算会让成本凭空少掉一成多，所以宁可不放进来。
+                </p>
+              </div>
+              <div className="game-backtrack-days" role="group" aria-label="选择回溯起点">
+                {backtrack.options.map((o, i) => {
+                  const active = (backtrackIndex ?? backtrack.options[0].index) === o.index;
+                  return (
+                    <button key={o.date} type="button" className={`game-day${active ? " is-active" : ""}${i === 0 ? " is-first" : ""}`} aria-pressed={active} onClick={() => setBacktrackIndex(o.index)}>
+                      <span className="game-day-date">{o.date}</span>
+                      <span className="game-day-rest">余 {o.remaining} 天</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div className="game-funding"><span className="game-eyebrow">准备您的虚拟本金</span><div className="cash-options">{CASH_OPTIONS.map((c) => <button key={c} type="button" className={`chip${cashChoice === c ? " chip-active" : ""}`} aria-pressed={cashChoice === c} onClick={() => setCashChoice(c)}>{c / 10000} 万</button>)}</div><p>A 股买入一手 100 股，资金量限制可买数量；本金较少时可能买不起一手高价股。</p><p>{selectedMode === "legend" ? "传奇关卡的资金与背景将在选关时确认。" : "仅用于模拟交易 · 账户保存在此浏览器"}</p></div>
-          <div className="game-launch-action"><button type="button" className="btn btn-primary game-launch-button" disabled={replayBlocked && !replayInProgress} onClick={startSelected}>{selectedMode === "live" ? accountRunning ? "回到正在跑的实时盘" : `用 ${cashChoice / 10000} 万开始实时盘` : replayInProgress ? "继续已保存的历史推演" : selectedMode === "legend" ? "选择传奇关卡" : `用 ${cashChoice / 10000} 万随机开局`} <span>→</span></button><p>{selectedMode === "live" ? accountRunning ? "实时盘还在跑，这里不会新开一局；要清空重来请到账户页点「重新开局」。" : `当前${sessionText}，非交易时段按最近收盘价成交。` : "今日挂单，下一交易日开盘撮合。"}</p></div>
+          <div className="game-launch-action"><button type="button" className="btn btn-primary game-launch-button" disabled={replayBlocked && !replayInProgress} onClick={startSelected}>{selectedMode === "live" ? accountRunning ? "回到正在跑的实时盘" : `用 ${cashChoice / 10000} 万开始实时盘` : replayInProgress ? "继续已保存的历史推演" : selectedMode === "legend" ? "选择传奇关卡" : selectedMode === "backtrack" ? btPick ? `从 ${btPick.date} 开始推演` : "选择起点" : `用 ${cashChoice / 10000} 万随机开局`} <span>→</span></button><p>{selectedMode === "live" ? accountRunning ? "实时盘还在跑，这里不会新开一局；要清空重来请到账户页点「重新开局」。" : `当前${sessionText}，非交易时段按最近收盘价成交。` : selectedMode === "backtrack" ? btPick ? `从 ${btPick.date} 起还有 ${btPick.remaining} 个交易日；今日挂单，下一交易日开盘撮合。` : "先挑一个起点。" : "今日挂单，下一交易日开盘撮合。"}</p></div>
         </section>
         {replayBlocked && !replayInProgress && <Notice tone="warn">当前快照缺少开盘价，历史推演暂不可用。您可以选择实时模式，或等下一次快照更新。</Notice>}
         <details className="game-quick-guide"><summary>玩法三步 · 展开查看 <span>＋</span></summary><div className="game-how-grid"><div><span>01</span><strong>读懂眼前的信息</strong><p>查看行情、新闻与背景，形成自己的判断。</p></div><div><span>02</span><strong>亲手作出决定</strong><p>选股、设置数量、提交委托，体验真实交易规则。</p></div><div><span>03</span><strong>回看每一次交易</strong><p>对照市场基准与交易记录，理解收益和风险。</p></div></div></details>

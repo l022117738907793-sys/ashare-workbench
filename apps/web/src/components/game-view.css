@@ -139,7 +139,12 @@
 .game-text-button:hover { color: var(--accent); }
 .game-mode-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /*
+   * 四张模式卡。用 auto-fit 而不是写死 4 列：1200px 上一行排得下四张，
+   * 900px 上自动掉成三列 + 一张换行，760px 以下由 compact-mobile.css 收成一列。
+   * 写死 4 列的话窄屏上每张只剩两百来像素，卡里的标题与脚注会互相挤。
+   */
+  grid-template-columns: repeat(auto-fit, minmax(216px, 1fr));
   gap: 16px;
 }
 .game-mode-card {
@@ -241,6 +246,63 @@
   color: #201c16;
 }
 .game-launch-action p { text-align: center; }
+/*
+ * 回溯模式的起点选择器。
+ *
+ * 它是 `.game-launch-panel` 的第一个孩子，而那块是两列网格（本金 | 开局）。
+ * `grid-column: 1 / -1` 让它独占一整行，本金与按钮照旧落在下面那一行 ——
+ * 不加这条的话它会被自动排到「本金」左边那一格，把整块面板挤成三行两列。
+ */
+.game-backtrack {
+  grid-column: 1 / -1;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.game-backtrack-head p {
+  margin: 9px 0 0;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.game-backtrack-head strong { color: var(--text); font-weight: 650; }
+.game-backtrack-note { color: var(--muted) !important; font-size: 11px !important; }
+.game-backtrack-days {
+  display: grid;
+  /* 一行放得下几个就放几个：1900px 上不会拉成稀稀拉拉的四条，390px 上自动掉成一列 */
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+  max-height: 268px;
+  overflow-y: auto;
+}
+.game-day {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 11px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: border-color .16s, background .16s, color .16s;
+}
+.game-day:hover { border-color: #6c5b4c; color: var(--text); }
+.game-day.is-active {
+  border-color: var(--accent);
+  background: linear-gradient(140deg, #2d261f, var(--surface-2) 80%);
+  color: var(--text);
+}
+.game-day:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.game-day-date {
+  font-size: 13px;
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.01em;
+}
+.game-day-rest { font-size: 10px; color: var(--muted); }
 .game-how-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

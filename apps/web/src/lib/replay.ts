@@ -16,6 +16,7 @@ import {
   replayDate,
   replayPrices,
   settleReplay,
+  marketGroupOf,
   MIN_REPLAY_DAYS,
   type Account,
   type EquityPoint,
@@ -34,6 +35,17 @@ import type { Snapshot, StockData as CoreStock } from "@aw/core";
 export const LS_REPLAY = "aw.replay.v1";
 
 /**
+ * 三种历史推演。
+ *
+ * - `legend` 传奇模式：行情来自 `history/level-<id>.json` 那份离线分片。
+ * - `random` 随机模式：行情来自快照，起点随机，日期对玩家隐藏。
+ * - `backtrack` 回溯模式：行情同样来自快照，但起点由玩家在最近一个月里指定，日期照实显示。
+ *
+ * 后两者共用一套从快照拼配置的代码（`startReplay`），差别只在起点怎么定、日期给不给看。
+ */
+export type ReplayMode = "random" | "legend" | "backtrack";
+
+/**
  * 存档里**不放行情**。
  *
  * 一份 120 天 × 600 只股票的行情表有五六十万个数字，塞进 localStorage 会直接爆掉配额；
@@ -42,7 +54,7 @@ export const LS_REPLAY = "aw.replay.v1";
  */
 export interface ReplaySave {
   version: 1;
-  mode: "random" | "legend";
+  mode: ReplayMode;
   /** 模式 3（随机）默认不显示日期，模式 2（传奇）显示 */
   hideDate: boolean;
   startIndex: number;
@@ -74,8 +86,8 @@ export function replayAvailable(snapshot: Snapshot): boolean {
 /** 网页里正在进行的一局推演：引擎状态 + 只影响「怎么展示」的元信息 */
 export interface ReplaySession {
   state: ReplayState;
-  mode: "random" | "legend";
-  /** 模式 3（随机）藏日期，模式 2（传奇）显示 */
+  mode: ReplayMode;
+  /** 模式 3（随机）藏日期，模式 2（传奇）与回溯模式显示 */
   hideDate: boolean;
   /** 参与标的，用于重建配置 */
   codes: string[];
@@ -142,7 +154,7 @@ export function buildReplayConfig(
 export function startReplay(
   snapshot: Snapshot,
   calendar: string[],
-  opts: { mode: "random" | "legend"; initialCash: number; codes?: string[]; startIndex?: number; runDays?: number; label?: string; rnd?: () => number },
+  opts: { mode: ReplayMode; initialCash: number; codes?: string[]; startIndex?: number; runDays?: number; label?: string; rnd?: () => number },
 ): ReplayState {
   const startIndex = opts.startIndex
     ?? pickRandomStartIndex(calendar, opts.runDays ?? MIN_REPLAY_DAYS, opts.rnd ?? Math.random);
@@ -150,15 +162,62 @@ export function startReplay(
     startIndex,
     initialCash: opts.initialCash,
     codes: opts.codes,
-    label: opts.label ?? (opts.mode === "random" ? "随机开局" : "传奇"),
+    label: opts.label ?? (opts.mode === "random" ? "随机开局" : opts.mode === "backtrack" ? "回溯" : "传奇"),
   });
   return createReplay(config);
 }
 
-/** 把进度的「参数部分」与「状态部分」一起存下来 */
-export function toSave(
+// ── 回溯模式（模式 4）：在最近一个月里挑一天开始 ────────────────
+
+/**
+ * 回溯窗口有多长：22 个交易日 ≈ 一个自然月。
+ *
+ * 用交易日而不是自然日，是因为快照那几个数组本来就是按交易日排的 —— 说「最近 30 天」
+ * 还得回头去数日历查有没有休市，而玩家关心的本来就是「还有几天可以玩」。
+ */
+export const BACKTRACK_DAYS = 22;
+
+export interface BacktrackOption {
+  /** 在快照日历里的下标，直接喂给 `startReplay` 的 `startIndex` */
+  index: number;
+  date: string;
+  /** 从这天开始还能走几个交易日（含当天） */
+  remaining: number;
+}
+
+/**
+ * 回溯模式能选的起点：快照日历的最后 `days` 个交易日，**从早到晚**。
+ *
+ * 顺序是刻意的。玩家要的是「从哪天开始往后推」，从早到晚读下来就是时间线本身，
+ * 也正好最长的一局排在第一个；倒过来排看着像新闻列表，反而要点最下面那条才玩得满。
+ */
+export function backtrackOptions(calendar: string[], days: number = BACKTRACK_DAYS): BacktrackOption[] {
+  const total = calendar.length;
+  if (total === 0) return [];
+  const first = Math.max(0, total - days);
+  const out: BacktrackOption[] = [];
+  for (let i = first; i < total; i += 1) {
+    out.push({ index: i, date: calendar[i], remaining: total - i });
+  }
+  return out;
+}
+
+/**
+ * 回溯模式参与推演的标的：**只放 A 股**。
+ *
+ * 境外标的在快照里的价格是各自的本币，而账户是人民币记账的 —— 要进引擎就必须先折成
+ * 人民币（见 `convertShardToCny`）。传奇模式的分片带着**每日**汇率序列，折得了；
+ * 快照里 `meta.hk.fx` 只有一个**标量**（最新那一次报价），拿它铺满一个月等于猜。
+ * 港币和人民币差一成多，猜错的后果是玩家的成本凭空少掉那么多，而界面上不会有任何提示 ——
+ * 这正是这个仓库一贯拒绝的那种静默偏差。所以宁可这一屏只做 A 股，也不折算着跑。
+ */
+export function backtrackStocks(snapshot: Snapshot): CoreStock[] {
+  return snapshot.stocks.filter((s) => marketGroupOf(s.code) === "CN");
+}
+
+/** 把进度的「参数部分」与「状态部分」一起存下来 */export function toSave(
   state: ReplayState,
-  meta: { mode: "random" | "legend"; hideDate: boolean; codes?: string[]; levelId?: string | null },
+  meta: { mode: ReplayMode; hideDate: boolean; codes?: string[]; levelId?: string | null },
 ): ReplaySave {
   return {
     version: 1,
@@ -186,7 +245,9 @@ export function parseReplaySave(raw: unknown): ReplaySave | null {
   if (!Array.isArray(s.codes) || !s.account) return null;
   return {
     version: 1,
-    mode: s.mode === "legend" ? "legend" : "random",
+    // 认不出来的模式一律当随机：老存档没有这一项，写坏的存档也不该让整局丢掉。
+    // 加了新模式就要在这里补一格，否则会被静默降级（回溯那一局会变成藏日期的随机局）。
+    mode: s.mode === "legend" ? "legend" : s.mode === "backtrack" ? "backtrack" : "random",
     hideDate: s.hideDate !== false,
     startIndex: s.startIndex,
     initialCash: s.initialCash ?? s.account.initialCash,
