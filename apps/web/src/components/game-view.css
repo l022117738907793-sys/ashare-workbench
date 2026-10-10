@@ -297,6 +297,30 @@
   font-size: 12px;
   color: var(--text-2);
 }
+/*
+ * 实时盘标题栏右侧那一列：状态胶囊在上，「← 返回游戏大厅」在下。
+ *
+ * 竖着排是因为横着放不下 —— 胶囊本身就有「港股、日股交易中」这样的字，
+ * 再并一个按钮，窄屏上会把「您的实时模拟盘」挤成两行。右对齐让它贴着胶囊那条边。
+ */
+.game-stage-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex: none;
+}
+.game-lobby-back {
+  padding: 5px 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.game-lobby-back:hover { color: var(--accent); }
+.game-lobby-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .game-stage .card { border-radius: 16px; box-shadow: none; }
 .game-stage .card-head { padding: 21px 23px 0; gap: 14px; }
 .game-stage .card-body { padding: 20px 23px 23px; gap: 15px; }

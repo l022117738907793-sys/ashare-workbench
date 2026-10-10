@@ -217,6 +217,15 @@ export function GameView(props: GameViewProps) {
   const { account, equity } = state;
   const [side, setSide] = useState<Side>("buy");
   const [selectedMode, setSelectedMode] = useState<"legend" | "live" | "random">(replayInProgress ? "live" : "legend");
+  /**
+   * 实时盘开局之后，玩家按「返回游戏大厅」把大厅重新调出来。
+   *
+   * 为什么需要这个开关：实时盘一开局，上面那个页签就从「游戏大厅」变成「实时账户」，
+   * 而大厅只在 `state.status === "idle"` 时渲染 —— 于是开局之后就**再也没有路回到
+   * 玩法选择那一屏**，只剩「重新开局」这一个按钮，而它会清空账户。
+   * 这个开关把「想看大厅」和「账户是否还在跑」分成两件事：账户照跑，大厅照看。
+   */
+  const [lobbyOpen, setLobbyOpen] = useState(false);
   const [cashChoice, setCashChoice] = useState<number>(DEFAULT_INITIAL_CASH);
   const [code, setCode] = useState("");
   const [sharesText, setSharesText] = useState("100");
@@ -337,11 +346,24 @@ export function GameView(props: GameViewProps) {
   }
 
   // 未开局：先选玩法，再进入相应的真实游戏流程。
-  if (state.status === "idle") {
+  // 实时盘开着的时候也能回来看（见 `lobbyOpen`），那时账户不动，只是换了块屏。
+  const accountRunning = state.status === "playing";
+  if (state.status === "idle" || lobbyOpen) {
     const replayBlocked = selectedMode !== "live" && !replayReady;
     const startSelected = () => {
-      if (selectedMode === "live") onStart(cashChoice);
-      else if (replayInProgress) onResumeReplay?.();
+      if (selectedMode === "live") {
+        /*
+         * 已经在跑的实时盘**不能从这里新开一局** —— `onStart` 会按新的本金重建账户，
+         * 持仓和成交记录瞬间没了，而按钮上写的还是「开始」。所以改成回账户；
+         * 真要清空重来，账户那一屏的「重新开局」会先问一句。
+         */
+        setLobbyOpen(false);
+        if (!accountRunning) onStart(cashChoice);
+      }
+      else if (replayInProgress) {
+        setLobbyOpen(false);
+        onResumeReplay?.();
+      }
       else if (selectedMode === "legend") onOpenLegend();
       else onStartReplay(cashChoice);
     };
@@ -356,6 +378,17 @@ export function GameView(props: GameViewProps) {
           </div>
           <MarketIllustration />
         </section>
+
+        {/*
+          实时盘正在跑的时候，这一屏是「回来看看」而不是「重新开始」——
+          所以最上面先给一条回账户的路，别让人以为点了别的模式就把实时盘丢了。
+        */}
+        {accountRunning && (
+          <section className="game-resume">
+            <div><strong>您的实时盘还在跑。</strong><p>账户、持仓与成交记录都还在，回去就能接着交易。</p></div>
+            <button type="button" className="btn btn-primary" onClick={() => setLobbyOpen(false)}>回到实时账户 →</button>
+          </section>
+        )}
 
         {replayInProgress && (
           <section className="game-resume">
@@ -389,7 +422,7 @@ export function GameView(props: GameViewProps) {
         <p className="game-mode-description" aria-live="polite">{selectedMode === "legend" ? "站在 10 个历史时刻的起点，带着当时的线索作出判断。" : selectedMode === "live" ? "从今天开始跟随真实行情，适合每天回来观察与交易。" : "不告诉您身处哪一年，只凭眼前的信息探索未知行情。"}</p>
         <section className={`game-launch-panel${selectedMode === "legend" ? " is-legend" : ""}`}>
           <div className="game-funding"><span className="game-eyebrow">准备您的虚拟本金</span><div className="cash-options">{CASH_OPTIONS.map((c) => <button key={c} type="button" className={`chip${cashChoice === c ? " chip-active" : ""}`} aria-pressed={cashChoice === c} onClick={() => setCashChoice(c)}>{c / 10000} 万</button>)}</div><p>A 股买入一手 100 股，资金量限制可买数量；本金较少时可能买不起一手高价股。</p><p>{selectedMode === "legend" ? "传奇关卡的资金与背景将在选关时确认。" : "仅用于模拟交易 · 账户保存在此浏览器"}</p></div>
-          <div className="game-launch-action"><button type="button" className="btn btn-primary game-launch-button" disabled={replayBlocked && !replayInProgress} onClick={startSelected}>{selectedMode === "live" ? `用 ${cashChoice / 10000} 万开始实时盘` : replayInProgress ? "继续已保存的历史推演" : selectedMode === "legend" ? "选择传奇关卡" : `用 ${cashChoice / 10000} 万随机开局`} <span>→</span></button><p>{selectedMode === "live" ? `当前${sessionText}，非交易时段按最近收盘价成交。` : "今日挂单，下一交易日开盘撮合。"}</p></div>
+          <div className="game-launch-action"><button type="button" className="btn btn-primary game-launch-button" disabled={replayBlocked && !replayInProgress} onClick={startSelected}>{selectedMode === "live" ? accountRunning ? "回到正在跑的实时盘" : `用 ${cashChoice / 10000} 万开始实时盘` : replayInProgress ? "继续已保存的历史推演" : selectedMode === "legend" ? "选择传奇关卡" : `用 ${cashChoice / 10000} 万随机开局`} <span>→</span></button><p>{selectedMode === "live" ? accountRunning ? "实时盘还在跑，这里不会新开一局；要清空重来请到账户页点「重新开局」。" : `当前${sessionText}，非交易时段按最近收盘价成交。` : "今日挂单，下一交易日开盘撮合。"}</p></div>
         </section>
         {replayBlocked && !replayInProgress && <Notice tone="warn">当前快照缺少开盘价，历史推演暂不可用。您可以选择实时模式，或等下一次快照更新。</Notice>}
         <details className="game-quick-guide"><summary>玩法三步 · 展开查看 <span>＋</span></summary><div className="game-how-grid"><div><span>01</span><strong>读懂眼前的信息</strong><p>查看行情、新闻与背景，形成自己的判断。</p></div><div><span>02</span><strong>亲手作出决定</strong><p>选股、设置数量、提交委托，体验真实交易规则。</p></div><div><span>03</span><strong>回看每一次交易</strong><p>对照市场基准与交易记录，理解收益和风险。</p></div></div></details>
@@ -400,7 +433,20 @@ export function GameView(props: GameViewProps) {
 
   return (
     <div className="view game-stage">
-      <div className="game-stage-heading"><div><span className="game-eyebrow">LIVE SIMULATION</span><h1>您的实时模拟盘</h1></div><span className="game-session-pill"><span className="game-status-dot" />{sessionText}</span></div>
+      <div className="game-stage-heading">
+        <div><span className="game-eyebrow">LIVE SIMULATION</span><h1>您的实时模拟盘</h1></div>
+        <div className="game-stage-actions">
+          <span className="game-session-pill"><span className="game-status-dot" />{sessionText}</span>
+          {/*
+            回到玩法选择那一屏。账户原样留着，不是「退出」——
+            所以文案是「返回游戏大厅」而不是「结束本局」，也没有二次确认。
+
+            用自己的类名而不是 `.game-text-button`：那个类在 600px 以下被加了
+            `padding-top: 24px`（大厅里它跟标题基线对齐用的），套在这里会把按钮往下顶。
+          */}
+          <button type="button" className="game-lobby-back" onClick={() => setLobbyOpen(true)}>← 返回游戏大厅</button>
+        </div>
+      </div>
       {/* 红线要求：常驻且显著 */}
       <p className="game-disclaimer" role="note">
         ⚠️ {GAME_DISCLAIMER}

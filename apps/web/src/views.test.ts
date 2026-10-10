@@ -1013,6 +1013,29 @@ describe("模拟游戏页渲染", () => {
     expect(html).toContain("不构成投资建议");
   });
 
+  /*
+   * 静态渲染点不动按钮，所以这里只钉「两个入口各自的标题栏长什么样」。
+   * 「点了之后真能回到大厅」由 scripts/e2e-live-legend.ts 在真浏览器里点。
+   */
+  describe("实时盘与游戏大厅之间的来回路", () => {
+    it("实时盘进行中：标题栏给出返回大厅的入口", () => {
+      const html = renderGame();
+      expect(html).toContain("← 返回游戏大厅");
+      // 大厅那一屏的东西不该同时出现在账户页里
+      expect(html).not.toContain("选一种玩法，进入市场");
+    });
+
+    it("大厅里（还没开局）不出现这个入口，也不谎称有实时盘在跑", () => {
+      // `renderGame` 的 over 在 state 之后展开，所以这样能拿到 status = "idle" 的那一屏
+      const html = renderGame({ state: defaultGameState() });
+      expect(html).not.toContain("← 返回游戏大厅");
+      expect(html).not.toContain("您的实时盘还在跑");
+      // 没开局时按钮还是「开始实时盘」，不能写成「回到正在跑的实时盘」
+      expect(html).toContain("选一种玩法，进入市场");
+      expect(html).not.toContain("回到正在跑的实时盘");
+    });
+  });
+
   describe("结算复盘报告", () => {
     const report = (over: Partial<ReviewReport> = {}): ReviewReport => ({
       season: "2026-09",

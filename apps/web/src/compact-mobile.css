@@ -206,6 +206,8 @@ summary::-webkit-details-marker { display: none; }
   .replay-result-empty strong { font-size: 22px; }
   .replay-result-empty small { font-size: 11px; line-height: 1.55; }
   .game-stage-heading h1 { font-size: 22px; margin: 4px 0; }
+  /* 手指点得到：这一圈圈出来的都是 48px 起的开关，别让「返回游戏大厅」独独矮一截。 */
+  .game-lobby-back { min-height: 44px; font-size: 13px; padding: 0; }
   /*
    * 卡片标题栏：标题与右侧 chip 排**上下**叠。
    *

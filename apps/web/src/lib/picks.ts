@@ -18,6 +18,7 @@
  * 事实上「涨得最猛」那几张票往往正是最危险的。界面上必须把这句话写出来。
  */
 
+import { marketGroupOf, type MarketGroup } from "@aw/game";
 import type { Currency } from "@aw/core";
 
 export type PickKey = "up" | "down" | "hot";
@@ -29,6 +30,9 @@ export const PICK_LABEL: Record<PickKey, string> = {
   down: "跌得最狠",
   hot: "成交最热",
 };
+
+/** 市场胶囊的固定顺序。与「市场观察」的 `MARKET_ORDER` 一致 —— 同一个概念不摆两种次序。 */
+export const PICK_MARKET_ORDER: readonly MarketGroup[] = ["CN", "HK", "US", "JP", "KR"];
 
 /** 榜单下面那句免责说明。改文案要连着测试一起改。 */
 export const PICK_CAVEAT = "只是把今天的数据摆出来，不是推荐，也不代表这些票值得买。";
@@ -56,12 +60,40 @@ export interface PickStock {
 
 export const PICK_LIMIT = 8;
 /**
- * 每个板块最多进榜几只。
+ * 每个**桶**最多进榜几只。
  *
  * 直接取全市场前 8 只，很可能 8 只全在同一个最热的行业里，玩家就看不到别的板块了。
- * 先按板块摊开再合并，榜单才真的是「各板块里动得最大的那些」。
+ * 先按桶摊开再合并，榜单才真的是「各桶里动得最大的那些」。
+ *
+ * 桶怎么分见 `bucketOf`。
  */
 export const PICK_PER_SECTOR = 2;
+
+/**
+ * 一只票属于哪个「桶」：**A 股按申万行业，境外按市场**。
+ *
+ * 境外标的的 `industry` 字段就是市场名（「港股」/「日股」/「韩股」），那不是行业 ——
+ * 照搬当行业用，等于给每个境外市场造了一个假的行业桶（而且境外我们本来就没有行业
+ * 数据，编一个比不分类更糟）。按代码推市场是唯一的真相来源。
+ *
+ * 注意：**分桶解决不了境外的可见性**。摊开只保证每个桶都能进候选，不保证进最终 8 名 ——
+ * 港股 20 只抵不过 A 股 31 个行业 62 个候选，全市场「涨得最猛」的前 8 里照样可以
+ * 一只港股都没有。要看见港股，得先把池子缩到港股（见 `pickMarkets` 与 StockPicker
+ * 的市场那一排）。这里分桶的作用是：筛到某个境外市场时它是**唯一的桶**，
+ * `pickCandidates` 于是不再摊开（否则 20 只会被砍到 2 只）。
+ */
+function bucketOf(s: PickStock): string {
+  const m = marketGroupOf(s.code);
+  if (m !== "CN") return m;
+  return s.sector || "未分类";
+}
+
+/** 这一批候选里出现了哪些市场。按 `PICK_MARKET_ORDER` 排序，只出现在池子里的才返回。 */
+export function pickMarkets(rows: PickStock[]): MarketGroup[] {
+  const seen = new Set<MarketGroup>();
+  for (const r of rows) seen.add(marketGroupOf(r.code));
+  return PICK_MARKET_ORDER.filter((m) => seen.has(m));
+}
 
 /** 这个排序键下，一只股票的分数。取不到就是 null（不参与排序）。 */
 export function pickScore(s: PickStock, key: PickKey): number | null {
@@ -71,7 +103,7 @@ export function pickScore(s: PickStock, key: PickKey): number | null {
 }
 
 /**
- * 候选榜单：每个板块先取分数最高的 `perSector` 只，再从这些里挑总分最高的 `limit` 只。
+ * 候选榜单：每个桶先取分数最高的 `perSector` 只，再从这些里挑总分最高的 `limit` 只。
  *
  * 分数相同时按代码排序，保证**同样的输入必定得到同样的榜单** ——
  * 否则每次重渲染顺序都在跳，玩家会以为按钮在动。
@@ -92,16 +124,24 @@ export function pickCandidates(
 
   const bySector = new Map<string, Array<{ r: PickStock; v: number }>>();
   for (const x of scored) {
-    const k = x.r.sector || "未分类";
+    const k = bucketOf(x.r);
     const arr = bySector.get(k);
     if (arr) arr.push(x);
     else bySector.set(k, [x]);
   }
 
+  /*
+   * 只有一个桶时不摊开。
+   *
+   * 摊开的本意是「别让 8 只全挤在同一个行业里」。桶只有一个的时候
+   * （比如筛到港股，20 只全在一个桶里）它剩下的唯一效果就是**截断**：
+   * 榜单从 20 只被砍到 2 只，而玩家明明刚点了「只看港股」。
+   */
+  const oneBucket = bySector.size <= 1;
   const best: Array<{ r: PickStock; v: number }> = [];
   for (const arr of bySector.values()) {
     arr.sort((a, b) => b.v - a.v || a.r.code.localeCompare(b.r.code));
-    best.push(...arr.slice(0, perSector));
+    best.push(...(oneBucket ? arr : arr.slice(0, perSector)));
   }
 
   best.sort((a, b) => b.v - a.v || a.r.code.localeCompare(b.r.code));

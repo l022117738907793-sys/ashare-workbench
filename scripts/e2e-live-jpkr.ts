@@ -130,17 +130,22 @@ try {
   });
   await send("Runtime.enable");
   await send("Page.enable");
+
+  console.log(`\n一、打开 ${BASE}`);
+  await send("Page.navigate", { url: BASE });
+  await evaluate(`try { localStorage.clear(); } catch {} return true;`);
+  await send("Page.reload", { ignoreCache: true });
+  /*
+   * 监听器必须在 reload **之后**装：reload 会把 window 连同 `__e2eErrors` 一起换掉。
+   * 装在前面的话末尾那句 `(window.__e2eErrors || [])` 读到的永远是空数组，
+   * 「没有未捕获异常」就成了一条**必过**的断言 —— 页面上真抛了错也发现不了。
+   */
   await evaluate(`
     window.__e2eErrors = [];
     window.addEventListener("error", (e) => window.__e2eErrors.push(String(e.message)));
     window.addEventListener("unhandledrejection", (e) => window.__e2eErrors.push(String(e.reason)));
     return true;
   `);
-
-  console.log(`\n一、打开 ${BASE}`);
-  await send("Page.navigate", { url: BASE });
-  await evaluate(`try { localStorage.clear(); } catch {} return true;`);
-  await send("Page.reload", { ignoreCache: true });
   check("页面渲染出标题", await waitFor(`document.body.innerText.includes("股市练习场")`, "标题"));
   check("快照加载完成", await waitFor(`!document.body.innerText.includes("正在加载")`, "加载完成"));
 

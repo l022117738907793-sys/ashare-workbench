@@ -1657,6 +1657,19 @@ code {
   display: flex;
   gap: 4px;
 }
+/*
+ * 市场那一排（全部 / A 股 / 港股 / 美股 / 日股 / 韩股）。
+ *
+ * 六个按钮在 390px 上铺不开，必须换行 —— 不换行会撑宽 `.pick-box`，把整张下单卡
+ * 搞出横向滚动条。底色与 `.pick-head` 相同，让这两排读成同一块表头（它是两层分类：
+ * 先市场，再问法），而不是六个并排的按钮。
+ */
+.pick-markets {
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
 .chip-tiny {
   font-size: 11px;
   padding: 3px 8px;
