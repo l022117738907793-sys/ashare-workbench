@@ -6,6 +6,7 @@ import {
   amountOf,
   changePctOf,
   fmtAmount,
+  pickAll,
   pickCandidates,
   pickMarkets,
   pickScore,
@@ -238,5 +239,57 @@ describe("涨跌幅与成交额的计算", () => {
 describe("免责说明", () => {
   it("必须写明「不是推荐」，这是模拟游戏和分析引擎的分界线", () => {
     expect(PICK_CAVEAT).toContain("不是推荐");
+  });
+});
+
+/*
+ * 这一组钉的是一个界面上的对不上：市场胶囊写着「全部 150」，清单往下只有 8 行。
+ * 数字本身没错（池子确实有 150），错的是玩家没有任何办法看到另外 142 只。
+ */
+describe("pickAll：这一屏的全量名册", () => {
+  // 四个行业、每个行业若干只：短名单每桶取 2 只，于是正好被 PICK_LIMIT 卡住
+  const SECTORS = ["电子", "银行", "医药", "食品饮料"];
+  const many: PickStock[] = Array.from({ length: 30 }, (_, i) =>
+    s({ code: `c${String(i).padStart(3, "0")}`, sector: SECTORS[i % SECTORS.length], changePct: i }),
+  );
+
+  it("不摊桶也不截断 —— 给多少只就还多少只", () => {
+    expect(pickAll(many, "up")).toHaveLength(30);
+    // 短名单在同一批数据上只有 8 只，这正是两个数字对不上的来源
+    const short = pickCandidates(many, "up");
+    expect(short).toHaveLength(PICK_LIMIT);
+    expect(pickAll(many, "up").length).toBeGreaterThan(short.length * 3);
+  });
+
+  it("按分数从高到低，和短名单同一个排序口径", () => {
+    const got = pickAll(many, "up").map((x) => x.changePct);
+    expect(got).toEqual([...got].sort((a, b) => (b ?? 0) - (a ?? 0)));
+    expect(got[0]).toBe(29);
+  });
+
+  it("分数相同的按代码排 —— 每次重渲染顺序都一样", () => {
+    const flat = [s({ code: "b", changePct: 1 }), s({ code: "a", changePct: 1 }), s({ code: "c", changePct: 1 })];
+    expect(pickAll(flat, "up").map((x) => x.code)).toEqual(["a", "b", "c"]);
+  });
+
+  it("当天取不到价格的进不了名册 —— 摆一个点不动的按钮没有意义", () => {
+    const rows = [s({ code: "a", changePct: 1 }), s({ code: "b", changePct: null }), s({ code: "c", changePct: 2 })];
+    expect(pickAll(rows, "up").map((x) => x.code)).toEqual(["c", "a"]);
+  });
+
+  it("空池子给空数组，不抛错", () => {
+    expect(pickAll([], "hot")).toEqual([]);
+  });
+});
+
+describe("searchStocks：默认不截断", () => {
+  it("命中多少就说多少 —— 上限是显示的事，不该藏在搜索里", () => {
+    const many = Array.from({ length: 25 }, (_, i) => s({ code: `60000${i}.SH`, name: `公司${i}` }));
+    expect(searchStocks(many, "公司")).toHaveLength(25);
+  });
+
+  it("调用方要几条可以自己传上限", () => {
+    const many = Array.from({ length: 25 }, (_, i) => s({ code: `60000${i}.SH`, name: `公司${i}` }));
+    expect(searchStocks(many, "公司", 20)).toHaveLength(20);
   });
 });

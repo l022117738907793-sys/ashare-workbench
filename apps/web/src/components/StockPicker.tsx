@@ -23,6 +23,7 @@ import {
   PICK_KEYS,
   PICK_LABEL,
   fmtAmount,
+  pickAll,
   pickCandidates,
   pickMarkets,
   searchStocks,
@@ -39,6 +40,15 @@ import {
  * A 股不标：它本来就是人民币，标了是噪音。
  */
 const CUR_NAME: Partial<Record<string, string>> = { HKD: "港币", USD: "美元", JPY: "日元", KRW: "韩元" };
+
+/**
+ * 搜索时没展开先显示前几条。
+ *
+ * 20 条足够认出想找的那只（真找不到还有市场胶囊可以缩池子），
+ * 但也足够多到不必让人先滚一轮。**这只是显示上限** ——
+ * 标题里那个「匹配到 N 只」用的是真实命中数，见 `allHits`。
+ */
+const SEARCH_LIMIT = 20;
 
 export interface StockPickerProps {
   /** 这一局能买的全部标的。只能来自本局的标的池，不能混进别的年份的票 */
@@ -79,20 +89,40 @@ export function StockPicker({ rows, query, onPick, activeCode }: StockPickerProp
   );
 
   const searching = query.trim() !== "";
-  const hits = useMemo(() => searchStocks(scoped, query), [scoped, query]);
+  /*
+   * 搜索结果**不在这里截断**：`allHits` 是真实的命中数，界面照它说
+   * 「匹配到 N 只」；`hits` 只是没展开时先显示前 20 条。
+   * 以前 `searchStocks` 内部写死 20，于是打一个「6」也会说「匹配到 20 只」。
+   */
+  const allHits = useMemo(() => searchStocks(scoped, query), [scoped, query]);
   const picks = useMemo(() => pickCandidates(scoped, key), [scoped, key]);
-  const list = searching ? hits : picks;
+  const all = useMemo(() => pickAll(scoped, key), [scoped, key]);
+  /** false = 先给折好的那一小段；true = 这一屏的全量名册 */
+  const [full, setFull] = useState(false);
+  const hits = full ? allHits : allHits.slice(0, SEARCH_LIMIT);
+  const list = searching ? hits : full ? all : picks;
+
+  const total = searching ? allHits.length : all.length;
+  const shown = searching ? hits.length : picks.length;
+  /*
+   * 展开之后换市场或换问法都可能让池子变小，全量名册短到不比原来长 ——
+   * 这时那个「收起」按钮就成了纯噪音（点一下什么都不会变）。用长度判断，
+   * 而不是写 effect 去清状态：清状态要等一帧，那一帧里按钮会闪一下。
+   */
+  const canExpand = total > shown;
+
+  const head = searching
+    ? total > 0
+      ? `匹配到 ${total} 只`
+      : "没找到这只票"
+    : full
+      ? `全部 ${all.length} 只，按「${PICK_LABEL[key]}」排序`
+      : "不知道买什么？挑一个";
 
   return (
     <div className="pick-box">
       <div className="pick-head">
-        <span className="pick-title">
-          {searching
-            ? hits.length > 0
-              ? `匹配到 ${hits.length} 只`
-              : "没找到这只票"
-            : "不知道买什么？挑一个"}
-        </span>
+        <span className="pick-title">{head}</span>
         {!searching && (
           <div className="pick-keys">
             {PICK_KEYS.map((k) => (
@@ -145,7 +175,7 @@ export function StockPicker({ rows, query, onPick, activeCode }: StockPickerProp
             : "这一局还没有可下单的行情。"}
         </p>
       ) : (
-        <ul className="pick-list">
+        <ul className={`pick-list${full ? " is-full" : ""}`}>
           {list.map((s) => (
             <li key={s.code}>
               <button
@@ -183,7 +213,26 @@ export function StockPicker({ rows, query, onPick, activeCode }: StockPickerProp
         </ul>
       )}
 
-      {!searching && list.length > 0 && <p className="field-hint pick-caveat">{PICK_CAVEAT}</p>}
+      {/*
+        「看全部」这一行是补上一个对不上的数字：市场胶囊写「全部 150」，
+        清单却只有 8 行 —— 两句话说的是两件事（池子多大 / 榜单多长），
+        但玩家只看得到那个 150。点开就是这一屏的全部标的，同一个排序；
+        搜索时同理，先说清真实的命中数，再让人决定要不要全看。
+      */}
+      {list.length > 0 && (
+        <div className="pick-foot">
+          {!searching && <p className="field-hint pick-caveat">{PICK_CAVEAT}</p>}
+          {canExpand && (
+            <button
+              type="button"
+              className="game-text-button pick-all"
+              onClick={() => setFull((v) => !v)}
+            >
+              {full ? `收起，只看前 ${shown} 只` : `看全部 ${total} 只 →`}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

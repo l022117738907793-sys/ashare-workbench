@@ -179,6 +179,47 @@ try {
   console.log("\n一、游戏页的文案");
   await waitFor(`document.body.innerText.includes("游戏大厅")`, "游戏大厅渲染");
   // 章节清单在「选择传奇关卡 →」后面，不点开就只有玩法三选一
+  /*
+   * 四张模式卡排成 2×2。
+   *
+   * 这里**先把视口撑到 1280×900 再量**：无头 Edge 会忽略 `--window-size`，
+   * 实际视口只有 500×450 —— 那个宽度落在 760px 断点内，卡片会换成紧凑版
+   * （副文案与页脚 `display: none`），量不到桌面那套排版。
+   * 量三件事：四张都在、恰是两行两列、每张够宽到副文案一句话读完。
+   * 不量像素宽度本身 —— 那个随视口变，而「被断成两行」才是当初要修的毛病。
+   */
+  await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await sleep(500);
+  const modeGrid = JSON.parse(await evaluate<string>(`
+    const g = document.querySelector(".game-mode-grid");
+    const cards = g ? [...g.children] : [];
+    const tops = [...new Set(cards.map((c) => Math.round(c.getBoundingClientRect().top)))];
+    const lines = cards.map((c) => {
+      const p = c.querySelector("p");
+      if (!p || getComputedStyle(p).display === "none") return 0;
+      const r = document.createRange();
+      r.selectNodeContents(p);
+      return r.getClientRects().length;
+    });
+    return JSON.stringify({
+      count: cards.length,
+      rows: tops.length,
+      perRow: tops.map((t) => cards.filter((c) => Math.round(c.getBoundingClientRect().top) === t).length),
+      w: cards.map((c) => Math.round(c.getBoundingClientRect().width)),
+      lines,
+    });
+  `)) as { count: number; rows: number; perRow: number[]; w: number[]; lines: number[] };
+  console.log(`    桌面 1280px 的模式卡：${JSON.stringify(modeGrid)}`);
+  check("四张模式卡都在", modeGrid.count === 4, JSON.stringify(modeGrid));
+  check("排成 2×2（两行、每行两张）", modeGrid.rows === 2 && modeGrid.perRow.every((n) => n === 2), JSON.stringify(modeGrid));
+  check(
+    `每张宽到副文案能一句话读完（最窄 ${Math.min(...modeGrid.w)}px，${modeGrid.lines.join("/")} 行）`,
+    Math.min(...modeGrid.w) >= 400 && modeGrid.lines.every((n) => n === 1),
+    JSON.stringify(modeGrid),
+  );
+  await send("Emulation.clearDeviceMetricsOverride");
+  await sleep(500);
+
   const openLevels = await evaluate<string>(CLICK("选择传奇关卡"));
   check("点得到「选择传奇关卡」", openLevels === "OK", openLevels);
   /*

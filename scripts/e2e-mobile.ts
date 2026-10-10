@@ -269,6 +269,28 @@ async function main(): Promise<void> {
     JSON.stringify(guideSize.badge),
   );
 
+  // 四张模式卡 2×2。断言量的是「排成几行、每行几张」，不量像素宽度 ——
+  // 宽度会随视口变，而「第四张孤零零掉到第二行左边」正是三列排法的病。
+  const grid = JSON.parse(await evaluate<string>(`
+    const g = document.querySelector(".game-mode-grid");
+    const cards = g ? [...g.children] : [];
+    const tops = [...new Set(cards.map((c) => Math.round(c.getBoundingClientRect().top)))];
+    return JSON.stringify({
+      count: cards.length,
+      perRow: cards.length / Math.max(tops.length, 1),
+      rows: tops.length,
+      w: cards.map((c) => Math.round(c.getBoundingClientRect().width)),
+    });
+  `)) as { count: number; perRow: number; rows: number; w: number[] };
+  console.log(`    模式卡：${JSON.stringify(grid)}`);
+  check("大厅里有四张模式卡", grid.count === 4, JSON.stringify(grid));
+  check("排成 2×2（两行，每行两张）", grid.rows === 2 && grid.perRow === 2, JSON.stringify(grid));
+  check(
+    "同一行的两张等宽，也没窄到放不下一句话",
+    new Set(grid.w).size <= 2 && Math.min(...grid.w) >= 120,
+    JSON.stringify(grid.w),
+  );
+
   // ── 三、关卡页：开局简报折叠块 ─────────────────────────────
   console.log("\n三、关卡页");
   check("点得到「选择传奇关卡」", (await evaluate<string>(CLICK("选择传奇关卡"))) === "OK");

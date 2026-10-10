@@ -140,11 +140,15 @@
 .game-mode-grid {
   display: grid;
   /*
-   * 四张模式卡。用 auto-fit 而不是写死 4 列：1200px 上一行排得下四张，
-   * 900px 上自动掉成三列 + 一张换行，760px 以下由 compact-mobile.css 收成一列。
-   * 写死 4 列的话窄屏上每张只剩两百来像素，卡里的标题与脚注会互相挤。
+   * 四张模式卡排成 2×2。
+   *
+   * 原来是一行四张（auto-fit，每张 287px）：四张并排时每张只够放下
+   * 「图标 + 标签」那一行和一个 24px 的标题，副文案被挤成两行断得很难看，
+   * 卡片又高又窄。改成两列之后每张约 590px，一句话读下来不用换行，
+   * 四张卡的信息量也还在一屏之内。
+   * 手机上同样是 2×2（compact-mobile.css 把它收成紧凑方块）。
    */
-  grid-template-columns: repeat(auto-fit, minmax(216px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
 .game-mode-card {
@@ -490,7 +494,7 @@
   .game-section-heading { align-items: start; gap: 10px; }
   .game-section-heading h2 { font-size: 20px; }
   .game-text-button { font-size: 10px; padding-top: 24px; white-space: nowrap; }
-  .game-mode-grid { grid-template-columns: 1fr; gap: 12px; }
+  .game-mode-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .game-mode-card { padding: 18px; display: grid; grid-template-columns: 48px 1fr; column-gap: 13px; }
   .game-mode-top { grid-row: 1 / span 4; margin: 0; align-items: start; flex-direction: column; gap: 14px; }
   .game-mode-top svg { width: 30px; height: 30px; }

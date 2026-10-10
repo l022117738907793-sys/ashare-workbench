@@ -1765,6 +1765,36 @@ code {
 .pick-caveat {
   margin: 6px 0 0;
 }
+/*
+ * 「看全部 N 只」那一行。
+ *
+ * 展开后清单要真的装得下：短名单是 8 行、264px 够用，全量名册有 150–659 行，
+ * 还卡在 264px 里就等于换了个说法的同一件事。用 vh 而不是写死像素 ——
+ * 矮窗口上 560px 会顶穿屏幕。
+ *
+ * 选择器要写成 `.pick-box .pick-list.is-full`（三层）而不是
+ * `.pick-list.is-full`（两层）：redesign.css 里那条 `.game-trading-grid .pick-list`
+ * 同样是两层，而它在本文件之后 import，平手时是它赢 —— 展开会毫无反应。
+ */
+.pick-box .pick-list.is-full {
+  max-height: min(70vh, 560px);
+}
+.pick-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 0 10px 8px;
+}
+.pick-foot .pick-caveat {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.pick-all {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 
 /* ── 术语：蓝色的词 + 就地展开的解释 ────────────────────────────
    解释不做浮层，就地撑开下面一行。浮层会盖住下单按钮，而琥珀那份接入包

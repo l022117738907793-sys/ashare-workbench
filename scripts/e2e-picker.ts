@@ -201,7 +201,77 @@ try {
   const mixed = JSON.parse((await evaluate<string>(PICK_CODES)) ?? "[]") as string[];
   check("「全部」又混回来了", mixed.some((c) => /^\d{6}$/.test(c)), JSON.stringify(mixed));
 
-  console.log("\n五、实时账户回游戏大厅，账户不能没");
+  /*
+   * 这一节钉的是一个曾经对不上的数字：市场胶囊写「全部 659」，清单往下只有 8 行。
+   * 两句话各自都没错（一个说池子多大，一个说榜单多长），但玩家只看得到那个 659，
+   * 也没有任何出口能看到另外 651 只。断言量「渲染出来的行数」和「按钮上写的只数」，
+   * 不量文案措辞。
+   */
+  console.log("\n五、「看全部 N 只」要说得出真实只数，也要真的给出来");
+  const chipTotal = Number((labels.find((x) => x.startsWith("全部")) ?? "").replace(/\D/g, ""));
+  check(`市场胶囊写了池子有多大（${chipTotal}）`, chipTotal > 8, String(chipTotal));
+
+  const measure = async () =>
+    JSON.parse(
+      (await evaluate<string>(`
+        const l = document.querySelector(".pick-list");
+        if (!l) return "null";
+        const cs = getComputedStyle(l);
+        return JSON.stringify({
+          cls: l.className,
+          mh: parseFloat(cs.maxHeight),
+          rows: document.querySelectorAll(".pick-row").length,
+          head: (document.querySelector(".pick-title") || {}).textContent || "",
+        });
+      `)) ?? "null",
+    ) as { cls: string; mh: number; rows: number; head: string } | null;
+
+  const short = await measure();
+  check("默认榜单只有 8 行，不是把整个池子铺出来", short?.rows === 8, JSON.stringify(short));
+
+  const expandLabel = await evaluate<string>(`
+    const b = document.querySelector(".pick-all");
+    if (!b) return "NO_BUTTON";
+    const t = b.textContent.trim();
+    b.click();
+    return t;
+  `);
+  check("有「看全部」按钮", expandLabel !== "NO_BUTTON", expandLabel);
+  check(`按钮上写的就是真实只数（${chipTotal}）`, expandLabel.includes(String(chipTotal)), expandLabel);
+
+  await sleep(500);
+  const full = await measure();
+  check(`展开后渲染出全部 ${chipTotal} 只（实际 ${full?.rows}）`, full?.rows === chipTotal, JSON.stringify(full));
+  check(
+    `标题改口说「全部 ${chipTotal} 只」`,
+    (full?.head ?? "").includes("全部") && (full?.head ?? "").includes(String(chipTotal)),
+    full?.head ?? "",
+  );
+  check("展开时挂上了 is-full", (full?.cls ?? "").includes("is-full"), full?.cls ?? "");
+  /*
+   * 高度必须真的放开：短名单 8 行 264px 够用，全量名册几百行还卡在原来的高度里，
+   * 就等于换了个说法的同一件事。这里比的是「展开后 > 收着时」，不写死像素 ——
+   * 桌面和手机两档的数值本来就不同（560 / 420）。
+   */
+  check(
+    `展开后清单真的变高了（${short?.mh}px → ${full?.mh}px）`,
+    Number.isFinite(full?.mh) && Number.isFinite(short?.mh) && (full?.mh ?? 0) > (short?.mh ?? 0),
+    JSON.stringify({ short: short?.mh, full: full?.mh }),
+  );
+
+  const collapseLabel = await evaluate<string>(`
+    const b = document.querySelector(".pick-all");
+    if (!b) return "NO_BUTTON";
+    const t = b.textContent.trim();
+    b.click();
+    return t;
+  `);
+  check("能收回去", collapseLabel.includes("收起"), collapseLabel);
+  await sleep(400);
+  const folded = await measure();
+  check("收回去又只剩 8 行", folded?.rows === 8, JSON.stringify(folded));
+
+  console.log("\n六、实时账户回游戏大厅，账户不能没");
   const before = await evaluate<string>(`
     const card = [...document.querySelectorAll(".card")].find(c => c.textContent.includes("总资产"));
     return card ? card.textContent : "";
@@ -230,7 +300,7 @@ try {
   );
   check("回来之后不再显示大厅", !(await evaluate<string>(`return document.body.innerText;`)).includes("选一种玩法"));
 
-  console.log("\n六、控制台");
+  console.log("\n七、控制台");
   const errs = await evaluate<string[]>(`return JSON.stringify(window.__e2eErrors);`);
   const errList = (typeof errs === "string" ? JSON.parse(errs) : errs) as string[];
   check("没有未捕获的异常", errList.length === 0, JSON.stringify(errList));

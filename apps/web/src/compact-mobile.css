@@ -55,7 +55,8 @@ summary::-webkit-details-marker { display: none; }
   .game-section-heading .game-eyebrow { display: none; }
   .game-section-heading h2 { margin: 0; font-size: 15px; }
   .game-section-heading .game-text-button { font-size: 11px; min-height: 44px; white-space: nowrap; padding: 0; }
-  .game-mode-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  /* 四张卡 2×2。三列的话第四张会孤零零掉到第二行左边。 */
+  .game-mode-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .game-mode-card { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 5px; min-height: 102px; padding: 11px 10px; border-radius: 12px; }
   .game-mode-top { display: flex; margin: 0; }
   .game-mode-top svg { width: 22px; height: 22px; }
@@ -247,6 +248,15 @@ summary::-webkit-details-marker { display: none; }
   .game-trading-grid { gap: 10px; }
   .game-stock-browser > summary { font-size: 12px; }
   .game-stock-browser .pick-list { max-height: 190px; }
+  /*
+   * 展开成「全部 150 只」之后就不能还卡在 190px 里了 —— 那等于换了个说法的
+   * 同一件事。选择器要带上 .pick-list 前面的那一层才算得过上面那条规则
+   * （同特异性时 compact-mobile.css 靠后，所以这里必须更高一级）。
+   */
+  .game-stock-browser .pick-list.is-full,
+  .replay-game .pick-list.is-full { max-height: min(60vh, 420px); }
+  .pick-foot { padding: 0 10px 6px; gap: 8px; }
+  .pick-all { min-height: 44px; font-size: 13px; padding: 0 4px; }
 
   /*
    * ── 展开 / 收起：手机上要一眼看出「这里能点」 ─────────────────────

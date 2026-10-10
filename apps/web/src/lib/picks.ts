@@ -148,6 +148,29 @@ export function pickCandidates(
   return best.slice(0, limit).map((x) => x.r);
 }
 
+/**
+ * 全量名册：同一个排序键下的**全部**标的，不摊桶、不截断。
+ *
+ * 与 `pickCandidates` 是两种东西，缺一不可：
+ * - `pickCandidates` 是「不知道买什么」的短名单 —— 每桶 2 只、总共 8 只。
+ * - 这个是「我自己找」的完整名册。
+ *
+ * 为什么必须有：市场那一排胶囊写着「全部 150」，清单往下却只有 8 行。玩家
+ * 看到的是一个对不上的数字，会以为数据丢了或者自己没滚到底 —— 而它俩其实
+ * 说的是两件事（池子有多大 / 榜单有多长）。把名册摆出来，这个数字才有着落。
+ *
+ * 取不到分数的（当天没有价格）不进名册：摆一个没有价格的按钮，点了也没用。
+ */
+export function pickAll(rows: PickStock[], key: PickKey): PickStock[] {
+  const scored: Array<{ r: PickStock; v: number }> = [];
+  for (const r of rows) {
+    const v = pickScore(r, key);
+    if (v !== null) scored.push({ r, v });
+  }
+  scored.sort((a, b) => b.v - a.v || a.r.code.localeCompare(b.r.code));
+  return scored.map((x) => x.r);
+}
+
 /** 名字/代码里含查询词的排前面；能完整匹配代码的排最前。 */
 function searchRank(s: PickStock, q: string, digits: string): number {
   if (s.code.toLowerCase() === q) return 0;
@@ -161,8 +184,12 @@ function searchRank(s: PickStock, q: string, digits: string): number {
 /**
  * 边打边筛。查询为空时返回空数组 —— 「没输入」和「输入了没匹配上」是两种
  * 完全不同的状态，调用方要能分开（前者显示榜单，后者显示「没找到」）。
+ *
+ * **默认不截断**：调用方要显示几条由它自己 `slice`。以前这里写死 20，
+ * 界面就照着 20 说「匹配到 20 只」—— 打一个「6」明明命中四百多只。
+ * 上限是显示问题，不该藏在搜索里，否则调用方永远说不出那个真实的数字。
  */
-export function searchStocks(rows: PickStock[], query: string, limit = 20): PickStock[] {
+export function searchStocks(rows: PickStock[], query: string, limit = Infinity): PickStock[] {
   const q = query.trim().toLowerCase();
   if (q === "") return [];
   const digits = q.replace(/[^0-9]/g, "");
