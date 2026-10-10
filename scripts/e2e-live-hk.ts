@@ -10,14 +10,49 @@
  * 它可能停在**没有港股的旧副本**上（实测曾经是 619 只 / 0 港股）。单测全绿
  * 也说明不了页面上真能看见港股 —— 只有把页面点开才知道。
  *
- * 断言的数字都是算好的，不是「看起来对」：
- *   - 腾讯 `00700.HK` 快照收盘 431.0 港币 × 0.8584 = 369.9704 → 显示 369.97
- *   - 下单 100 股：参考价 369.9704 → 预计成交价 370.34（+0.1% 滑点）
- *     金额 37034 元；港股手续费 = max(37034/0.8584×0.25%, 100)×0.8584 + 37034×0.1%
- *     = 92.59 + 37.03 = 129.62
+ * 期望值**从页面自己加载的那份快照里现算**，不写死数字。
+ *
+ * 为什么：`data/snapshot_*` 每天被 CI 的 `update-snapshot.yml` 换掉一次，收盘价每天都在动，
+ * 汇率甚至一天一个报价。断言里一旦写死「431.0 港币 × 0.8584 = 369.97」，第二天就全红 ——
+ * 而它红的不是代码坏了，是**数据换了**（实测：快照换成 `snapshot_20261009` 后，
+ * 港股池从 20 只缩到 14 只、腾讯 `00700.HK` 整个不在里面了，写死的断言一次挂掉 11 条）。
+ *
+ * 所以这里只钉**结构与接线**：港股进得了候选、价格确实被折算过、下单卡走的是港股费率。
+ * 算式本身由 `packages/game` 的单测覆盖，这里直接用同一个 `previewOrder` 算期望值 ——
+ * 验证的是**界面接到了同一个引擎**，不是把数学重算一遍。
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { rmSync } from "node:fs";
+import { previewOrder } from "@aw/game";
+
+/** 港股里优先拿这几只当靶子（盘子大、常年都在池子里）；都不在就退而求其次拿任意一只有收盘价的 */
+const HK_PREFERRED = ["00939.HK", "01299.HK", "00941.HK", "00005.HK", "00388.HK"];
+
+interface SnapStock {
+  code: string;
+  name: string;
+  close?: Array<number | null>;
+}
+/** 快照的 close 是「按日排列、个别日期可能为 null」的数组，最后一个非空就是最新收盘 */
+function lastClose(close: Array<number | null> | undefined): number | null {
+  if (!Array.isArray(close)) return null;
+  for (let i = close.length - 1; i >= 0; i -= 1) if (typeof close[i] === "number") return close[i] as number;
+  return null;
+}
+/**
+ * 页面上「今天」用的是北京时间（`useLiveQuotes` 的 `beijingTime().iso`），
+ * 费率档位按它选（印花税 2023-08-28 减半、港股 2021-08-01 与 2023-11-17 各调过一次），
+ * 所以这里也得用同一个口径，不能用机器本地时区。
+ */
+function beijingToday(): string {
+  // en-CA 的短日期格式正好是 YYYY-MM-DD
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
 
 const BASE = process.env.E2E_BASE ?? "http://127.0.0.1:4399/";
 const EDGE = "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge";
@@ -135,6 +170,35 @@ try {
   check("页面渲染出标题", await waitFor(`document.body.innerText.includes("股市练习场")`, "标题"));
   check("快照加载完成", await waitFor(`!document.body.innerText.includes("正在加载")`, "加载完成"));
 
+  /*
+   * 现读快照，算出这一趟要比对的期望值。读的是**服务上真的那份**（`data/latest.json`
+   * 指向哪个目录就读哪个），不是仓库根 `data/` 里那份 —— 页面用的就是前者。
+   */
+  const snapName = ((await (await fetch(`${BASE}data/latest.json`)).json()) as { snapshot: string }).snapshot;
+  const meta = (await (await fetch(`${BASE}data/${snapName}/meta.json`)).json()) as {
+    hk?: { fx?: { rate?: number }; count?: number };
+  };
+  /* `stocks.json` 是裸数组（早期的副本曾经包成 `{stocks: []}`，两种都认） */
+  const rawStocks = await (await fetch(`${BASE}data/${snapName}/stocks.json`)).json();
+  const rows: SnapStock[] = Array.isArray(rawStocks) ? rawStocks : rawStocks.stocks;
+  const hkRows = rows.filter((r) => r.code.endsWith(".HK"));
+  const fxRate = meta.hk?.fx?.rate ?? null;
+  check(`快照 ${snapName} 里有港股（${hkRows.length} 只）`, hkRows.length > 0, `meta.hk.count=${meta.hk?.count}`);
+  check("快照带港币汇率（缺了下单卡会按 1:1 算错最低佣金）", typeof fxRate === "number" && fxRate > 0, String(fxRate));
+  const target =
+    HK_PREFERRED.map((c) => hkRows.find((r) => r.code === c && lastClose(r.close) !== null)).find(Boolean) ??
+    hkRows.find((r) => lastClose(r.close) !== null);
+  if (!target || typeof fxRate !== "number") throw new Error("快照里没有可用的港股靶子，先确认 sync_web_data 跑过");
+  const rawClose = lastClose(target.close) as number;
+  /** 折算后的参考价。与 `fmtNum` 一致：两位小数（先 toFixed 再 Number，尾随 0 会去掉） */
+  const refCny = Number((rawClose * fxRate).toFixed(2));
+  const expected = previewOrder(refCny, "buy", 100, beijingToday(), { market: "HK", fx: fxRate });
+  const show = (n: number) => String(Number(n.toFixed(2)));
+  console.log(
+    `    靶子 ${target.code} ${target.name}：收盘 ${rawClose} 港币 × ${fxRate} = ${show(refCny)} 元` +
+      ` → 预计成交 ${show(expected.price)} · 金额 ${show(expected.amount)} · 手续费 ${show(expected.fee.total)}`,
+  );
+
   console.log("\n二、进实时盘（游戏大厅是默认视图）");
   check("默认落在游戏大厅的玩法选择上", (await evaluate<string>(`return document.body.innerText;`)).includes("选一种玩法"));
   const live = await evaluate<string>(CLICK("实时模式"));
@@ -157,45 +221,70 @@ try {
   check("点得开「从列表选择股票」", picksOpened === "OK", picksOpened);
 
   console.log("\n三、港股进得了候选清单，价格已折成人民币");
-  await evaluate(TYPE("#game-code", "00700"));
-  const listed = await waitFor(`document.body.innerText.includes("腾讯控股")`, "腾讯控股出现在候选里", 20);
-  check("候选清单里有腾讯控股（港股确实进页面了）", listed, "候选空的话多半是 public/data 没同步");
+  await evaluate(TYPE("#game-code", target.code.split(".")[0]));
+  const listed = await waitFor(`document.body.innerText.includes(${JSON.stringify(target.name)})`, `${target.name} 出现在候选里`, 20);
+  check(`候选清单里有${target.name}（港股确实进页面了）`, listed, "候选空的话多半是 public/data 没同步");
   const pickText = await evaluate<string>(`
-    const row = [...document.querySelectorAll(".pick-row, li, div")].find(
-      (x) => x.textContent && x.textContent.includes("腾讯控股") && x.textContent.includes("369.97"),
+    const row = [...document.querySelectorAll(".pick-row")].find(
+      (x) => x.textContent.includes(${JSON.stringify(target.name)}),
     );
     return row ? row.textContent : "";
   `);
-  check("候选里显示 369.97（= 431.0 港币 × 0.8584，折算发生了）", pickText.includes("369.97"), pickText.slice(0, 120));
+  check(
+    `候选里显示折成人民币的 ${show(refCny)}（= ${rawClose} 港币 × ${fxRate}）`,
+    pickText.includes(show(refCny)),
+    pickText.slice(0, 120),
+  );
   check("候选里标了「港币」", pickText.includes("港币"), pickText.slice(0, 120));
 
   console.log("\n四、下单卡按港股口径算");
-  await evaluate(TYPE("#game-code", "00700.HK"));
+  await evaluate(TYPE("#game-code", target.code));
   await evaluate(TYPE("#game-shares", "100"));
   const card = await waitFor(`document.body.innerText.includes("预计成交价")`, "下单预览", 20);
   check("填完代码与股数就出下单预览", card);
   const text = await evaluate<string>(`return document.body.innerText;`);
-  check("标的行是 00700.HK 腾讯控股", text.includes("00700.HK 腾讯控股"), text.slice(0, 200));
-  check("预计成交价 370.34（参考价 369.97 + 0.1% 滑点）", text.includes("370.34"), "");
-  check("预计金额 37034 元", text.includes("37034"), "");
+  check(`标的行是 ${target.code} ${target.name}`, text.includes(`${target.code} ${target.name}`), text.slice(0, 200));
+  /*
+   * 参考价从卡片自己读，再拿它喂 `previewOrder` 算期望值。
+   * 不直接拿快照收盘价当输入：盘中跑这一趟时实时行情会把它拽走几点，断言会跟着行情抖。
+   * 「折算到底有没有发生」由下面那条 3% 容差断言负责 —— 真没折算的话，
+   * 卡上会是 ${rawClose} 港币原价，与折算后的 ${show(refCny)} 差着汇率那 14%，必然被抓。
+   */
+  const refShown = Number((/参考价\s*([\d.]+)/.exec(text) ?? [])[1]);
+  check("下单卡里读得到参考价", Number.isFinite(refShown) && refShown > 0, text.slice(text.indexOf("参考价"), text.indexOf("参考价") + 30));
   check(
-    "手续费 129.62（港股 0.25%/最低 100 港元 + 0.1% 双向印花税，折成人民币）",
-    text.includes("129.62"),
+    `参考价与「快照收盘 × 汇率」差不到 3%（卡上 ${refShown} vs 折算后的 ${show(refCny)}）`,
+    Math.abs(refShown - refCny) / refCny <= 0.03,
+    `卡上 ${refShown}，快照算出来 ${show(refCny)}`,
+  );
+  const cardExp = previewOrder(refShown, "buy", 100, beijingToday(), { market: "HK", fx: fxRate });
+  check(`预计成交价 ${show(cardExp.price)}（参考价 + 0.1% 滑点）`, text.includes(show(cardExp.price)), "");
+  check(`预计金额 ${show(cardExp.amount)}`, text.includes(show(cardExp.amount)), "");
+  check(
+    `手续费 ${show(cardExp.fee.total)}（港股 0.25%/最低 100 港元 + 0.1% 双向印花税，折成人民币）`,
+    text.includes(show(cardExp.fee.total)),
     text.includes("手续费") ? text.slice(text.indexOf("手续费"), text.indexOf("手续费") + 40) : "没有手续费行",
   );
   check("下单卡副标题写 T+0（港股当日可卖，不是 T+1）", text.includes("港股 T+0"), "");
   check("下单卡副标题不再声称「一手 100 股」", !text.includes("一手 100 股"), "");
 
   console.log("\n五、A 股这条路径没被改坏");
-  await evaluate(TYPE("#game-code", "600519.SH"));
+  const cnTarget =
+    rows.find((r) => r.code === "600519.SH" && lastClose(r.close) !== null) ??
+    rows.find((r) => (r.code.endsWith(".SH") || r.code.endsWith(".SZ")) && lastClose(r.close) !== null);
+  if (!cnTarget) throw new Error("快照里没有可用的 A 股靶子");
+  const cnClose = lastClose(cnTarget.close) as number;
+  await evaluate(TYPE("#game-code", cnTarget.code));
   await evaluate(TYPE("#game-shares", "100"));
   await sleep(500);
   const cn = await evaluate<string>(`return document.body.innerText;`);
   check("A 股仍走 T+1 文案", cn.includes("T+1：当日买入次日才可卖"), "");
+  /* 同样是 3% 容差：A 股折算了的话会变成 close × 某个汇率，差得远不止 3% */
+  const cnRef = Number((/参考价\s*([\d.]+)/.exec(cn) ?? [])[1]);
   check(
-    "A 股价格没被折算（1258.62）",
-    cn.includes("1258.62"),
-    cn.includes("600519") ? cn.slice(cn.indexOf("600519"), cn.indexOf("600519") + 60) : "没有贵州茅台行",
+    `A 股价格没被折算（卡上 ${cnRef}，快照收盘 ${cnClose}，${cnTarget.code}）`,
+    Number.isFinite(cnRef) && cnRef > 0 && Math.abs(cnRef - cnClose) / cnClose <= 0.03,
+    cn.includes(cnTarget.code) ? cn.slice(cn.indexOf(cnTarget.code), cn.indexOf(cnTarget.code) + 60) : `没有 ${cnTarget.code} 那一行`,
   );
 
   console.log("\n六、没有控制台报错");
