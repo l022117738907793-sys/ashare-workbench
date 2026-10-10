@@ -439,24 +439,53 @@ async function main(): Promise<void> {
   // （高度与徽标）。后者曾经是这一片最弱的地方 —— `.card-fold` 在
   // redesign.css 里被抹成 `border:0; background:none`，手机上就是一小撮灰字。
   console.log("\n八、展开 / 收起");
+  // v2 把市场观察做成三层收起：外层「详细数据与筛选」→ 里面四张卡 → 卡里的个股分组。
+  // 一进页面四张卡全是折着的，所以先按需展开，再验「折得动」。
+  await evaluate<string>(`
+    const d = document.querySelector("details.market-full-details");
+    if (d && !d.open) d.querySelector("summary").click();
+    return "OK";
+  `);
+  await sleep(400);
+  const openStocks = await evaluate<string>(`
+    const card = [...document.querySelectorAll("section.card")]
+      .find(c => ((c.querySelector(".card-title") || {}).textContent || "").includes("③ 个股分类"));
+    const b = card && card.querySelector(".card-fold");
+    if (!b) return "NO_CARD";
+    if ((b.textContent || "").includes("展开")) b.click();
+    return "OK";
+  `);
+  check("点得开「③ 个股分类」", openStocks === "OK", openStocks);
+  await sleep(600);
+  // 分组的「继续展开」与分组标题只在这张卡展开之后才量得到。
+  await evaluate<string>(`
+    const head = document.querySelector("section.group button.group-head");
+    if (head && head.getAttribute("aria-expanded") !== "true") head.click();
+    return "OK";
+  `);
+  await sleep(700);
   const foldCount = await evaluate<number>(`return document.querySelectorAll(".card-fold").length;`);
   check("今日信号与①大盘环境都能折", foldCount === 4, `实际 ${foldCount} 个折叠按钮`);
 
   // 数第一张卡（今日信号）里的行。它的行是不可点的 `row-static`，没有
   // 「打开七步分析」那个按钮，所以不能拿全页那套计数。
   const signalRows = () => evaluate<number>(`const c = document.querySelector(".card"); return c ? c.querySelectorAll("li").length : -1;`);
+  const firstFold = `document.querySelectorAll(".card-fold")[0]`;
+  check("第一张卡默认是折着的", (await evaluate<string>(`return ${firstFold}.textContent.trim();`)) === "展开 ▾");
+  check("点得到第一个折叠按钮", (await evaluate<string>(`${firstFold}.click(); return "OK";`)) === "OK");
+  await sleep(400);
   const beforeFold = await signalRows();
-  check("折之前「今日信号」里的个股行在", beforeFold > 0, `实际 ${beforeFold} 行`);
+  check("展开「今日信号」之后个股行在", beforeFold > 0, `实际 ${beforeFold} 行`);
 
-  check("点得到第一个折叠按钮", (await evaluate<string>(`document.querySelectorAll(".card-fold")[0].click(); return "OK";`)) === "OK");
+  check("再点得到第一个折叠按钮（折回去）", (await evaluate<string>(`${firstFold}.click(); return "OK";`)) === "OK");
   await sleep(400);
   const afterFold = await signalRows();
   const foldLabels = await evaluate<string[]>(`return [...document.querySelectorAll(".card-fold")].map(b => (b.textContent || "").trim());`);
   check("折起来之后那张卡的行没了", afterFold === 0, `${beforeFold} → ${afterFold}`);
   check("折起来的那张按钮写着「展开」", foldLabels[0] === "展开 ▾", foldLabels.join(" | "));
-  check("没折的那几张还写着「收起」", foldLabels.filter((t) => t === "收起 ▴").length === 3, foldLabels.join(" | "));
+  check("四张卡各自记着自己的开合", foldLabels.filter((t) => t === "展开 ▾").length === 3, foldLabels.join(" | "));
   // 折起来顺序点两次要能回到原样，否则折了就打不开
-  check("再点一次能展开回来", (await evaluate<string>(`document.querySelectorAll(".card-fold")[0].click(); return "OK";`)) === "OK");
+  check("再点一次能展开回来", (await evaluate<string>(`${firstFold}.click(); return "OK";`)) === "OK");
   await sleep(400);
   check("展开后行回来了", (await signalRows()) === beforeFold, `实际 ${await signalRows()} 行`);
 

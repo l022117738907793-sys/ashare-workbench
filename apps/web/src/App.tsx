@@ -47,6 +47,7 @@ import {
   settleSeason,
   totalAssets as calcTotalAssets,
   levelById,
+  LEVELS,
   type EquityPoint,
   type ReplayLevel,
   type SeasonResult,
@@ -54,6 +55,7 @@ import {
   type Trade,
 } from "@aw/game";
 import { AppIcon } from "./components/AppIcon";
+import { resetCampaignNotes } from "./lib/campaign";
 import { GameCompanion } from "./components/GameCompanion";
 import { AnalysisView } from "./components/AnalysisView";
 import { GameRulesView } from "./components/GameRulesView";
@@ -227,6 +229,7 @@ export default function App() {
 
   // ── 历史推演（模式 3：随机开局）─────────────────────────────
   // 存档里只有进度，行情每次从快照还原 —— 六十万个数字塞不进 localStorage。
+  const [replayGeneration, setReplayGeneration] = useState(0);
   const [replay, setReplay] = useState<ReplaySession | null>(null);
   const replayRestored = useRef(false);
   /*
@@ -970,6 +973,8 @@ export default function App() {
     (initialCash: number) => {
       if (!snapshot || !calendar || !replayAvailable(snapshot)) return;
       const state = startReplay(snapshot, calendar, { mode: "random", initialCash });
+      resetCampaignNotes();
+      setReplayGeneration(g => g + 1);
       setReplay({
         state,
         mode: "random",
@@ -1041,6 +1046,8 @@ export default function App() {
       void loadLevelShard(level.id)
         .then((shard) => {
           const state = startLevelReplay(shard, initialCash, `${level.order}. ${level.title}`);
+          resetCampaignNotes();
+      setReplayGeneration(g => g + 1);
           setReplay({
             state,
             mode: "legend",
@@ -1129,7 +1136,7 @@ export default function App() {
       </div>
 
       <main className="app-main" id="main-content">
-        {tab !== "game" && <div className="page-intro"><span className="eyebrow">{tab === "workbench" ? "OBSERVE THE MARKET" : tab === "analysis" ? "LEARN FROM YOUR DECISIONS" : tab === "settings" ? "YOUR PREFERENCES" : "GET TO KNOW THE GAME"}</span><h1>{tab === "workbench" ? "市场观察" : tab === "analysis" ? "学习笔记" : tab === "settings" ? "设置" : tab === "guide" ? "每一次练习，都从看懂开始。" : "交易规则"}</h1><p>{tab === "workbench" ? "从大盘到个股，看看当前市场发生了什么。此处展示的是当前行情。" : tab === "analysis" ? "留下观察依据，回看自己的判断。" : tab === "settings" ? "调整行情刷新、数据来源与学习助手。" : "先熟悉操作，再在真实的市场历史中练习。"}</p></div>}
+        {tab !== "game" && <div className={`page-intro${tab === "workbench" ? " market-page-intro" : ""}`}><span className="eyebrow">{tab === "workbench" ? "OBSERVE THE MARKET" : tab === "analysis" ? "LEARN FROM YOUR DECISIONS" : tab === "settings" ? "YOUR PREFERENCES" : "GET TO KNOW THE GAME"}</span><h1>{tab === "workbench" ? "市场观察" : tab === "analysis" ? "学习笔记" : tab === "settings" ? "设置" : tab === "guide" ? "每一次练习，都从看懂开始。" : "交易规则"}</h1><p>{tab === "workbench" ? "从大盘到个股，看看当前市场发生了什么。此处展示的是当前行情。" : tab === "analysis" ? "留下观察依据，回看自己的判断。" : tab === "settings" ? "调整行情刷新、数据来源与学习助手。" : "先熟悉操作，再在真实的市场历史中练习。"}</p></div>}
         {loading && <Notice tone="info">正在加载快照…</Notice>}
         {loadError && (
           <Notice tone="danger" role="alert">
@@ -1143,7 +1150,7 @@ export default function App() {
         {!loading && !loadError && !snapshot && <Notice tone="info">没有可用快照。</Notice>}
 
         {tab === "workbench" && !guideSeen && (
-          <div className="guide-banner">
+          <div className="guide-banner market-guide-banner">
             <span>
               <strong>第一次用？</strong> 这里有一份使用说明，讲清楚每个结论是怎么来的。
             </span>
@@ -1289,6 +1296,7 @@ export default function App() {
 
         {!loading && tab === "game" && gamePane === "replay" && replay && (
           <ReplayView
+            key={replayGeneration}
             state={replay.state}
             hideDate={replay.hideDate}
             label={replay.label}
@@ -1309,6 +1317,8 @@ export default function App() {
             onCancel={handleReplayCancel}
             onAdvance={handleReplayAdvance}
             onExit={handleReplayExit}
+            onRestart={() => replayLegend ? handleStartLevel(replayLegend, replay.state.account.initialCash) : handleStartReplay(replay.state.account.initialCash)}
+            onNext={replayLegend && LEVELS[replayLegend.order] ? () => handleStartLevel(LEVELS[replayLegend.order], replay.state.account.initialCash) : undefined}
           />
         )}
 
@@ -1370,6 +1380,7 @@ export default function App() {
             onStartBacktrack={handleStartBacktrack}
             backtrack={backtrackPlan}
             replayInProgress={!!replay}
+            replaySummary={replay ? { title: replay.label, day: replay.state.dayIndex - replay.state.config.startIndex + 1, totalDays: replay.state.config.calendar.length - replay.state.config.startIndex, finished: replay.state.finished } : undefined}
             onResumeReplay={() => {
               setGamePane("replay");
               setLegendOpen(false);
@@ -1405,7 +1416,7 @@ export default function App() {
             quoteSourceText={quoteSourceText}
           />
         )}
-        {!loading && tab === "game" && <GameCompanion onGuide={openGuide} context={gamePane === "replay" ? "replay" : legendOpen ? "chapter" : game.status === "playing" ? "live" : replay ? "resume" : "lobby"}/>}
+        {!loading && tab === "game" && <GameCompanion onGuide={openGuide} cue={gamePane === "replay" && replay ? replay.state.finished ? {label: "本局完成", mood: "happy", text: "这段推演已经完成。打开本局战报，把真实结果和您当时的判断放在一起回看。"} : replay.state.pending.length ? {label: "等待撮合", mood: "explain", text: "您的委托已进入队列。推进下一天，开盘回报会告诉您成交情况；也可以先记录今天的理由。"} : {label: "本局挑战", mood: "thinking", text: "先观察眼前的信息，再展开「本局挑战」记下理由。观望也算一次判断，不必为了任务而交易。"} : undefined} context={gamePane === "replay" ? "replay" : legendOpen ? "chapter" : game.status === "playing" ? "live" : replay ? "resume" : "lobby"}/>}
         <footer className="app-footer"><span>MARKET PLAYGROUND</span><span>每一次判断，都值得复盘。</span><span>所有交易均为虚拟模拟</span></footer>
       </main>
 

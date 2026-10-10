@@ -8,7 +8,7 @@ import { AppIcon } from "./AppIcon";
 const TIPS: Array<{label: string; mood: HisuiMood; text: string}> = [
   {label: "先做什么", mood: "neutral", text: "第一次来可以选择传奇模式。先读开局简报，再看看截至当前日期的走势，记录自己的判断。"},
   {label: "委托与成交", mood: "explain", text: "历史推演里，委托提交后要等到下一交易日开盘撮合。请先看待成交委托，再点击“下一天”。"},
-  {label: "时间与规则", mood: "concern", text: "推进由您自己掌握：想清楚了再点“下一天”。当天新获得的股票，要到下一交易日才可出售。"},
+  {label: "时间与规则", mood: "concern", text: "推进由您自己掌握：想清楚了再点“下一天”。A 股当日买入次日才可卖，港美股当日可卖；请以当前标的的规则说明为准。"},
   {label: "怎样复盘", mood: "thinking", text: "我们可以对照最初的判断、成交记录和资金变化。一次结果还不能说明方法一直有效。"},
 ];
 
@@ -20,10 +20,10 @@ const START_TIPS = {
   live: "先选择股票与委托数量，再确认行情价格和交易费用。实时盘会跟随现实时间，休市时请留意页面的成交说明。",
 };
 
-export function GameCompanion({onGuide, context = "lobby"}: {onGuide: () => void; context?: keyof typeof START_TIPS}) {
+export function GameCompanion({onGuide, context = "lobby", cue}: {onGuide: () => void; context?: keyof typeof START_TIPS; cue?: {label: string; mood: HisuiMood; text: string}}) {
   const [index, setIndex] = useState(0);
   const [expanded, setExpanded] = useState(false);
-  const tip = index === 0 ? {...TIPS[0], text: START_TIPS[context]} : TIPS[index];
+  const tip = index === 0 ? cue ?? {...TIPS[0], text: START_TIPS[context]} : TIPS[index];
   const [x,y] = MOOD_CELL[tip.mood];
   const position = `${x * 50}% ${y * 100}%`;
   return <section className={`game-companion${expanded ? " is-expanded" : ""}`} aria-label="翡翠教学助手">

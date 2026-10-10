@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { answerQuestion } from './proxy.mjs';
+const mock = data => async()=>({ok:true,json:async()=>({choices:[{message:{content:JSON.stringify(data)}}]})});
+test('validates before any paid request',async()=>{let calls=0;const result=await answerQuestion({question:'a'.repeat(201)},{apiKey:'test-only',fetchImpl:async()=>{calls++}});assert.equal(result.status,400);assert.equal(calls,0)});
+test('missing key is honestly unavailable',async()=>{assert.equal((await answerQuestion({question:'什么是挂单？'})).status,503)});
+test('matches existing frontend protocol and caps output',async()=>{const r=await answerQuestion({term:'挂单',context:'界面解释',question:'怎么算成交？'},{apiKey:'test-only',fetchImpl:mock({mood:'unknown',answer:'答'.repeat(700)})});assert.equal(r.status,200);assert.equal(r.body.mood,'explain');assert.equal(r.body.answer.length,600)});
+test('uses server knowledge and drops untrusted context',async()=>{let sent;await answerQuestion({term:'挂单',context:'LEAK_THIS_CONTEXT',question:'为什么还没成交？'},{apiKey:'test-only',fetchImpl:async(url,opts)=>{sent=opts.body;return mock({mood:'explain',answer:'请等下一交易日撮合。'})()}});assert.ok(!sent.includes('LEAK_THIS_CONTEXT'));assert.ok(sent.includes('下一交易日'));assert.ok(!sent.includes('test-only'))});
+test('does not expose provider error or secret',async()=>{const r=await answerQuestion({question:'什么是挂单？'},{apiKey:'test-only',fetchImpl:async()=>{throw new Error('test-only')}});assert.equal(r.status,502);assert.ok(!JSON.stringify(r).includes('test-only'))});
+test('invalid provider JSON fails gracefully',async()=>{const r=await answerQuestion({question:'什么是挂单？'},{apiKey:'test-only',fetchImpl:async()=>({ok:true,json:async()=>({choices:[{message:{content:'invalid'}}]})})});assert.equal(r.status,502)});
+test('requests official JSON output without spending answer budget on default thinking',async()=>{let sent;await answerQuestion({question:'什么是挂单？'},{apiKey:'test-only',fetchImpl:async(url,opts)=>{sent=JSON.parse(opts.body);return mock({mood:'explain',answer:'先看当前规则说明。'})()}});assert.deepEqual(sent.response_format,{type:'json_object'});assert.deepEqual(sent.thinking,{type:'disabled'});assert.equal(sent.max_tokens,1500);assert.ok(sent.messages[0].content.includes('JSON示例'))});

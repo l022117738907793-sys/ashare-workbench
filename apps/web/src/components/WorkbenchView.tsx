@@ -16,6 +16,7 @@ import {
 import type { TradeSignal } from "@aw/core";
 import { Card, EmptyHint, Notice, ReasonList, StateBadge } from "./common";
 import { SignalBadge, SignalSummary } from "./SignalCard";
+import { MarketBrief } from "./MarketBrief";
 
 export interface WorkbenchProps {
   market: MarketResult;
@@ -81,15 +82,21 @@ export function WorkbenchView(props: WorkbenchProps) {
     focusStocks = 0,
   } = props;
 
-  const firstNonEmpty = groups.findIndex((g) => g.items.length > 0);
-  const [closed, setClosed] = useState<Record<string, boolean>>({});
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  const revealDetails = () => {
+    if (detailsRef.current) detailsRef.current.open = true;
+    setDetailsOpen(true);
+  };
+
+  const [closed, setClosed] = useState<Record<string, boolean>>(() => parseClosedGroups(readLS(GROUP_FOLD_KEY)));
 
   /**
    * 第二层、第三层整卡的折叠状态。
    *
    * 这两层加起来能占好几屏，折起来之后读别的层不用一路滚。
-   * 默认展开：一进来就把内容藏掉，等于让人先点一下才看得到东西。
-   * 但选择会记住（localStorage），折过一次之后每次打开都是折着的。
+   * 默认全部收起，只在用户选择之后记住展开状态。
+   * 使用v2键，旧版默认展开的记录不覆盖本次默认收起的设计。
    */
   const [folds, setFolds] = useState<Folds>(() => parseFolds(readLS(FOLD_KEY)));
   /**
@@ -141,6 +148,8 @@ export function WorkbenchView(props: WorkbenchProps) {
     }
     if (jumpedTo.current === sectorCode) return;
     jumpedTo.current = sectorCode;
+    revealDetails();
+    if (foldsRef.current.stocks) toggleFold("stocks");
     scrollBelowHeader(document.getElementById(STOCK_LAYER_ID));
     flashStockCard();
   }, [sectorCode, flashStockCard]);
@@ -154,15 +163,17 @@ export function WorkbenchView(props: WorkbenchProps) {
    */
   useEffect(() => {
     if (!focusStocks) return;
+    revealDetails();
     scrollBelowHeader(document.getElementById(STOCK_LAYER_ID));
     if (foldsRef.current.stocks) toggleFold("stocks");
     flashStockCard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusStocks]);
-  const isOpen = (type: string, idx: number) =>
-    closed[type] === undefined ? idx === firstNonEmpty : !closed[type];
-  const toggle = (type: string, idx: number) => {
-    setClosed((s) => ({ ...s, [type]: isOpen(type, idx) }));
+  const isOpen = (type: string) => closed[type] === false;
+  const toggle = (type: string) => {
+    const next = { ...closed, [type]: isOpen(type) };
+    setClosed(next);
+    writeLS(GROUP_FOLD_KEY, JSON.stringify(next));
     // 重新展开时回到「只展开三个」：折起来再打开通常是想换个角度看，
     // 而不是接着上次看到第几百只。顺带把 DOM 收回去，等于每次展开都重新计时。
     setShown((r) => ({ ...r, [stockKey(type)]: REVEAL_STEP }));
@@ -195,7 +206,11 @@ export function WorkbenchView(props: WorkbenchProps) {
   const shownSectors = Math.min(revealCount(SECTORS_KEY), sectors.length);
 
   return (
-    <div className="view">
+    <div className="view market-observation">
+      <MarketBrief market={market} sectors={sectors} mainIndexText={mainIndexText} onSelectSector={onSelectSector} onOpenDetails={revealDetails} />
+      <details ref={detailsRef} className="market-full-details" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
+        <summary>详细数据与筛选 <span>技术信号 · 板块榜单 · 个股分类</span></summary>
+        <div className="market-details-body">
       <SignalSummary signals={signals} folded={folds.signals} onToggleFold={() => toggleFold("signals")} />
 
       <Card
@@ -294,7 +309,8 @@ export function WorkbenchView(props: WorkbenchProps) {
               className="chip chip-active"
               onClick={() => {
                 onSelectSector(null);
-                scrollBelowHeader(document.getElementById(SECTOR_LAYER_ID));
+                if (foldsRef.current.sectors) toggleFold("sectors");
+                window.requestAnimationFrame(() => scrollBelowHeader(document.getElementById(SECTOR_LAYER_ID)));
               }}
             >
               ↑ 回到板块列表
@@ -358,13 +374,13 @@ export function WorkbenchView(props: WorkbenchProps) {
         )}
 
         <div className="chips">
-          {groups.map((g, idx) => (
+          {groups.map((g) => (
             <button
               key={g.type}
               type="button"
-              className={`chip${isOpen(g.type, idx) ? " chip-active" : ""}`}
-              onClick={() => toggle(g.type, idx)}
-              aria-expanded={isOpen(g.type, idx)}
+              className={`chip${isOpen(g.type) ? " chip-active" : ""}`}
+              onClick={() => toggle(g.type)}
+              aria-expanded={isOpen(g.type)}
             >
               {g.type} {counts[g.type] ?? 0}
             </button>
@@ -373,9 +389,9 @@ export function WorkbenchView(props: WorkbenchProps) {
 
         {filteredStocks === 0 && <EmptyHint>当前筛选条件下没有个股。试着清空代码/名称筛选或换一个板块。</EmptyHint>}
 
-        {groups.map((g, idx) => {
+        {groups.map((g) => {
           if (g.items.length === 0) return null;
-          const open = isOpen(g.type, idx);
+          const open = isOpen(g.type);
           const key = stockKey(g.type);
           const shownItems = Math.min(revealCount(key), g.items.length);
           return (
@@ -383,7 +399,7 @@ export function WorkbenchView(props: WorkbenchProps) {
               <button
                 type="button"
                 className="group-head"
-                onClick={() => toggle(g.type, idx)}
+                onClick={() => toggle(g.type)}
                 aria-expanded={open}
               >
                 <span className="group-title">
@@ -444,6 +460,8 @@ export function WorkbenchView(props: WorkbenchProps) {
           );
         })}
       </Card>
+        </div>
+      </details>
     </div>
   );
 }
@@ -487,29 +505,38 @@ export interface Folds {
   stocks: boolean;
 }
 
-const FOLD_KEY = "aw.folds.v1";
-const NO_FOLDS: Folds = { market: false, signals: false, sectors: false, stocks: false };
+const FOLD_KEY = "aw.folds.v2";
+const GROUP_FOLD_KEY = "aw.group-folds.v2";
+const DEFAULT_FOLDS: Folds = { market: true, signals: true, sectors: true, stocks: true };
 
 /**
  * 解析存下来的折叠状态。
  *
- * 只认真正的 `true`：存档被手改过、或者是旧版本写的 json，都退回「全展开」。
- * 这里不能抛 —— 折叠状态坏了顶多是页面长一点，不该让整页打不开。
+ * 只认明确的false为展开；缺失或损坏字段都保持默认收起。
+ * 用户展开过的选择仍可保存，旧版v1记录不读取。
  */
 export function parseFolds(raw: string | null): Folds {
-  if (!raw) return NO_FOLDS;
+  if (!raw) return DEFAULT_FOLDS;
   try {
     const parsed = JSON.parse(raw) as Partial<Folds> | null;
-    if (!parsed || typeof parsed !== "object") return NO_FOLDS;
+    if (!parsed || typeof parsed !== "object") return DEFAULT_FOLDS;
     return {
-      market: parsed.market === true,
-      signals: parsed.signals === true,
-      sectors: parsed.sectors === true,
-      stocks: parsed.stocks === true,
+      market: parsed.market !== false,
+      signals: parsed.signals !== false,
+      sectors: parsed.sectors !== false,
+      stocks: parsed.stocks !== false,
     };
   } catch {
-    return NO_FOLDS;
+    return DEFAULT_FOLDS;
   }
+}
+
+export function parseClosedGroups(raw: string | null): Record<string, boolean> {
+  try {
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter(([,value]) => typeof value === "boolean"));
+  } catch { return {}; }
 }
 
 function reasonValue(s: SectorResult, key: string): number | null {

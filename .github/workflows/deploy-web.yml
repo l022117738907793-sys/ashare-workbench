@@ -46,6 +46,10 @@ jobs:
         run: node packages/data/scripts/sync_web_data.mjs --keep 1 --trim-days 120
 
       - name: Build web app
+        # 问答代理地址在构建期注入，线上所有访客默认就能用（公开网址，不是密钥）。
+        # 用 pages.dev 那个入口而不是 workers.dev：后者在大陆被屏蔽。
+        env:
+          VITE_HISUI_ENDPOINT: https://ashare-hisui-proxy.pages.dev/ask
         run: npm run build --workspace @aw/web
 
       - uses: actions/configure-pages@v5

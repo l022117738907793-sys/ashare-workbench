@@ -8,7 +8,7 @@
  * 与实时模式最需要讲清楚的一条规矩：**今天下单，按次一交易日开盘价成交**。
  * 玩家看到的是一整天的完整走势，若按当天收盘价成交就等于开了天眼。
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   boardOf,
   describeRules,
@@ -29,6 +29,8 @@ import { useDayNews } from "../lib/useDayNews";
 import { DayNewsCard } from "./DayNewsCard";
 import { ReplayChart } from "./ReplayChart";
 import "./replay-view.css";
+import { CampaignHUD, CampaignReport, DailyDispatch } from "./Campaign";
+import { readCampaignNotes, writeCampaignNotes, type DecisionNote } from "../lib/campaign";
 
 /** 市场的中文名，界面各处复用 */
 const MARKET_NAME: Record<string, string> = { CN: "A 股", HK: "港股", US: "美股", JP: "日股", KR: "韩股" };
@@ -100,6 +102,8 @@ export interface ReplayViewProps {
   /** 推进 n 个交易日 */
   onAdvance: (n: number) => void;
   onExit: () => void;
+  onRestart?: () => void;
+  onNext?: () => void;
 }
 
 /** 序列里的第 i 项，不是有限数就当没有（分片里可能是 null）。 */
@@ -125,7 +129,7 @@ function Metric({ k, v, tone }: { k: string; v: string; tone?: "good" | "bad" | 
 }
 
 export function ReplayView(props: ReplayViewProps) {
-  const { state, hideDate, label, stocks, benchmarkName, briefing, mode = "legend", onOrder, onCancel, onAdvance, onExit } = props;
+  const { state, hideDate, label, stocks, benchmarkName, briefing, mode = "legend", onOrder, onCancel, onAdvance, onExit, onRestart, onNext } = props;
 
   const [side, setSide] = useState<Side>("buy");
   const [code, setCode] = useState(() => accountFirstCode(state, stocks));
@@ -134,6 +138,14 @@ export function ReplayView(props: ReplayViewProps) {
   const [lastSeason, setLastSeason] = useState<SeasonResult | null>(null);
   const [lastSeasonDay, setLastSeasonDay] = useState(0);
   const [showStocks, setShowStocks] = useState(false);
+  const [notes, setNotes] = useState<DecisionNote[]>(() => readCampaignNotes(state));
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportSnapshot, setReportSnapshot] = useState<ReplayState | null>(null);
+  const [dispatchFrom, setDispatchFrom] = useState<number | null>(null);
+  const previousDay = useRef(state.dayIndex);
+  const closeReport = useCallback(() => setReportOpen(false), []);
+  useEffect(() => { if (state.dayIndex > previousDay.current) setDispatchFrom(previousDay.current); previousDay.current = state.dayIndex; }, [state.dayIndex]);
+  useEffect(() => { if (state.finished) finish(); }, [state.finished]);
   const [mobilePane, setMobilePane] = useState<"trade" | "market" | "account">("trade");
 
   const { account, calendar, startIndex } = {
@@ -223,6 +235,8 @@ export function ReplayView(props: ReplayViewProps) {
     const { result } = settleReplay(state, `${label} · ${displayDate(state, hideDate)}`);
     setLastSeason(result);
     setLastSeasonDay(dayNo);
+    setReportSnapshot(state);
+    setReportOpen(true);
   }
 
   const pending = state.pending;
@@ -263,6 +277,9 @@ export function ReplayView(props: ReplayViewProps) {
         </div>
         <div className="replay-progress" role="progressbar" aria-label="推演进度" aria-valuemin={0} aria-valuemax={totalDays} aria-valuenow={dayNo}><span style={{ width: `${progress}%` }}/></div>
       </div>
+
+      <CampaignHUD state={state} notes={notes} hideDate={hideDate} onSave={note => { const updated = [...notes.filter(n => n.dayIndex !== note.dayIndex), note]; setNotes(updated); return writeCampaignNotes(state, updated); }}/>
+      {dispatchFrom !== null && <DailyDispatch state={state} fromDay={dispatchFrom} hideDate={hideDate} onClose={() => setDispatchFrom(null)}/>}
 
       <section className="replay-account" aria-label="模拟账户">
         <Metric k="账户总资产 / 元" v={fmtNum(assets)} />
@@ -361,9 +378,10 @@ export function ReplayView(props: ReplayViewProps) {
       })}</div>}</section>
 
       <div className="replay-bottom-grid">
-        <section className="replay-panel replay-results"><header className="replay-panel-head"><div><p className="replay-eyebrow">PERFORMANCE / 本局表现</p><h2>{state.finished ? "本局结算" : "阶段成绩"}</h2></div><button type="button" className="btn btn-primary btn-tiny" onClick={finish}>{state.finished ? "结算本局" : "查看阶段结算"}</button></header><div className="replay-results-body">{state.finished ? <p className="replay-result-note">已走完最后一个交易日。查看成绩后，可退出游戏开始新一局。</p> : <p className="replay-result-note">阶段结算只查看当前成绩，您仍可继续推进和下单。</p>}{lastSeason ? <><p className="replay-snapshot-date">截至第 {lastSeasonDay} 天{lastSeasonDay !== dayNo ? " · 可重新查看最新成绩" : ""}</p><div className="kv-list"><KV k="本局区间" v={hideDate ? `第 1 天 → 第 ${lastSeasonDay} 天` : `${lastSeason.startDate} → ${lastSeason.endDate}`}/><KV k="期末总资产" v={`${fmtNum(lastSeason.finalAssets)} 元`}/><KV k="总收益率" v={fmtPct(lastSeason.totalReturnPct)}/><KV k={`同期${benchmarkName}`} v={fmtPct(lastSeason.benchmarkReturnPct)}/><KV k="超额收益" v={fmtPct(lastSeason.excessReturnPct)}/><KV k="最大回撤" v={fmtPct(-lastSeason.maxDrawdownPct)}/><KV k="胜率" v={lastSeason.winRatePct === null ? "—（无平仓）" : fmtPct(lastSeason.winRatePct)}/><KV k="成交笔数" v={`${lastSeason.tradeCount} 笔`}/></div></> : <div className="replay-result-empty"><span>{account.trades.length} 笔成交</span><strong className={`tone-${pnlTone(totalReturnPct)}`}>{fmtPct(totalReturnPct)}</strong><small>查看结算，对照同期{benchmarkName}、回撤与胜率。</small></div>}</div></section>
+        <section className="replay-panel replay-results"><header className="replay-panel-head"><div><p className="replay-eyebrow">PERFORMANCE / 本局表现</p><h2>{state.finished ? "本局结算" : "阶段成绩"}</h2></div><button type="button" className="btn btn-primary btn-tiny" onClick={finish}>{state.finished ? "打开本局战报" : "查看阶段战报"}</button></header><div className="replay-results-body">{state.finished ? <p className="replay-result-note">已走完最后一个交易日。查看成绩后，可退出游戏开始新一局。</p> : <p className="replay-result-note">阶段结算只查看当前成绩，您仍可继续推进和下单。</p>}{lastSeason ? <><p className="replay-snapshot-date">截至第 {lastSeasonDay} 天{lastSeasonDay !== dayNo ? " · 可重新查看最新成绩" : ""}</p><div className="kv-list"><KV k="本局区间" v={hideDate ? `第 1 天 → 第 ${lastSeasonDay} 天` : `${lastSeason.startDate} → ${lastSeason.endDate}`}/><KV k="期末总资产" v={`${fmtNum(lastSeason.finalAssets)} 元`}/><KV k="总收益率" v={fmtPct(lastSeason.totalReturnPct)}/><KV k={`同期${benchmarkName}`} v={fmtPct(lastSeason.benchmarkReturnPct)}/><KV k="超额收益" v={fmtPct(lastSeason.excessReturnPct)}/><KV k="最大回撤" v={fmtPct(-lastSeason.maxDrawdownPct)}/><KV k="胜率" v={lastSeason.winRatePct === null ? "—（无平仓）" : fmtPct(lastSeason.winRatePct)}/><KV k="成交笔数" v={`${lastSeason.tradeCount} 笔`}/></div></> : <div className="replay-result-empty"><span>{account.trades.length} 笔成交</span><strong className={`tone-${pnlTone(totalReturnPct)}`}>{fmtPct(totalReturnPct)}</strong><small>查看结算，对照同期{benchmarkName}、回撤与胜率。</small></div>}</div></section>
         <details className="replay-panel replay-log-panel replay-log-details"><summary><span>推演日志 · 最近 {recentLog.length} 条</span><span>＋</span></summary><div className="replay-log-body">{recentLog.length === 0 ? <EmptyHint>尚无成交记录。推进交易日后，撮合结果会记录在这里。</EmptyHint> : <ul className="replay-log-list">{recentLog.map((e, i) => <li key={`${e.date}-${e.code}-${i}`}><span className={`replay-log-dot${e.ok ? " is-ok" : ""}`}/><p className={e.ok ? "" : "tone-muted"}>{maskDatesIn(state, e.text, hideDate)}</p></li>)}</ul>}</div></details>
       </div>
+      {reportOpen && lastSeason && reportSnapshot && <CampaignReport state={reportSnapshot} result={lastSeason} notes={notes} hideDate={hideDate} label={label} onClose={closeReport} onRestart={onRestart} onNext={onNext}/>}
       <p className="game-disclaimer replay-disclaimer" role="note">{`⚠️ ${GAME_DISCLAIMER}`}</p>
     </div>
   );

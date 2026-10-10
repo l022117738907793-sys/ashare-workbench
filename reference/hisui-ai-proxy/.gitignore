@@ -1,0 +1,6 @@
+node_modules/
+.wrangler/
+.worker-build/
+.pages-build/
+.dev.vars*
+.env*

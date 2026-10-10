@@ -395,9 +395,9 @@ try {
   );
 
   console.log("\n六、结算");
-  // 这一局还没走完，按钮写的是「查看阶段结算」；走完了才变成「结算本局」
-  const settle = await evaluate<string>(CLICK("查看阶段结算"));
-  check("点得到「查看阶段结算」", settle === "OK", settle);
+  // 这一局还没走完，按钮写的是「查看阶段战报」；走完了才变成「打开本局战报」
+  const settle = await evaluate<string>(CLICK("查看阶段战报"));
+  check("点得到「查看阶段战报」", settle === "OK", settle);
   await sleep(600);
   const settled = await evaluate<string>(`return document.body.innerText;`);
   check("结算后给出收益率", /收益率|总收益/.test(settled), settled.slice(0, 120));
@@ -713,6 +713,25 @@ try {
   console.log("\n十二、板块跳转：点板块跳到该板块的个股");
   await evaluate(CLICK("市场观察"));
   await sleep(600);
+  // v2 市场观察是三层收起：外层「详细数据与筛选」→ 四张卡 → 卡里分组。
+  // 板块行在「② 板块强弱」的卡体里，折着就不渲染，先逐层点开。
+  await evaluate(`
+    const d = document.querySelector("details.market-full-details");
+    if (d && !d.open) d.querySelector("summary").click();
+    return "OK";
+  `);
+  await sleep(400);
+  for (const t of ["② 板块强弱", "③ 个股分类"]) {
+    await evaluate(`
+      const card = [...document.querySelectorAll("section.card")]
+        .find(c => ((c.querySelector(".card-title") || {}).textContent || "").includes(${JSON.stringify(t)}));
+      const b = card && card.querySelector(".card-fold");
+      if (b && (b.textContent || "").includes("展开")) b.click();
+      return "OK";
+    `);
+    await sleep(400);
+  }
+  await sleep(600);
   // 先滚到板块卡，再点第一个板块 —— 否则本来就在页面顶部，跳不跳看不出来
   await evaluate(`
     const el = document.getElementById("layer-sectors");
@@ -740,12 +759,21 @@ try {
     const head = document.querySelector(".app-head");
     const headH = head ? head.getBoundingClientRect().height : 0;
     const top = el.getBoundingClientRect().top;
-    return JSON.stringify({ top: Math.round(top), headH: Math.round(headH), vh: window.innerHeight });
+    // 个股卡是最后一层，页面可能已经滚到底了，那就没法再把它顶到上半屏 —— 那也算跳到位。
+    const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+    return JSON.stringify({
+      top: Math.round(top),
+      headH: Math.round(headH),
+      vh: window.innerHeight,
+      y: Math.round(window.scrollY),
+      maxScroll: Math.round(maxScroll),
+      atBottom: window.scrollY >= maxScroll - 2,
+    });
   `);
-  const L = JSON.parse(landed) as { top: number; headH: number; vh: number };
+  const L = JSON.parse(landed) as { top: number; headH: number; vh: number; atBottom: boolean };
   check(
     `个股卡的标题落在视口里，且没被顶栏挡住（top=${L.top}, 顶栏=${L.headH}, 视口=${L.vh}）`,
-    L.top >= L.headH - 4 && L.top < L.vh / 2,
+    L.top >= L.headH - 4 && (L.top < L.vh / 2 || L.atBottom),
     landed,
   );
   check(
@@ -782,6 +810,33 @@ try {
   const foldIn = (layerId: string) => `document.getElementById(${JSON.stringify(layerId)})?.querySelector("button.card-fold")`;
   await evaluate(CLICK("市场观察"));
   await sleep(500);
+  // v2 里三层都是默认收起的，不先把两层展开，下面点到的就是「展开」而不是「收起」。
+  await evaluate(`
+    const d = document.querySelector("details.market-full-details");
+    if (d && !d.open) d.querySelector("summary").click();
+    return "OK";
+  `);
+  await sleep(400);
+  /*
+   * 四张卡全开之后再量基线。
+   *
+   * 后面既要验「折起来变短」，又要验「复原之后回到原长」——
+   * 基线要是只开了两张卡量的，复原（四张全开）自然对不上，那是脚本自己挖的坑。
+   */
+  const openCard = (title: string) => `
+    const card = [...document.querySelectorAll("section.card")].find(c => {
+      const t = c.querySelector(".card-title");
+      return t && t.textContent.includes(${JSON.stringify(title)});
+    });
+    const b = card && card.querySelector("button.card-fold");
+    if (b && b.textContent.includes("展开")) b.click();
+    return "OK";
+  `;
+  for (const title of ["今日信号", "① 大盘环境", "② 板块强弱", "③ 个股分类"]) {
+    await evaluate(openCard(title));
+    await sleep(300);
+  }
+  await sleep(600);
   const h0 = await evaluate<number>(`return document.body.scrollHeight;`);
   const fold2 = await evaluate<string>(`
     const b = ${foldIn("layer-sectors")};
@@ -810,15 +865,20 @@ try {
   const h2 = await evaluate<number>(`return document.body.scrollHeight;`);
   check(`再折起第三层（${h1} → ${h2}）`, h2 < h1 - 300);
 
-  // 折过之后要记住 —— 否则每次打开都得再折一遍，等于没做
+  // 折过之后要记住 —— 否则每次打开都得再折一遍，等于没做。
+  // v2 里四张卡默认都是折着的，只验「折着」证明不了记住了任何东西：
+  // 上面全开过一轮（存的是 false），所以刷新后该开的两张仍然开着。
   await send("Page.reload", { ignoreCache: true });
   await sleep(3000);
   const remembered = await evaluate<string>(`
-    const folded = [...document.querySelectorAll("button.card-fold")].filter(b => b.textContent.includes("展开")).length;
-    return JSON.stringify({ folded, h: document.body.scrollHeight });
+    const labels = [...document.querySelectorAll("button.card-fold")].map(b => (b.textContent || "").trim());
+    return JSON.stringify({ folded: labels.filter(t => t.includes("展开")).length, labels, h: document.body.scrollHeight });
   `);
-  const R = JSON.parse(remembered) as { folded: number; h: number };
-  check(`刷新后两层还是折着的（按钮 ${R.folded} 个，高度 ${R.h}）`, R.folded === 2 && R.h < h0);
+  const R = JSON.parse(remembered) as { folded: number; labels: string[]; h: number };
+  check(
+    `刷新后展开的两层还开着、折着的两层还折着（${R.labels.join(" | ")}，高度 ${R.h}）`,
+    R.folded === 2 && R.labels[0] === "收起 ▴" && R.h < h0,
+  );
   check(
     "折着的时候筛选按钮还在（要能清除板块筛选）",
     await evaluate<boolean>(`
@@ -828,7 +888,13 @@ try {
     `),
   );
 
-  // 复原，免得影响后面/下次跑
+  // 复原，免得影响后面/下次跑（刷新之后外层「详细数据与筛选」又是收着的，先点开）
+  await evaluate(`
+    const d = document.querySelector("details.market-full-details");
+    if (d && !d.open) d.querySelector("summary").click();
+    return "OK";
+  `);
+  await sleep(400);
   await evaluate(`
     for (const b of [...document.querySelectorAll("button.card-fold")]) {
       if (b.textContent.includes("展开")) b.click();
@@ -978,8 +1044,19 @@ try {
 
   // 再开一局历史推演 —— 实时那边不该被动到
   const coexistLevel = LEVELS.find((l) => l.id === "2024-09-25")!;
-  // 现在人在实时账户那一屏，玩法卡片不在这 —— 要先按「探索传奇关卡 →」回大厅
-  await evaluate(CLICK("探索传奇关卡"));
+  // 现在人在实时账户那一屏，玩法卡片不在这 —— 要先按「探索传奇关卡 →」回大厅。
+  // 这颗按钮 `disabled={!replayReady}`，快照没加载完时点它是个空操作；
+  // 所以等它真能按了再按，否则后面会一路等超时、报出一串跟本意无关的失败。
+  const backToLobby = await waitFor(
+    `(() => {
+        const b = [...document.querySelectorAll("button")].find(x => x.textContent && x.textContent.includes("探索传奇关卡"));
+        if (!b || b.disabled) return false;
+        b.click();
+        return true;
+      })()`,
+    "回到大厅的入口可以按了",
+  );
+  check("实时账户那一屏给得出回大厅的入口", backToLobby);
   await sleep(400);
   // 两步走：卡片只负责选中，还要按「选择传奇关卡」才真的进关卡列表
   await evaluate(CLICK("选择传奇关卡"));
@@ -1248,11 +1325,37 @@ try {
   // 回到筛选页：这一页术语最密，而且和上一节留下的游戏状态无关
   await evaluate(CLICK("市场观察"));
   await sleep(600);
+  /*
+   * v2 之后术语基本都在「详细数据与筛选」里面，而它是**默认收起的**。
+   * 所以得先按用户的做法把它点开 —— 不点开的话整页一个**可见的**术语按钮都没有，
+   * 脚本只能摸到藏在收起区域里的那些（点得到，但展开在看不见的地方）。
+   */
+  const detailsForTerms = await evaluate<string>(`
+    const d = document.querySelector("details.market-full-details");
+    if (!d) return "NO_DETAILS";
+    if (!d.open) d.querySelector("summary").click();
+    return "OK";
+  `);
+  check("市场观察页里有「详细数据与筛选」", detailsForTerms === "OK", detailsForTerms);
+  await sleep(500);
   const termBefore = await evaluate<number>(`return document.querySelectorAll(".term-panel").length;`);
   check("没点之前一个解释都不展开", termBefore === 0, `实际 ${termBefore} 个`);
 
+  /*
+   * 只挑**真正在渲染**的那个词。
+   *
+   * `Card` / `RuleLines` 这些公共组件里到处都是 `TermText`，没切过去的标签页、
+   * 折着的卡片、收起来的「详细数据与筛选」里的词都在 DOM 里 ——
+   * `querySelector("button.term")` 摸到的很可能是藏在里面的那个。点它照样会展开，
+   * 只是展开在看不见的地方，`innerText` 是空的，脚本会以为自己点坏了。
+   *
+   * 判据是 `checkVisibility()` 而**不是** `getClientRects().length`：实测闭合的
+   * `<details>` 里的按钮 `getClientRects()` 仍然返回 1 个矩形（`innerText` 却是空的），
+   * 只有 `checkVisibility()` 会给出 false。
+   */
+  const VISIBLE_TERM = `[...document.querySelectorAll("button.term")].find(b => b.checkVisibility())`;
   const termWord = await evaluate<string>(`
-    const b = document.querySelector("button.term");
+    const b = ${VISIBLE_TERM};
     if (!b) return "NOT_FOUND";
     b.scrollIntoView({ block: "center" });
     const w = b.textContent;
@@ -1261,16 +1364,41 @@ try {
   `);
   check("页面上能找到术语按钮", termWord !== "NOT_FOUND", termWord);
 
-  check(
-    "点第一下：原地撑开一句话的解释",
-    await waitFor(
-      `(() => {
+  const shortPanel = await waitFor(
+    `(() => {
         const p = document.querySelector(".term-panel");
         return !!p && p.innerText.includes("翡翠") && p.innerText.includes("让翡翠细讲");
       })()`,
-      "术语气泡",
-    ),
+    "术语气泡",
   );
+  if (!shortPanel) {
+    const diag = await evaluate<string>(`
+      const b = ${VISIBLE_TERM};
+      const p = document.querySelector(".term-panel");
+      const cs = p ? getComputedStyle(p) : null;
+      const vis = (el) => {
+        for (let n = el; n && n !== document.body; n = n.parentElement) {
+          const c = getComputedStyle(n);
+          if (c.display === "none" || c.visibility === "hidden") return n.tagName + "." + n.className;
+        }
+        return null;
+      };
+      return JSON.stringify({
+        word: ${JSON.stringify(termWord)},
+        expanded: b ? b.getAttribute("aria-expanded") : null,
+        panels: document.querySelectorAll(".term-panel").length,
+        terms: document.querySelectorAll("button.term").length,
+        visibleTerms: [...document.querySelectorAll("button.term")].filter(x => x.checkVisibility()).length,
+        panelText: p ? p.innerText.slice(0, 80) : null,
+        panelTextContent: p ? (p.textContent || "").slice(0, 80) : null,
+        panelDisplay: cs ? cs.display : null,
+        hiddenAncestor: p ? vis(p) : null,
+        btnHiddenAncestor: b ? vis(b) : null,
+      });
+    `);
+    console.log(`    [诊断] ${diag}`);
+  }
+  check("点第一下：原地撑开一句话的解释", shortPanel);
 
   const termFull = await evaluate<string>(`
     const more = document.querySelector(".term-more");
@@ -1296,7 +1424,8 @@ try {
    */
   const exclusive = await evaluate<string>(`
     const all = [...document.querySelectorAll("button.term")];
-    const other = all.find(b => b.getAttribute("aria-expanded") === "false");
+    const shown = all.filter(b => b.checkVisibility());
+    const other = shown.find(b => b.getAttribute("aria-expanded") === "false");
     if (!other) return "NO_OTHER";
     other.click();
     return other.textContent;

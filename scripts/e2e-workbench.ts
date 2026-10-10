@@ -12,8 +12,13 @@
  * 单测能证明 props 传对了、HTML 里字符串在，证明不了 tab 切换后真的渲染出来、
  * 点 chip 真的会重排列表 —— 所以还是得开浏览器。
  *
+ * v2 把市场观察做成了**三层收起**：最外层 `details.market-full-details`（「详细数据与
+ * 筛选」）默认折着，里面四张卡各自也默认折着，卡里的个股分组同样默认折着。分档 chip
+ * 与个股行都藏在最里面，所以第二节先把这三层逐层点开（断言也顺手钉住了「默认收起」
+ * 这件事本身），第三节再从「一行都没有」开始点第一组。
+ *
  * 断言里最容易写错的一条：**分档的数字是筛之前的**。点「港股」之后
- * 「全部市场 679」还得在，否则点进任何一个分档其它分档就消失了，人换不回去。
+ * 「全部市场 659」还得在，否则点进任何一个分档其它分档就消失了，人换不回去。
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
@@ -138,6 +143,34 @@ const MORE = (which: "sector" | "stock") => `
   if (!b) return "NOT_FOUND";
   b.click(); return "OK";
 `;
+/**
+ * 点开「详细数据与筛选」。
+ *
+ * v2 把整块做成了默认收起的 `<details class="market-full-details">`，分档 chip
+ * 与个股行都在里面 —— 不先展开，下面三条全是空量。
+ */
+const OPEN_DETAILS = `
+  const d = document.querySelector("details.market-full-details");
+  if (!d) return "NO_DETAILS";
+  if (!d.open) d.querySelector("summary").click();
+  return "OK";
+`;
+/** 按标题点开某张卡（`button.card-fold` 收着时写「展开 ▾」，开着时写「收起 ▴」） */
+const OPEN_CARD = (title: string) => `
+  const card = [...document.querySelectorAll("section.card")]
+    .find(c => ((c.querySelector(".card-title") || {}).textContent || "").includes(${JSON.stringify(title)}));
+  if (!card) return "NO_CARD";
+  const b = card.querySelector("button.card-fold");
+  if (!b) return "NO_BUTTON";
+  if ((b.textContent || "").includes("展开")) b.click();
+  return "OK";
+`;
+/** 此刻还收着的卡片标题 */
+const FOLDED_TITLES = `
+  return [...document.querySelectorAll("section.card button.card-fold")]
+    .filter(b => (b.textContent || "").includes("展开"))
+    .map(b => (((b.closest("section.card") || {}).querySelector(".card-title") || {}).textContent || "").trim());
+`;
 async function waitFor(expr: string, label: string, tries = 60): Promise<boolean> {
   for (let i = 0; i < tries; i += 1) {
     if (await evaluate<boolean>(`return ${expr};`)) return true;
@@ -250,7 +283,25 @@ try {
   console.log("\n二、市场观察：市场分档");
   const tab = await evaluate<string>(CLICK("市场观察"));
   check("切到「市场观察」", tab === "OK", tab);
-  await waitFor(`document.querySelector(".chips-market") !== null`, "分档 chip 出现", 80);
+
+  // v2 的默认是「详细数据与筛选」整块收起、里面四张卡也各自收起。
+  // 这一层默认要先断言掉，再逐层展开 —— 下面的 chip 与个股行都藏在最里面。
+  const detailsDefault = await evaluate<boolean | null>(`
+    const d = document.querySelector("details.market-full-details");
+    return d ? !d.open : null;
+  `);
+  check("「详细数据与筛选」默认是收起的", detailsDefault === true, String(detailsDefault));
+  const openedDetails = await evaluate<string>(OPEN_DETAILS);
+  check("点得开「详细数据与筛选」", openedDetails === "OK", openedDetails);
+  await sleep(400);
+  const foldedCards = await evaluate<string[]>(FOLDED_TITLES);
+  check("四张卡默认都收着", foldedCards.length === 4, JSON.stringify(foldedCards));
+  for (const t of ["② 板块强弱", "③ 个股分类"]) {
+    const opened = await evaluate<string>(OPEN_CARD(t));
+    check(`点得开「${t}」`, opened === "OK", opened);
+  }
+  await sleep(600);
+  await waitFor(`document.querySelector(".chips-market") !== null`, "分档 chip 出现", 40);
   const chips = await evaluate<Array<{ text: string; on: boolean }> | null>(CHIPS);
   check("分档 chip 渲染出来了", chips !== null);
   const labels = (chips ?? []).map((c) => c.text).join(" | ");
@@ -269,7 +320,20 @@ try {
   console.log("\n三、分段展开：每次只放三个");
   const before = await evaluate<number>(ROWS);
   console.log(`    展开前个股行：${before}`);
-  check("默认只展开第一组，所以只有 3 条个股行", before === 3, `实际 ${before}`);
+  check("分组默认全收着，一行个股都没有", before === 0, `实际 ${before}`);
+
+  // 分组在 v2 里也要自己点开，点开之后每次仍然只放三个。
+  const openFirst = await evaluate<string>(`
+    const head = document.querySelector("section.group button.group-head");
+    if (!head) return "NOT_FOUND";
+    if (head.getAttribute("aria-expanded") !== "true") head.click();
+    return "OK";
+  `);
+  check("点得开第一个分组", openFirst === "OK", openFirst);
+  await sleep(700);
+  const firstOpen = await evaluate<number>(ROWS);
+  console.log(`    第一组展开后个股行：${firstOpen}`);
+  check("展开第一组只放三个", firstOpen === 3, `实际 ${firstOpen}`);
   const moreLabels = await evaluate<string[]>(`
     return [...document.querySelectorAll("button.reveal-more")].map(b => (b.textContent || "").trim());
   `);
@@ -288,14 +352,15 @@ try {
   await sleep(500);
   const after = await evaluate<number>(ROWS);
   console.log(`    点一次之后个股行：${after}`);
-  check("点一次多放三个（3 → 6）", after === before + 3, `实际 ${after}`);
+  check("点一次多放三个（3 → 6）", after === 6, `实际 ${after}`);
 
   // 「排除」是最大的一组（引擎的兜底桶），也正是用户说「展开有点慢」的那一个
   const openExclude = await evaluate<string>(`
     const head = [...document.querySelectorAll("button.group-head")]
       .find(b => (b.textContent || "").includes("排除"));
     if (!head) return "NOT_FOUND";
-    head.click(); return "OK";
+    if (head.getAttribute("aria-expanded") !== "true") head.click();
+    return "OK";
   `);
   check("点得到「排除」分组的表头", openExclude === "OK", openExclude);
   await sleep(900);

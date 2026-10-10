@@ -1,0 +1,15 @@
+{
+  "name": "ashare-hisui-ai-proxy",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test proxy.test.mjs worker.test.mjs",
+    "dev": "wrangler dev --local",
+    "check": "wrangler deploy --dry-run --outdir .worker-build",
+    "deploy": "wrangler deploy",
+    "pages:build": "node pages/build.mjs",
+    "pages:deploy": "node pages/build.mjs && wrangler pages deploy --cwd pages"
+  },
+  "devDependencies": { "wrangler": "4.149.0" }
+}

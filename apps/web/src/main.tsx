@@ -15,3 +15,7 @@ const container = document.getElementById("root");
 if (!container) throw new Error("找不到 #root 容器");
 
 createRoot(container).render(<App />);
+
+import "./campaign.css";
+
+import "./market-observation.css";

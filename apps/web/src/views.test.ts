@@ -58,7 +58,7 @@ import { SettingsView } from "./components/SettingsView";
 import { Card } from "./components/common";
 import { StockPicker } from "./components/StockPicker";
 import type { PickStock } from "./lib/picks";
-import { WorkbenchView, parseFolds } from "./components/WorkbenchView";
+import { WorkbenchView, parseFolds, parseClosedGroups } from "./components/WorkbenchView";
 import { CASH_OPTIONS, defaultGameState, GAME_DISCLAIMER, startGame, type GameState } from "./lib/game";
 import { awayReport, makeMark } from "./lib/awayReport";
 import { REVIEW_CAVEATS, type ReviewReport } from "@aw/game";
@@ -104,13 +104,25 @@ const devSnapshot = loadFixture("market_normal_sector_active_stock_high.json");
 function renderWorkbench(
   snapshot: Snapshot,
   over: Partial<Parameters<typeof WorkbenchView>[0]> = {},
+  expandedForContentChecks = true,
 ): string {
   const byCode = new Map<string, StockData>(snapshot.stocks.map((s) => [s.code, s]));
   const results = snapshot.stocks.map((s) => classifyStock(s, defaultRules));
   const metrics = new Map(snapshot.stocks.map((s) => [s.code, computeStockMetrics(s, defaultRules)]));
   const ret20 = new Map([...metrics].map(([code, m]) => [code, m.ret20]));
   const groups = groupStockResults(results, ret20);
-  return renderToStaticMarkup(
+  // Existing detail-content checks represent explicit user expansion. New default tests
+  // omit v2 choices; old v1 open preferences must not override the new default.
+  const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const fixtureGroups = over.groups ?? groups;
+  const first = fixtureGroups.find(group => group.items.length)?.type;
+  const store: Record<string, string> = { "aw.folds.v1": JSON.stringify({market:false,signals:false,sectors:false,stocks:false}) };
+  if (expandedForContentChecks) {
+    store["aw.folds.v2"] = JSON.stringify({market:false,signals:false,sectors:false,stocks:false});
+    store["aw.group-folds.v2"] = JSON.stringify(first ? {[first]: false} : {});
+  }
+  Object.defineProperty(globalThis, "localStorage", {configurable:true,value:{getItem:(key:string)=>store[key] ?? null}});
+  try { return renderToStaticMarkup(
     createElement(WorkbenchView, {
       market: analyzeMarket(snapshot, defaultRules),
       sectors: sortSectors(snapshot.sectors.map((s) => analyzeSector(s, byCode, defaultRules))),
@@ -137,7 +149,10 @@ function renderWorkbench(
       signals: deriveSignals(snapshot.stocks, defaultRules),
       ...over,
     }),
-  );
+  ); } finally {
+    if (original) Object.defineProperty(globalThis,"localStorage",original);
+    else delete (globalThis as {localStorage?:Storage}).localStorage;
+  }
 }
 
 /** 找一个板块代码，用来测「选中板块之后」的样子 */
@@ -241,39 +256,25 @@ describe("卡片闪一下（跳转的落点提示）", () => {
 });
 
 describe("折叠状态存档", () => {
-  it("没存过 → 全展开", () => {
-    expect(parseFolds(null)).toEqual({ market: false, signals: false, sectors: false, stocks: false });
+  const collapsed = {market:true,signals:true,sectors:true,stocks:true};
+  it("没存过、缺失或损坏的状态默认全收起", () => {
+    for (const raw of [null,"{不是 json","null",'"字符串"','{"sectors":"yes","stocks":1}']) expect(parseFolds(raw)).toEqual(collapsed);
   });
-
-  it("存过 → 按存的来", () => {
-    expect(parseFolds('{"market":true,"signals":true,"sectors":true,"stocks":false}')).toEqual({
-      market: true,
-      signals: true,
-      sectors: true,
-      stocks: false,
-    });
+  it("保留明确选择展开的状态，缺少字段继续收起", () => {
+    expect(parseFolds('{"sectors":true,"stocks":false}')).toEqual({...collapsed, stocks:false});
+    expect(parseFolds('{"market":false,"signals":false,"sectors":false,"stocks":false}')).toEqual({market:false,signals:false,sectors:false,stocks:false});
   });
-
-  it("旧存档（只有 sectors / stocks）里新加的两层退回展开", () => {
-    // `aw.folds.v1` 没换版本，老存档会实打实读进来 ——
-    // 缺的字段必须是 false（展开），不能是 undefined 漏到 `folded` 上
-    expect(parseFolds('{"sectors":true,"stocks":false}')).toEqual({
-      market: false,
-      signals: false,
-      sectors: true,
-      stocks: false,
-    });
+  it("详情首次打开所有卡片收起，旧v1展开记录不覆盖新默认", () => {
+    const html=renderWorkbench(devSnapshot,{},false);
+    expect((html.match(/class="card-fold"[^>]*aria-expanded="false"/g)??[]).length).toBe(4);
+    expect(html).not.toContain('class="card-body"');
+    expect(html).not.toContain("打开七步分析");
   });
-
-  it("只认真正的 true，别的值当没折", () => {
-    // 手改过的存档、或者以后改了字段含义，都不该让某一层莫名其妙地消失
-    expect(parseFolds('{"sectors":"yes","stocks":1}')).toEqual({ market: false, signals: false, sectors: false, stocks: false });
-  });
-
-  it("坏 json 不抛，退回全展开", () => {
-    expect(parseFolds("{不是 json")).toEqual({ market: false, signals: false, sectors: false, stocks: false });
-    expect(parseFolds("null")).toEqual({ market: false, signals: false, sectors: false, stocks: false });
-    expect(parseFolds('"字符串"')).toEqual({ market: false, signals: false, sectors: false, stocks: false });
+  it("个股分组默认收起，只接受明确布尔选择", () => {
+    expect(parseClosedGroups(null)).toEqual({});
+    expect(parseClosedGroups('bad')).toEqual({});
+    expect(parseClosedGroups('[false]')).toEqual({});
+    expect(parseClosedGroups('{"排除":false,"观察":true,"坏值":0}')).toEqual({排除:false,观察:true});
   });
 });
 
@@ -286,7 +287,7 @@ describe("板块跳转：点板块跳到该板块的个股", () => {
     // 少一张就是某处漏传了 onToggleFold，那处会静静地没有按钮。
     expect((html.match(/card-fold/g) ?? []).length).toBe(4);
     expect(html).toContain("收起 ▴");
-    // 默认展开：一进来就把内容藏掉，等于让人先点一下才看得到东西
+    // 此处模拟用户已明确展开，检查详情功能仍完整
     expect(html).not.toContain("展开 ▾");
   });
 
@@ -326,7 +327,7 @@ describe("筛选页渲染", () => {
     expect(html).toContain("最强成分");
   });
 
-  it("默认展开第一个非空分组，且每个分类都带判断依据", () => {
+  it("用户展开首个非空分组后，每个分类都带判断依据", () => {
     expect(html).toContain("趋势观察");
     expect(html).toContain("打开七步分析");
     // 默认展开的组里，每条个股都有一份 reasons 列表
@@ -383,7 +384,7 @@ describe("市场观察：市场分档与分段展开", () => {
 
   it("收起的那组一条都不渲染，展开的那组也只有三个", () => {
     const second: StockGroup = { ...bigGroup, type: "数据不足" };
-    // 默认只展开第一个非空分组（`isOpen` 的第一条分支），第二组是收起的
+    // 模拟用户展开第一组，第二组仍默认收起
     const html = renderWorkbench(devSnapshot, {
       groups: [bigGroup, second],
       counts: { 排除: 10, 数据不足: 10 },
@@ -1570,7 +1571,7 @@ describe("模拟游戏开局界面", () => {
     for (const mode of ["传奇模式", "实时模式", "随机模式"]) {
       expect(buttonMarkupWithText(html, mode)).toBeDefined();
     }
-    expect(plain(html)).toContain("回到市场的关键时刻。");
+    expect(plain(html)).toContain("重返历史，写下您的选择。");
     expect(html).not.toContain("模拟下单");
   });
 

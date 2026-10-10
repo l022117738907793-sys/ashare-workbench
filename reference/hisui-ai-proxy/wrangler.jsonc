@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "ashare-hisui-teacher",
+  "main": "worker-entry.mjs",
+  "compatibility_date": "2026-10-10",
+  "workers_dev": true,
+  "vars": {
+    "HISUI_MODEL": "deepseek-flash",
+    "ALLOWED_ORIGINS": "https://l022117738907793-sys.github.io,http://localhost:5192,http://127.0.0.1:5192",
+    "DAILY_REQUEST_LIMIT": "300",
+    "ENABLED": "true"
+  },
+  "ratelimits": [{
+    "name": "HISUI_RATE_LIMITER",
+    "namespace_id": "61010",
+    "simple": { "limit": 6, "period": 60 }
+  }],
+  "durable_objects": { "bindings": [{ "name": "DAILY_BUDGET", "class_name": "DailyBudget" }] },
+  "exports": { "DailyBudget": { "type": "durable-object", "storage": "sqlite" } }
+}

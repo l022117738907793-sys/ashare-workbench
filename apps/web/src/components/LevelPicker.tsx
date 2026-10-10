@@ -4,6 +4,8 @@ import { LEVELS, type ReplayLevel } from "@aw/game";
 import { Notice, RichP } from "./common";
 import { GAME_DISCLAIMER } from "../lib/game";
 import "./level-picker.css";
+import { CampaignEmblem, ChapterObjective } from "./Campaign";
+import { CHAPTER_FOCUS } from "../lib/campaign";
 
 export interface LevelPickerProps {
   /** At least one history shard is available. */
@@ -42,6 +44,7 @@ export function LevelDetail(props: LevelDetailProps) {
         <span className="chapter-kicker">CHAPTER {String(level.order).padStart(2, "0")}</span>
         <span className="chapter-selected-label">当前选择</span>
       </div>
+      <div className="chapter-cover-top"><CampaignEmblem number={String(level.order).padStart(2,"0")}/><span>真实历史 · 自主决策</span></div>
       <h2 id={`chapter-title-${level.id}`}>{level.title}</h2>
       <p className="chapter-briefing-subtitle">{level.subtitle}</p>
 
@@ -50,6 +53,8 @@ export function LevelDetail(props: LevelDetailProps) {
         <div><dt>推演长度</dt><dd>{level.days}<small> 个交易日</small></dd></div>
       </dl>
 
+      <ChapterObjective/>
+      <p className="chapter-focus">{CHAPTER_FOCUS[level.id]}</p>
       <details className="chapter-briefing-details" key={level.id}>
         <summary>开局简报 · 点开阅读 <span>＋</span></summary>
       <div className="chapter-briefing-section">
@@ -117,7 +122,7 @@ export function LevelPicker(props: LevelPickerProps) {
       <header className="chapter-page-heading">
         <div>
           <span className="chapter-kicker">HISTORICAL REPLAY / 传奇模式</span>
-          <h1>选择你的历史章节<span>.</span></h1>
+          <h1>下一段历史，由您入场<span>.</span></h1>
           <p>回到真实的市场。只看当时的信息，亲手做出每一次决定。</p>
         </div>
         <button type="button" className="chapter-back" onClick={onBack}>← 返回游戏大厅</button>

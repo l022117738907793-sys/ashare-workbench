@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_SLIPPAGE,
+  LEVELS,
   LOT_SIZE,
   marketGroupOf,
   reviewReport,
@@ -43,6 +44,7 @@ import { AwayCard } from "./AwayCard";
 import { ReviewBlock } from "./ReviewBlock";
 import type { AwayReport } from "../lib/awayReport";
 import type { LiveNewsState } from "../lib/useLiveNews";
+import { CampaignEmblem } from "./Campaign";
 
 export interface GameViewProps {
   state: GameState;
@@ -100,6 +102,7 @@ export interface GameViewProps {
   replayReady: boolean;
   /** 已经有一局历史推演在跑：这时不能再开一局，只能回去。 */
   replayInProgress?: boolean;
+  replaySummary?: { title: string; day: number; totalDays: number; finished: boolean };
   /** 回到正在跑的那一局推演。 */
   onResumeReplay?: () => void;
   /** 用随机开局进入历史推演模式 */
@@ -227,7 +230,7 @@ export function GameView(props: GameViewProps) {
     benchmarkName, benchmarkReturnPct, totalAssets, holdingsValue,
     replayReady, onStartReplay, onOpenLegend,
     onStartBacktrack, backtrack = null,
-    replayInProgress = false, onResumeReplay,
+    replayInProgress = false, onResumeReplay, replaySummary,
     away = null, onDismissAway,
     onPickCode, fxOf,
   } = props;
@@ -403,12 +406,12 @@ export function GameView(props: GameViewProps) {
       <div className="view game-lobby">
         <section className="game-hero">
           <div className="game-hero-copy">
-            <span className="game-eyebrow"><span className="game-status-dot" /> 用虚拟资金，体验真实市场</span>
-            <h1>回到市场的<br /><em>关键时刻。</em></h1>
-            <p>行情由真实历史书写，交易由您决定。<span className="game-hero-secondary"><br />在涨跌之间练习判断，在每一次复盘中积累经验。</span></p>
+            <span className="game-eyebrow"><span className="game-status-dot" /> MARKET CAMPAIGNS / 交易挑战</span>
+            <h1>重返历史，<br /><em>写下您的选择。</em></h1>
+            <p>只有当时的线索，真实历史来揭晓结果。<span className="game-hero-secondary"><br />每一局，都是一次独立的交易挑战。</span></p>
             <div className="game-hero-facts"><span>真实历史行情</span><i /><span>虚拟资金</span><i /><span>自主决策</span></div>
           </div>
-          <MarketIllustration />
+          <div className="campaign-desktop-art"><MarketIllustration /></div>
         </section>
 
         {/*
@@ -424,11 +427,15 @@ export function GameView(props: GameViewProps) {
 
         {replayInProgress && (
           <section className="game-resume">
-            <div><strong>上一次的市场旅程，还等着您。</strong><p>已保存的历史推演可以继续，不影响实时账户。</p></div>
-            <button type="button" className="btn btn-primary" onClick={onResumeReplay}>继续推演 →</button>
+            <div><span className="campaign-kicker">{replaySummary?.finished ? "CAMPAIGN COMPLETE" : "CONTINUE CAMPAIGN"}</span><strong>{replaySummary?.title ?? "上一次的市场旅程，还等着您。"}</strong><p>{replaySummary ? `第 ${replaySummary.day} / ${replaySummary.totalDays} 天 · ${replaySummary.finished ? "挑战已结束，您的战报已准备好。" : "进度已保存，接着作出下一次判断。"}` : "已保存的历史推演可以继续，不影响实时账户。"}</p></div>
+            <button type="button" className="btn btn-primary" onClick={onResumeReplay}>{replaySummary?.finished ? "查看本局战报 →" : "继续推演 →"}</button>
           </section>
         )}
 
+        <section className={`campaign-feature campaign-feature-${selectedMode}`} aria-label="当前玩法挑战">
+          <div className="campaign-cover"><span className="campaign-kicker">{selectedMode === "legend" ? "01 / HISTORICAL CAMPAIGN" : selectedMode === "random" ? "?? / UNKNOWN CHALLENGE" : "LIVE / DAILY PRACTICE"}</span><span className="campaign-cover-tag">{selectedMode === "legend" ? "第一章 · 推荐入场" : selectedMode === "random" ? "日期隐藏 · 等待揭晓" : "真实市场 · 独立账户"}</span><h2>{selectedMode === "legend" ? LEVELS[0].title : selectedMode === "random" ? "这一次，您不知道结局。" : "您的交易日，正在继续。"}</h2><p>{selectedMode === "legend" ? `${LEVELS[0].startDate} · ${LEVELS[0].days} 个交易日` : selectedMode === "random" ? "只有眼前的信息，历史不会给您提示。" : "跟随现实时间，积累自己的交易与观察。"}</p><CampaignEmblem number={selectedMode === "legend" ? "01" : selectedMode === "random" ? "?" : "24"}/></div>
+          <div className="campaign-feature-bottom"><div className="campaign-feature-objective"><span>本局任务</span><p>{selectedMode === "live" ? "自主交易 · 观察记录 · 回顾账户" : "回撤 ≤ 10% · 记录 2 次判断 · 完成推演"}</p></div><button type="button" className="btn btn-primary" disabled={replayBlocked && !replayInProgress} onClick={startSelected}>{selectedMode === "legend" ? "选择传奇关卡 →" : selectedMode === "random" ? "进入未知挑战 →" : accountRunning ? "回到实时账户 →" : "开始实时练习 →"}</button></div>
+        </section>
         <div className="game-section-heading"><div><span className="game-eyebrow">CHOOSE YOUR PLAY</span><h2>选一种玩法，进入市场</h2></div><button type="button" className="game-text-button" onClick={onOpenRules}>第一次玩？先看规则 ↗</button></div>
         <div className="game-mode-grid" role="group" aria-label="选择模拟游戏模式">
           <button type="button" className={`game-mode-card game-mode-legend${selectedMode === "legend" ? " is-selected" : ""}`} aria-pressed={selectedMode === "legend"} disabled={replayInProgress} title={replayInProgress ? "请先继续或结束当前历史推演" : undefined} onClick={() => setSelectedMode("legend")}>

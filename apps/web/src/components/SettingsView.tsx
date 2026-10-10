@@ -227,7 +227,7 @@ export function SettingsView(props: SettingsProps) {
       >
         <KV
           k="现在的状态"
-          v={hisuiOk ? `已接通 ${hisui.endpoint}` : "没配 —— 术语照常解释，只是没有提问框"}
+          v={hisuiOk ? `已配置 ${hisui.endpoint}（尚未验证连接）` : "没配 —— 术语照常解释，只是没有提问框"}
         />
         <label className="field">
           <span className="field-label">问答代理地址</span>
