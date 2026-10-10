@@ -1,5 +1,5 @@
 /**
- * 翡翠问答：只测不发疯的部分 —— 地址判断、存档解析、请求形状。
+ * 交易员问答：只测不发疯的部分 —— 地址判断、存档解析、请求形状。
  *
  * 最要紧的一条是 `askHisui` **发了什么**。接入包 §5 要求按局裁剪上下文、
  * 过滤未来信息，那需要服务端按 runId 重建「此刻可见的事实」；本仓是纯静态
@@ -37,7 +37,7 @@ function bodyOf(init: RequestInit | undefined): Record<string, unknown> {
   return JSON.parse(String(init?.body)) as Record<string, unknown>;
 }
 
-describe("翡翠：代理地址", () => {
+describe("交易员：代理地址", () => {
   it("只认 https 的完整地址", () => {
     expect(isUsableEndpoint("https://my-proxy.example.com/ask")).toBe(true);
     expect(isUsableEndpoint("https://x.dev")).toBe(true);
@@ -69,7 +69,7 @@ describe("翡翠：代理地址", () => {
   });
 });
 
-describe("翡翠：同时只展开一个词", () => {
+describe("交易员：同时只展开一个词", () => {
   it("订阅者收到通知，取消订阅后不再收到", () => {
     resetHisui();
     let n = 0;
@@ -100,7 +100,7 @@ describe("翡翠：同时只展开一个词", () => {
   });
 });
 
-describe("翡翠：问一句", () => {
+describe("交易员：问一句", () => {
   it("POST 出去只带术语名、已审核释义、玩家自己的问题", async () => {
     const { f, seen } = stubFetch({ body: { mood: "explain", answer: "少爷，滑点是……" } });
     const got = await askHisui({
@@ -142,7 +142,7 @@ describe("翡翠：问一句", () => {
     ).rejects.toThrow("HTTP 502");
   });
 
-  it("回了空字符串也算失败 —— 界面上不该出现一个空的翡翠气泡", async () => {
+  it("回了空字符串也算失败 —— 界面上不该出现一个空的气泡", async () => {
     const { f } = stubFetch({ body: { mood: "explain", answer: "   " } });
     await expect(
       askHisui({ endpoint: "https://x.dev/a", question: "q", fetchImpl: f } ),
