@@ -1109,9 +1109,9 @@ export default function App() {
     <div className={`app app-${tab}`}>
       <header className="app-head">
         <div className="app-head-row">
-          <button className="brand" type="button" onClick={() => setTab("game")} aria-label="股市练习场，返回游戏">
+          <button className="brand" type="button" onClick={() => setTab("game")} aria-label="交易员，返回游戏">
             <span className="brand-mark"><svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M5 21V15M14 21V7M23 21V11" stroke="currentColor" strokeWidth="4" strokeLinecap="round"/><path d="m3 10 8-5 8 3 7-5" stroke="currentColor" strokeWidth="1.5"/></svg></span>
-            <span><strong>股市练习场</strong><small>MARKET PLAYGROUND</small></span>
+            <span><strong>交易员</strong><small>MARKET PLAYGROUND</small></span>
           </button>
           <nav className="topnav" aria-label="主导航">
             {TABS.map(t => <button key={t.key} className={`topnav-link${tab===t.key ? " active" : ""}`} type="button" onClick={() => setTab(t.key)} aria-current={tab===t.key ? "page" : undefined}><AppIcon name={t.key==="game" ? "game" : t.key==="workbench" ? "chart" : "book"}/>{t.label}</button>)}

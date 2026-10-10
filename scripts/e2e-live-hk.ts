@@ -167,7 +167,7 @@ try {
     window.addEventListener("unhandledrejection", (e) => window.__e2eErrors.push(String(e.reason)));
     return true;
   `);
-  check("页面渲染出标题", await waitFor(`document.body.innerText.includes("股市练习场")`, "标题"));
+  check("页面渲染出标题", await waitFor(`document.body.innerText.includes("交易员")`, "标题"));
   check("快照加载完成", await waitFor(`!document.body.innerText.includes("正在加载")`, "加载完成"));
 
   /*

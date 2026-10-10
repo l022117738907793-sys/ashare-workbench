@@ -193,7 +193,7 @@ describe("AI 问答是可选入口：没配代理就整块不出现", () => {
     resetHisui();
     try {
       const html = renderAsk();
-      expect(html).toContain("问交易员");
+      expect(html).toContain("问翡翠");
       expect(html).toContain("input");
     } finally {
       saveHisuiSettings(NO_HISUI);
