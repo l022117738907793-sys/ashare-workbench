@@ -3,8 +3,8 @@
  *
  * ## 交互（两次点击拿到完整解析）
  *
- * 1. 点一下蓝色的词 → 下面就地弹出一句短释义，旁边站着交易员；
- * 2. 短释义下面有「让交易员细讲」→ 点它才展开完整的解析。
+ * 1. 点一下蓝色的词 → 下面就地弹出一句短释义，旁边站着翡翠；
+ * 2. 短释义下面有「让翡翠细讲」→ 点它才展开完整的解析。
  *
  * ## 三个必须守住的实现约束
  *
@@ -55,7 +55,7 @@ function Portrait({ mood, size = 44 }: { mood: HisuiMood; size?: number }) {
 }
 
 /**
- * 「问交易员」的输入框。**没配代理地址就返回 null。**
+ * 「问翡翠」的输入框。**没配代理地址就返回 null。**
  *
  * 导出是为了能直接测这一条 —— `TermPanel` 静态渲染停在第一档，看不到它，
  * 而这个「不配就不出现」的规则恰恰是最该钉死的（用户明确要求过不要假入口）。
@@ -93,14 +93,14 @@ export function AskBox({ term, context }: { term: string; context: string }) {
           value={question}
           maxLength={200}
           placeholder={`追问「${term}」…`}
-          aria-label={`向交易员追问${term}`}
+          aria-label={`向翡翠追问${term}`}
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") void send();
           }}
         />
         <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void send()}>
-          {busy ? "交易员在想…" : "问交易员"}
+          {busy ? "翡翠在想…" : "问翡翠"}
         </button>
       </span>
       {error !== null && (
@@ -131,7 +131,7 @@ export function rich(text: string): ReactNode {
     .map((part, i) => (i % 2 === 1 ? <strong key={i}>{part}</strong> : part));
 }
 
-/** 就地展开的解释。`stage` 由「有没有点过让交易员细讲」决定 */
+/** 就地展开的解释。`stage` 由「有没有点过让翡翠细讲」决定 */
 export function TermPanel({ term }: { term: Term }) {
   const [stage, setStage] = useState<"short" | "full">("short");
   const mood = term.mood ?? "explain";
@@ -140,11 +140,11 @@ export function TermPanel({ term }: { term: Term }) {
       <span className="term-panel-row">
         <Portrait mood={mood} />
         <span className="term-panel-body">
-          <span className="term-panel-who">交易员</span>
+          <span className="term-panel-who">翡翠</span>
           <span className="term-panel-text">{rich(stage === "short" ? term.short : term.full)}</span>
           {stage === "short" && (
             <button type="button" className="term-more" onClick={() => setStage("full")}>
-              让交易员细讲
+              让翡翠细讲
             </button>
           )}
         </span>

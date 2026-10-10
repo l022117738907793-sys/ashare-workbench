@@ -1,5 +1,5 @@
 /**
- * 教学助手（显示名「交易员」）：状态、形象与（可选的）AI 问答入口。
+ * 翡翠教学助手：状态、形象与（可选的）AI 问答入口。
  *
  * ## 为什么助手没有一个自己的大卡片
  *
@@ -20,15 +20,7 @@ import { readLS, writeLS } from "./helpers";
 
 export type HisuiMood = "neutral" | "thinking" | "explain" | "concern" | "happy" | "sorry";
 
-/**
- * 界面上的显示名。
- *
- * **模块与标识符仍叫 hisui**（`hisui.ts`、`HisuiMood`、`aw.hisui.v1`、
- * `hisui-expressions.webp`）—— 素材原本是《月姬》的翡翠。改名只改了显示名：
- * 存档键一改，用户填过的代理地址就丢了，而那是要用户重新去找一次东西的代价。
- * 内部名与显示名不一致这件事写在 `docs/terms-and-hisui.md` 第五节。
- */
-export const HISUI_NAME = "交易员";
+export const HISUI_NAME = "翡翠";
 
 /** 表情图在精灵图里的位置：[列, 行]，与琥珀那份 dialogue.json 的 moods 一致 */
 export const MOOD_CELL: Record<HisuiMood, [number, number]> = {
