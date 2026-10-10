@@ -1318,7 +1318,7 @@ try {
    * 用户提的：「对专业术语标蓝（就是没接触过股票的看不懂的），用户点两下能看到
    * 解析。解析的形式是教学助手来解释。」
    *
-   * 「点两下」指的是**两层**：第一下出一句话，第二下（点「让翡翠细讲」）出完整
+   * 「点两下」指的是**两层**：第一下出一句话，第二下（点「让交易员细讲」）出完整
    * 解释。这里把这两层和「同时只开一个」都验一遍 —— 一屏几十个词，全开着会变成
    * 一屏解释，那是功能没做完而不是功能多。
    */
@@ -1367,7 +1367,7 @@ try {
   const shortPanel = await waitFor(
     `(() => {
         const p = document.querySelector(".term-panel");
-        return !!p && p.innerText.includes("翡翠") && p.innerText.includes("让翡翠细讲");
+        return !!p && p.innerText.includes("交易员") && p.innerText.includes("让交易员细讲");
       })()`,
     "术语气泡",
   );
@@ -1406,13 +1406,13 @@ try {
     more.click();
     return more.textContent;
   `);
-  check("气泡里有「让翡翠细讲」这个入口", termFull !== "NOT_FOUND", termFull);
+  check("气泡里有「让交易员细讲」这个入口", termFull !== "NOT_FOUND", termFull);
   check(
     "点第二下：换成完整解析（有「是什么、为什么」那几段）",
     await waitFor(
       `(() => {
         const p = document.querySelector(".term-panel");
-        return !!p && !p.innerText.includes("让翡翠细讲") && p.innerText.length > 40;
+        return !!p && !p.innerText.includes("让交易员细讲") && p.innerText.length > 40;
       })()`,
       "完整解析",
     ),

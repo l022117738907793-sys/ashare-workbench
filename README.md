@@ -14,7 +14,7 @@
 | [docs/analysis-rules.md](docs/analysis-rules.md) | 分析规则唯一事实来源 |
 | [docs/data-sources.md](docs/data-sources.md) | **行情**数据源实测（CORS/限频/字段表） |
 | [docs/news-sources.md](docs/news-sources.md) | **新闻**数据源实测（历史覆盖/抓取坑/版权） |
-| [docs/terms-and-hisui.md](docs/terms-and-hisui.md) | 术语高亮与翡翠问答（词典规则/纯静态边界） |
+| [docs/terms-and-hisui.md](docs/terms-and-hisui.md) | 术语高亮与交易员问答（词典规则/纯静态边界） |
 | [docs/game-design.md](docs/game-design.md) | 模拟游戏设计 |
 | [docs/gpt-game-review-2.md](docs/gpt-game-review-2.md) | 游戏模式设计评审（含实测证据） |
 | [docs/chatgpt-game-prompt.md](docs/chatgpt-game-prompt.md) | 给外部评审的提问稿 |
@@ -93,7 +93,7 @@ apps/web/               网页界面
 docs/                   规则规格与数据源实测结论
 ```
 
-## 部署到 GitHub Pages
+## 部署到 GitHub Pages（以及 Cloudflare Pages）
 
 1. 新建公开仓库并推送；
 2. `Settings → Pages → Source` 选 **GitHub Actions**；
@@ -105,6 +105,32 @@ docs/                   规则规格与数据源实测结论
 - `.github/workflows/deploy-web.yml` — 跑测试 → 同步快照 → 构建 → 部署
 
 **源码里没有任何密钥。** 本版所有数据源都是免密钥的公开接口，不需要配置任何 Secret。
+
+### 为什么线上还要再发一份到 Cloudflare Pages
+
+GitHub Pages 在中国大陆会被限速到 **约 15 KB/s**：`data/snapshot_*/stocks.json` 2.68 MB，
+实测要 178 秒，首屏会一直停在「正在加载快照…」。同一个文件从 Cloudflare Pages 取是
+**2.48 秒**（1.08 MB/s），所以**给大陆访客的入口是 `pages.dev`**。
+
+主站是 <https://ashare-workbench.pages.dev/>（Pages 项目 `ashare-workbench`），手动发版：
+
+```bash
+node packages/data/scripts/sync_web_data.mjs --keep 1 --trim-days 120
+VITE_HISUI_ENDPOINT=https://ashare-hisui-proxy.pages.dev/ask npm run build --workspace @aw/web
+npx wrangler pages deploy apps/web/dist --project-name=ashare-workbench --branch=main
+```
+
+`deploy-web.yml` 里已经带了这一步（`cloudflare/wrangler-action`）。要让它自动跑，在仓库
+`Settings → Secrets and variables → Actions` 里加两个 Secret：
+
+- `CLOUDFLARE_API_TOKEN`（权限给 **Cloudflare Pages: Edit**）；
+- `CLOUDFLARE_ACCOUNT_ID`。
+
+**没配这两个 Secret 时这一步整步跳过**，站点仍然只发 GitHub Pages —— 流水线不会被它弄红。
+注意本地 `wrangler login` 拿到的 OAuth 令牌**不能**当 API Token 用，得去控制台单独建一个。
+
+两边的来源都要写进代理的 `ALLOWED_ORIGINS`（`reference/hisui-ai-proxy/wrangler.jsonc`）：
+少写一个，从那个域名打开的页面一问就会被代理 403「来源不允许」。
 
 ## 模拟投资游戏
 

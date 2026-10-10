@@ -26,14 +26,14 @@ export function GameCompanion({onGuide, context = "lobby", cue}: {onGuide: () =>
   const tip = index === 0 ? cue ?? {...TIPS[0], text: START_TIPS[context]} : TIPS[index];
   const [x,y] = MOOD_CELL[tip.mood];
   const position = `${x * 50}% ${y * 100}%`;
-  return <section className={`game-companion${expanded ? " is-expanded" : ""}`} aria-label="翡翠教学助手">
-    <div className="companion-portrait" role="img" aria-label={`翡翠，${tip.label}`}>
+  return <section className={`game-companion${expanded ? " is-expanded" : ""}`} aria-label="交易员教学助手">
+    <div className="companion-portrait" role="img" aria-label={`交易员，${tip.label}`}>
       <span className="companion-frame companion-open" style={{backgroundImage:`url(${sheet})`,backgroundPosition:position}} />
       <span className="companion-frame companion-blink" style={{backgroundImage:`url(${blink})`,backgroundPosition:position}} />
     </div>
     <div className="companion-copy">
       <span className="eyebrow">YOUR MARKET COMPANION</span>
-      <h2>不确定下一步？翡翠陪您一起。</h2>
+      <h2>不确定下一步？交易员陪您一起。</h2>
       <p aria-live="polite">{tip.text}</p>
       {expanded && <div className="companion-details">
         <div className="chips">{TIPS.map((t,i) => <button key={t.label} className={`chip${i===index ? " chip-active" : ""}`} aria-pressed={i===index} onClick={() => setIndex(i)}>{t.label}</button>)}</div>
@@ -41,7 +41,7 @@ export function GameCompanion({onGuide, context = "lobby", cue}: {onGuide: () =>
       </div>}
     </div>
     <div className="companion-actions">
-      <button className="btn btn-ghost" type="button" aria-expanded={expanded} onClick={() => setExpanded(v=>!v)}>{expanded ? "收起帮助" : "听翡翠讲解"}</button>
+      <button className="btn btn-ghost" type="button" aria-expanded={expanded} onClick={() => setExpanded(v=>!v)}>{expanded ? "收起帮助" : "听交易员讲解"}</button>
       <button className="text-action" type="button" onClick={onGuide}>完整玩法指南 <AppIcon name="arrow" size={15}/></button>
     </div>
   </section>;

@@ -67,7 +67,7 @@ export function SettingsView(props: SettingsProps) {
   } = props;
 
   /*
-   * 翡翠的问答代理。**默认是空的**，因为纯静态站点不能保管 API Key ——
+   * 交易员的问答代理。**默认是空的**，因为纯静态站点不能保管 API Key ——
    * 留一个「看着能问、点了说没接通」的入口比没有入口更糟，所以没配就整块
    * 提问框都不渲染（判断在 AskBox 里，见 Terms.tsx）。
    */

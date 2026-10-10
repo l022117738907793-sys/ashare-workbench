@@ -1,4 +1,4 @@
-name: Deploy Web to GitHub Pages
+name: Deploy Web
 
 on:
   push:
@@ -22,6 +22,11 @@ concurrency:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    # GitHub 不允许在 if 里读 secrets，所以先落到 job 级 env 再判断有没有配。
+    # 只给 Cloudflare 部署用；没配时下面那一步整步跳过。
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -61,3 +66,16 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Deploy to Cloudflare Pages
+        # 大陆访问 GitHub Pages 会被限速到约 15 KB/s：stocks.json 2.68 MB 要 178 秒，
+        # 首屏几分钟都出不来。pages.dev 在大陆是通的，同一份 dist 实测快约 72 倍
+        # （2.48 秒），所以**给大陆访客的真正入口是这一个**。
+        # 需要仓库 Secrets 里配 CLOUDFLARE_API_TOKEN（Pages:Edit 权限）与
+        # CLOUDFLARE_ACCOUNT_ID；没配就跳过，站点仍然只在 GitHub Pages 上。
+        if: ${{ env.CLOUDFLARE_API_TOKEN != '' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy apps/web/dist --project-name=ashare-workbench --branch=main

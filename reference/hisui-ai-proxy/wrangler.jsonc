@@ -6,7 +6,7 @@
   "workers_dev": true,
   "vars": {
     "HISUI_MODEL": "deepseek-flash",
-    "ALLOWED_ORIGINS": "https://l022117738907793-sys.github.io,http://localhost:5192,http://127.0.0.1:5192",
+    "ALLOWED_ORIGINS": "https://ashare-workbench.pages.dev,https://l022117738907793-sys.github.io,http://localhost:5192,http://127.0.0.1:5192",
     "DAILY_REQUEST_LIMIT": "300",
     "ENABLED": "true"
   },

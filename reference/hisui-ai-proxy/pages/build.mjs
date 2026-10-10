@@ -15,10 +15,10 @@ const LANDING = `<!doctype html>
 <html lang="zh-CN">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>翡翠问答代理</title>
+<title>交易员问答代理</title>
 <body style="font-family:system-ui,-apple-system,'PingFang SC',sans-serif;max-width:36rem;margin:4rem auto;padding:0 1.25rem;line-height:1.7;color:#1b1f22">
-<h1 style="font-size:1.25rem">翡翠问答代理</h1>
-<p>这是 A 股模拟投资工作台「翡翠教学助手」的服务端代理。它只接受来自本工作台网页的提问，
+<h1 style="font-size:1.25rem">交易员问答代理</h1>
+<p>这是 A 股模拟投资工作台「交易员教学助手」的服务端代理。它只接受来自本工作台网页的提问，
 把问题交给上游模型，再把回答发回网页。密钥存在服务端，网页上拿不到。</p>
 <p><a href="/health">/health</a> 可以看服务是否已配置好。</p>
 </body>
