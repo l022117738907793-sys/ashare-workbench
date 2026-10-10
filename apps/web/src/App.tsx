@@ -27,6 +27,7 @@ import {
   convertSnapshotToCny,
   currencyOf,
   fxRatesOfMeta,
+  fxSeriesOfMeta,
   loadSnapshot,
   sessionLabel,
   sessionState,
@@ -288,9 +289,14 @@ export default function App() {
          *
          * `meta` 里没有汇率时原样返回（不猜、也不按 1:1 顶），
          * 那些标的靠 `currency` 字段在界面上标注。
+         *
+         * 汇率给**两个**：逐日序列优先，它让历史推演里的境外标的按当天的价折；
+         * 标量兜底（序列长度对不上日历、或老快照根本没有这一列时用）。
+         * 实时盘只用得到最后一天，两种口径在那一格上是同一个数。
          */
         const fx = fxRatesOfMeta(b.meta);
-        setBundle({ ...b, snapshot: convertSnapshotToCny(b.snapshot, fx) });
+        const fxSeries = fxSeriesOfMeta(b.meta, b.calendar.length);
+        setBundle({ ...b, snapshot: convertSnapshotToCny(b.snapshot, fx, fxSeries) });
         setLoadError(null);
       })
       .catch((e) => {
@@ -994,8 +1000,9 @@ export default function App() {
   /**
    * 回溯模式开局：起点由玩家在最近一个月里挑。
    *
-   * 参与标的只放 A 股（理由见 `backtrackStocks`），所以要显式传 `codes` ——
-   * 不传的话 `buildReplayConfig` 会把快照里的港股日股韩股全放进来，按本币当人民币计价。
+   * `codes` 显式传进去，把这一局的标的**钉在开局那一刻** —— 不传的话
+   * `buildReplayConfig` 会直接用「当前快照里的全部股票」，而快照每天更新，
+   * 半路刷新一次就换了一批票，存档里的成交记录会对不上。
    */
   const handleStartBacktrack = useCallback(
     (startIndex: number, initialCash: number) => {

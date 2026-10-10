@@ -1526,10 +1526,10 @@ try {
     hkHolding.replace(/\s+/g, " ").slice(0, 120),
   );
   check(
-    "持仓行写明了港美股当日可卖、境外标的已折成人民币",
+    "持仓行写明了境外当日可卖、境外标的已按当天汇率折成人民币",
     await evaluate<boolean>(`
       const p = document.querySelector(".replay-holdings-panel .replay-panel-head p");
-      return !!p && p.innerText.includes("港美股当日可卖") && p.innerText.includes("境外标的已折成人民币");
+      return !!p && p.innerText.includes("港美日韩当日可卖") && p.innerText.includes("境外标的已按当天汇率折成人民币");
     `),
   );
 

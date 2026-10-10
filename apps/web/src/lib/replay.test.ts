@@ -352,10 +352,29 @@ function btStock(code: string, name: string, industry: string): StockData {
   };
 }
 
-/** 2 只 A 股 + 港日韩各一只，用来验证「回溯只放 A 股」 */
+/**
+ * 2 只 A 股 + 港日韩各一只。
+ *
+ * `meta` 里带一条**逐日**汇率序列（与 `BT_CAL` 等长），这是境外标的能进这一局的前提：
+ * 价格列在加载快照时按「那一天的汇率」折成人民币，引擎再按同一列算最低佣金。
+ * 汇率刻意逐日递增，这样「用的是第 k 天而不是最后一天」是可验证的。
+ */
+function btFxSeries(base: number, step: number) {
+  return {
+    pair: "HKDCNY",
+    code: "HKDCNY",
+    name: "港币兑人民币",
+    rate: BT_CAL.map((_, i) => Number((base + i * step).toFixed(6))),
+  };
+}
+
 function btSnapshot(): Snapshot {
   return {
-    meta: {},
+    meta: {
+      hk: { fx: { pair: "HKDCNY", date: BT_CAL[BT_CAL.length - 1], rate: 0.8 + (BT_CAL.length - 1) * 0.01 }, fxSeries: btFxSeries(0.8, 0.01) },
+      jp: { fx: { pair: "JPYCNY", date: BT_CAL[BT_CAL.length - 1], rate: 0.04 }, fxSeries: btFxSeries(0.04, 0) },
+      kr: { fx: { pair: "KRWCNY", date: BT_CAL[BT_CAL.length - 1], rate: 0.005 }, fxSeries: btFxSeries(0.005, 0) },
+    },
     calendar: [...BT_CAL],
     indices: [
       {
@@ -417,16 +436,52 @@ describe("回溯模式：可选的起点", () => {
   });
 });
 
-describe("回溯模式：只放 A 股", () => {
-  it("港股 / 日股 / 韩股都不进这一局", () => {
+describe("回溯模式：标的含境外", () => {
+  const start = () =>
+    startReplay(btSnapshot(), BT_CAL, { mode: "backtrack", initialCash: 100000, startIndex: 8 });
+
+  it("港日韩都在这一局的标的里", () => {
+    // 早先这里只放 A 股（那时快照只有一个标量汇率）。逐日汇率补上之后就不必了。
     const codes = backtrackStocks(btSnapshot()).map((s) => s.code);
-    expect(codes).toEqual(["600519.SH", "000001.SZ"]);
+    expect(codes).toEqual(["600519.SH", "000001.SZ", "00700.HK", "7203.JP", "005930.KR"]);
   });
 
-  it("不显式传 codes 的话，境外标的会被一起放进来按本币当人民币", () => {
-    // 这条钉的是 handleStartBacktrack 里那句 `codes`。哪天有人把它当冗余删掉，
-    // 港股就会按 1:1 混进这一局 —— 玩家的成本凭空少一成多，界面上不会有任何提示。
-    const st = startReplay(btSnapshot(), BT_CAL, { mode: "backtrack", initialCash: 100000, startIndex: 8 });
+  it("每只标的都带着 market 与 currency 进引擎", () => {
+    // 少任何一列都不报错，只会安静地「港股按 A 股规则成交」：
+    // T+1 而不是 T+0、涨跌停不同、港股佣金下限 100 港币被当成 100 元。
+    const st = start();
+    const hk = st.config.instruments.find((i) => i.code === "00700.HK")!;
+    expect(hk.market).toBe("HK");
+    expect(hk.currency).toBe("HKD");
+    const cn = st.config.instruments.find((i) => i.code === "600519.SH")!;
+    expect(cn.market).toBe("CN");
+    expect(cn.currency).toBe("CNY");
+  });
+
+  it("config.fx 拿的是快照里那条逐日序列，一天一格", () => {
+    // 引擎用它把港股最低佣金折回人民币。拿固定汇率乘一百多天就是这里要防的错。
+    const st = start();
+    const hkd = st.config.fx?.find((f) => f.currency === "HKD")!;
+    expect(hkd.rate).toHaveLength(BT_CAL.length);
+    expect(hkd.rate[0]).toBeCloseTo(0.8, 6);
+    expect(hkd.rate[BT_CAL.length - 1]).toBeCloseTo(0.8 + (BT_CAL.length - 1) * 0.01, 6);
+  });
+
+  it("序列长度与日历经对不上就整条丢掉，不喂错位的汇率", () => {
+    // 错位的序列不会报错，只会把 4 月的汇率安到 9 月的价格上。
+    const snap = btSnapshot();
+    (snap.meta as Record<string, Record<string, unknown>>).hk!.fxSeries = { rate: [0.9] };
+    const st = startReplay(snap, BT_CAL, { mode: "backtrack", initialCash: 100000, startIndex: 8 });
+    // 坏的只有港币那一条，日韩照旧 —— 一条坏不该把别的币种也带走
+    expect(st.config.fx?.some((f) => f.currency === "HKD")).toBe(false);
+    expect(st.config.fx?.some((f) => f.currency === "JPY")).toBe(true);
+  });
+
+  it("没有 meta（老快照）时只是没有汇率，不抛错", () => {
+    const snap = btSnapshot();
+    delete (snap as { meta?: unknown }).meta;
+    const st = startReplay(snap, BT_CAL, { mode: "backtrack", initialCash: 100000, startIndex: 8 });
+    expect(st.config.fx).toBeUndefined();
     expect(st.config.instruments).toHaveLength(5);
   });
 });
@@ -444,11 +499,17 @@ describe("回溯模式：开局", () => {
     });
   };
 
-  it("起点就是玩家挑的那天，股票池只有 A 股", () => {
+  it("起点就是玩家挑的那天，股票池是整个快照", () => {
     const st = start();
     expect(st.config.startIndex).toBe(20);
     expect(replayDate(st)).toBe(BT_CAL[20]);
-    expect(st.config.instruments.map((i) => i.code)).toEqual(["600519.SH", "000001.SZ"]);
+    expect(st.config.instruments.map((i) => i.code)).toEqual([
+      "600519.SH",
+      "000001.SZ",
+      "00700.HK",
+      "7203.JP",
+      "005930.KR",
+    ]);
     expect(st.config.label).toBe("回溯 · 2026-09-21 起");
     expect(st.config.calendar).toEqual(BT_CAL);
   });

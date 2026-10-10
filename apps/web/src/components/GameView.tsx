@@ -119,8 +119,8 @@ export interface GameViewProps {
  * 回溯模式在大厅里要摆出来的东西。
  *
  * `options` 从早到晚，直接就是一排按钮；`span` 是窗口长度（多少交易日），
- * `stockCount` 是本局能交易的标的数 —— 界面上要写清「这一屏只做 A 股」，
- * 免得玩家点了回溯却找不到刚在实时盘里买过的港股。
+ * `stockCount` 是本局能交易的标的数 —— 界面上写出来，玩家才知道这一局能碰哪些票
+ * （含港日韩，它们的价格在加载快照时已按当天汇率折成人民币）。
  */
 export interface BacktrackPlan {
   options: BacktrackOption[];
@@ -468,8 +468,8 @@ export function GameView(props: GameViewProps) {
                   共 {backtrack.options.length} 个交易日。挑一天开局，从那天往后逐日推演。
                 </p>
                 <p className="game-backtrack-note">
-                  本局有 {backtrack.stockCount} 只 A 股可交易。港股/日股/韩股不在其中 —— 回溯窗口里没有逐日汇率，
-                  按最新汇率折算会让成本凭空少掉一成多，所以宁可不放进来。
+                  本局有 {backtrack.stockCount} 只股票可交易，含港股 / 日股 / 韩股。
+                  境外的价格按<strong>当天</strong>的汇率折成人民币，账户全程只记人民币。
                 </p>
               </div>
               <div className="game-backtrack-days" role="group" aria-label="选择回溯起点">

@@ -10,7 +10,10 @@
  *   2. 起点清单与快照日历对得上（数量、首尾、余几天），点中间那天选中状态真的转移；
  *   3. 开局之后**日期照实显示** —— 回溯模式一旦被 `parseReplaySave` 认错，
  *      就会变成一个藏日期的随机局，那是这个功能最要命的失败方式；
- *   4. 候选里**一只境外标的都没有**（回溯窗口没有逐日汇率，不能把它们放进来）。
+ *   4. **境外标的真能买** —— 点「港股」那颗市场胶囊之后榜单上确实出现 .HK 的票。
+ *      这一条早先断言的是**反面**（「一只境外标的都没有」），因为那时快照只有一个标量
+ *      汇率，按最新价折一个月等于猜。逐日汇率补上之后反过来：真正要防的失败方式变成
+ *      「汇率没接上，境外又被放进来了」—— 那正是这条要抓的。
  *
  * 断言尽量量结构（有几颗按钮、选中哪一颗、日期是不是这一天），
  * 少量文案 —— 文案改一个字就让 e2e 变红，是这类脚本最常见的浪费。
@@ -241,7 +244,10 @@ check("默认选中最早那天（能玩满窗口）", days[0]?.active === true 
 const first = JSON.parse(await evaluate<string>(LAUNCH)) as Launch;
 check("按钮文案报出选中的日期", first.label === `从 ${days[0].date} 开始推演`, String(first.label));
 check("副文案报出还剩几个交易日", (first.hint ?? "").includes(String(WINDOW)), String(first.hint));
-check("起点选择器写明了本局只有 A 股", (await evaluate<string>(TEXT)).includes("只 A 股可交易"));
+// 起点选择器要把「这一局能碰哪些票」说出来。含港日韩之后这句更该在 ——
+// 玩家刚在实时盘买过港股，回到这一屏找不到它才是真的会困惑。
+const note = (await evaluate<string>(TEXT)).includes("含港股");
+check("起点选择器写明了本局含港股 / 日股 / 韩股", note);
 
 // 挑中间那天，看选中状态与按钮文案是否一起走
 const mid = Math.floor(days.length / 2);
@@ -297,8 +303,63 @@ check("候选榜单不是空的", universe.count > 0, String(universe.count));
 const isCnCode = (c: string) => /^\d{6}$/.test(c);
 const isOverseas = (c: string) => /\.(HK|JP|KR)$/.test(c);
 check("候选里有 A 股", universe.codes.some(isCnCode), universe.codes.slice(0, 3).join(" / "));
-check("候选里一只境外标的都没有", !universe.codes.some(isOverseas), universe.codes.join(" / "));
-check("页面里没有「境外标的已折成人民币」这句（本局没有境外）", !(await evaluate<string>(TEXT)).includes("境外标的已折成人民币"));
+check(
+  "「全部」这一屏是 A 股为主（市场胶囊排的存在感才立得住）",
+  universe.codes.some(isCnCode),
+  universe.codes.slice(0, 3).join(" / "),
+);
+
+/*
+ * 切到港股。**这是本节的要害**：回溯窗口里能买境外标的，前提是加载快照时
+ * 按 `meta.<市场>.fxSeries` 那条**逐日**序列把价格折成了人民币 ——
+ * 汇率没接上的话，这里要么一只 .HK 都出不来，要么出来的价是本币当人民币。
+ * 只断言「出现了 .HK」还不够，价格也得落在人民币的量级上。
+ */
+const CLICK_MARKET = (label: string) => `
+  const box = document.querySelector(".pick-markets");
+  if (!box) return "NO_BOX";
+  const b = [...box.querySelectorAll("button")].find(
+    (x) => (x.textContent || "").trim().startsWith(${JSON.stringify(label)}),
+  );
+  if (!b) return "NOT_FOUND";
+  b.click();
+  return "OK";
+`;
+check("选股清单里有市场胶囊排", (await evaluate<string>(`return document.querySelector(".pick-markets") ? "OK" : "NO";`)) === "OK");
+
+const switched = await evaluate<string>(CLICK_MARKET("港股"));
+check("点得到「港股」那颗胶囊", switched === "OK", switched);
+await sleep(500);
+const hkRows = JSON.parse(
+  await evaluate<string>(`
+    const rows = [...document.querySelectorAll(".pick-row")];
+    const out = rows.map(r => {
+      const code = ((r.querySelector(".pick-code") || {}).textContent || "").trim();
+      const price = ((r.querySelector(".pick-price") || {}).textContent || "").trim();
+      return { code, price };
+    }).filter(r => r.code);
+    return JSON.stringify({ rows: out, labels: [...document.querySelectorAll(".pick-cur")].map(x => (x.textContent||"").trim()) });
+  `),
+) as { rows: Array<{ code: string; price: string }>; labels: string[] };
+check("筛到港股之后榜单不是空的", hkRows.rows.length > 0, `${hkRows.rows.length} 行`);
+check(
+  "筛到港股之后榜单上全是港股",
+  hkRows.rows.length > 0 && hkRows.rows.every((r) => r.code.endsWith(".HK")),
+  hkRows.rows.map((r) => r.code).join(" / "),
+);
+// 港股价格折成人民币之后是二三十到几百元这个量级；要是汇率没接上，
+// 显示的会是港币原值（几百到上千），这里用一个宽松的上界兜住
+const hkPrices = hkRows.rows.map((r) => Number(r.price.replace(/[^\d.]/g, ""))).filter((n) => Number.isFinite(n) && n > 0);
+check("港股的价格折成了人民币（量级合理，不是本币原值）", hkPrices.length > 0 && hkPrices.every((n) => n < 1000), hkPrices.join(" / "));
+
+const backToAll = await evaluate<string>(CLICK_MARKET("全部"));
+check("点得回「全部」", backToAll === "OK", backToAll);
+await sleep(400);
+
+check(
+  "持仓面板写明境外标的已按当天汇率折成人民币",
+  (await evaluate<string>(TEXT)).includes("境外标的已按当天汇率折成人民币"),
+);
 
 console.log("\n四、逐日推进");
 const stepped = await evaluate<string>(CLICK("下一天"));

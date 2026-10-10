@@ -106,16 +106,79 @@ export function fxRatesOfMeta(meta: Record<string, unknown>): FxRates {
   return out;
 }
 
+/**
+ * 逐日汇率序列，与快照的 `calendar` **按下标**等长。
+ *
+ * 第 k 项是当天「1 单位该币种值多少人民币」，当天中行没报价就是 `null`
+ * （折算时沿用上一个已知值）。它比 `FxRates` 那个标量贵得多 ——
+ * 有了它，推演里的境外标的才能按**当天**的汇率折，而不是拿最后一天的价
+ * 铺满整段历史。
+ *
+ * 名字里的 `Snapshot` 是为了跟隔壁 `overseas.ts` 的 `FxSeries` 区分开：
+ * 那个是按**日期**索引的（`{dates, rate}`，给关卡分片用），这个是按**下标**
+ * 索引的（与快照日历对齐，喂给 `convertSnapshotToCny`）。
+ */
+export type SnapshotFxSeries = Partial<Record<Currency, Array<number | null>>>;
+
+/**
+ * 从快照的 `meta` 里读逐日汇率序列。
+ *
+ * `fetch_snapshot.py` 把它写在 `meta.<市场>.fxSeries = {pair, code, name, rate}`，
+ * `rate` 与快照的 `calendar` 等长，港股 `hk`、日股 `jp`、韩股 `kr` 同构。
+ *
+ * `days` 传快照的日历长度；**长度对不上就整条丢掉**。错位的序列比没有更糟：
+ * 它不会报错，只会把 4 月的汇率安到 9 月的价格上，而界面上一切正常。
+ * `days` 传 0 或省略表示不检查长度（调用方拿不到日历时的退路）。
+ */
+export function fxSeriesOfMeta(meta: Record<string, unknown>, days = 0): SnapshotFxSeries {
+  const out: SnapshotFxSeries = {};
+  const blocks: Array<[string, Currency]> = [
+    ["hk", "HKD"],
+    ["jp", "JPY"],
+    ["kr", "KRW"],
+  ];
+  for (const [key, currency] of blocks) {
+    const block = meta?.[key];
+    if (!block || typeof block !== "object") continue;
+    const series = (block as { fxSeries?: unknown }).fxSeries;
+    if (!series || typeof series !== "object") continue;
+    const rate = (series as { rate?: unknown }).rate;
+    if (!Array.isArray(rate)) continue;
+    if (days > 0 && rate.length !== days) continue;
+    if (rate.length === 0) continue;
+    // 一个有效数字都没有的序列等于没有序列，别让它把标量兜底也顶掉
+    if (!rate.some((v) => typeof v === "number" && Number.isFinite(v) && v > 0)) continue;
+    out[currency] = rate.map((v) =>
+      typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null,
+    );
+  }
+  return out;
+}
+
 /** 折算后保留 4 位小数：够精确到分，又不会拖一串浮点尾巴（与 replay 的 convertShardToCny 同口径） */
 function round4(v: number): number {
   return Math.round(v * 1e4) / 1e4;
 }
 
+/**
+ * 折一列。
+ *
+ * 第 k 天用第 k 天的汇率；那天没有报价就沿用**上一个已知**的汇率（与推演的
+ * `cnyColumn` 同一条规则：汇率是慢变量，隔一天沿用远比插值或补 1 更接近事实）。
+ * 序列还没走到第一个报价时，用 `fallback` —— 也就是快照里那个标量。
+ */
 function scaleColumn(
   col: Array<number | null> | undefined,
-  rate: number,
+  series: Array<number | null> | undefined,
+  fallback: number,
 ): Array<number | null> | undefined {
-  return col?.map((v) => (v === null || v === undefined ? null : round4(v * rate)));
+  if (!col) return undefined;
+  let last = fallback;
+  return col.map((v, k) => {
+    const r = series?.[k];
+    if (typeof r === "number" && Number.isFinite(r) && r > 0) last = r;
+    return v === null || v === undefined ? null : round4(v * last);
+  });
 }
 
 /**
@@ -125,9 +188,11 @@ function scaleColumn(
  * 折完之后 `price × shares === amount`、费用按 amount 算、跨标的求和的权益曲线
  * 这几条不变式一条都不用改，与历史推演走 `convertShardToCny` 是同一个道理。
  *
- * 与推演的区别：推演分片带**逐日**汇率序列，快照只带生成当天那**一个**价。
- * 所以这里整条序列用同一个汇率 —— 对「拿最近几天算涨跌幅」反而更干净
- * （涨幅里不会混进汇率波动），代价是更早的历史不是当日汇率口径。
+ * 汇率有两个来源，`series` 优先：`meta.<市场>.fxSeries` 是**逐日**序列，
+ * 而 `meta.<市场>.fx` 是生成当天那**一个**价。只给了标量时整条序列用同一个汇率 ——
+ * 对「拿最近几天算涨跌幅」反而更干净（涨幅里不会混进汇率波动），
+ * 代价是更早的历史不是当日汇率口径；而历史推演恰恰要的就是当日口径，
+ * 所以 `App.tsx` 两个都传，实时盘只用到最后一天、两种口径在那一格上是一致的。
  *
  * ⚠️ **非幂等**：`currency` 字段保持原样（界面要标"原以港币计价"），
  * 所以调两次会折两次。只在**加载快照时调一次**。
@@ -135,7 +200,11 @@ function scaleColumn(
  * 换不到汇率的标的**原样留着不动**（不猜、也不按 1:1 顶），
  * 由调用方通过 `currency` 与 `fxRatesOfMeta` 自己判断要不要拦。
  */
-export function convertSnapshotToCny(snapshot: Snapshot, rates: FxRates): Snapshot {
+export function convertSnapshotToCny(
+  snapshot: Snapshot,
+  rates: FxRates,
+  series?: SnapshotFxSeries,
+): Snapshot {
   if (!rates || Object.keys(rates).length === 0) return snapshot;
 
   const conv = <T extends SeriesData>(s: T): T => {
@@ -143,12 +212,19 @@ export function convertSnapshotToCny(snapshot: Snapshot, rates: FxRates): Snapsh
     if (cur === "CNY") return s;
     const rate = rates[cur];
     if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return s;
+    /*
+     * 逐日序列只在长度与这一列**对得上**时采用。价格列老分片可能缺 open，
+     * 但 close 一定在，所以拿 close 当长度的基准。对不上就退回标量 ——
+     * 错位的序列不会报错，只会把 4 月的汇率安到 9 月的价格上。
+     */
+    const daily = series?.[cur];
+    const usable = daily && daily.length === s.close.length ? daily : undefined;
     return {
       ...s,
-      open: scaleColumn(s.open, rate),
-      close: scaleColumn(s.close, rate),
-      high: scaleColumn(s.high, rate),
-      low: scaleColumn(s.low, rate),
+      open: scaleColumn(s.open, usable, rate),
+      close: scaleColumn(s.close, usable, rate),
+      high: scaleColumn(s.high, usable, rate),
+      low: scaleColumn(s.low, usable, rate),
       // volume 不折：它是股数，跟币种无关
     };
   };

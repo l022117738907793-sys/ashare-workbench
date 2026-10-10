@@ -30,6 +30,7 @@ import {
   type Currency,
   type ConfigFx,
 } from "@aw/game";
+import { currencyOf, fxSeriesOfMeta } from "@aw/data";
 import type { Snapshot, StockData as CoreStock } from "@aw/core";
 
 export const LS_REPLAY = "aw.replay.v1";
@@ -120,7 +121,35 @@ export function toInstruments(stocks: CoreStock[]): ReplayInstrument[] {
     low: [...s.low],
     volume: [...s.volume],
     industry: s.industry,
+    /*
+     * 市场与原币种**必须带过去**。
+     *
+     * 价格列早就是人民币了（`convertSnapshotToCny` 在加载快照时折过），但引擎还要靠
+     * `market` 决定 T+1 还是 T+0、有没有涨跌停、按哪套费率收钱，靠 `currency` 去
+     * `config.fx` 里找当天汇率。两者缺了**都不会报错** —— 只会安静地「港股按 A 股规则成交」，
+     * 而且港股佣金下限是 100 **港币**，丢掉币种就变成「最低 100 元」，小单要多收约 15%。
+     */
+    market: s.market ?? marketGroupOf(s.code),
+    currency: s.currency ?? currencyOf(s.code),
   }));
+}
+
+/**
+ * 快照里的逐日汇率 → 引擎配置里的汇率。
+ *
+ * 引擎目前只用它做一件事：把港股的**最低佣金**（100 港币）按当天汇率折回人民币，
+ * 见 `@aw/game` 的 `rateAt`。它必须按天走 —— 拿一个固定汇率乘一百多天，越往前越不准。
+ *
+ * 长度与日历经对不上的序列会被 `fxSeriesOfMeta` 整条丢掉，那时这里返回 undefined：
+ * 引擎按「没有汇率」处理（最低佣金当人民币算），比喂一条错位的序列安全得多。
+ */
+function snapshotFx(snapshot: Snapshot, days: number): ConfigFx[] | undefined {
+  const series = snapshot.meta ? fxSeriesOfMeta(snapshot.meta, days) : {};
+  const out: ConfigFx[] = [];
+  for (const [currency, rate] of Object.entries(series) as Array<[Currency, Array<number | null>]>) {
+    out.push({ currency, rate });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 export interface StartOptions {
@@ -146,6 +175,7 @@ export function buildReplayConfig(
     initialCash: opts.initialCash,
     instruments: toInstruments(stocks),
     benchmarkClose: benchmarkSeries(snapshot),
+    fx: snapshotFx(snapshot, calendar.length),
     label: opts.label,
   };
 }
@@ -203,16 +233,17 @@ export function backtrackOptions(calendar: string[], days: number = BACKTRACK_DA
 }
 
 /**
- * 回溯模式参与推演的标的：**只放 A 股**。
+ * 回溯模式参与推演的标的：**快照里的全部股票**，含港股 / 日股 / 韩股。
  *
- * 境外标的在快照里的价格是各自的本币，而账户是人民币记账的 —— 要进引擎就必须先折成
- * 人民币（见 `convertShardToCny`）。传奇模式的分片带着**每日**汇率序列，折得了；
- * 快照里 `meta.hk.fx` 只有一个**标量**（最新那一次报价），拿它铺满一个月等于猜。
- * 港币和人民币差一成多，猜错的后果是玩家的成本凭空少掉那么多，而界面上不会有任何提示 ——
- * 这正是这个仓库一贯拒绝的那种静默偏差。所以宁可这一屏只做 A 股，也不折算着跑。
+ * 境外标的在快照里以本币计价，进引擎前必须先折成人民币 —— 这一步由
+ * `convertSnapshotToCny` 在**加载快照时**做一次，用的是 `meta.<市场>.fxSeries`
+ * 那条**逐日**序列，所以每一格都是「那一天的汇率」，而不是拿最后一天的价铺满整段历史。
+ *
+ * 这里早先只放 A 股，因为快照当时只有生成当日的一个标量汇率，拿它铺满一个月等于猜。
+ * 逐日序列补上之后那条理由就不成立了（见 git 历史里的 commit 说明）。
  */
 export function backtrackStocks(snapshot: Snapshot): CoreStock[] {
-  return snapshot.stocks.filter((s) => marketGroupOf(s.code) === "CN");
+  return snapshot.stocks;
 }
 
 /** 把进度的「参数部分」与「状态部分」一起存下来 */export function toSave(

@@ -16,6 +16,7 @@ import {
   applyLivePrices,
   convertSnapshotToCny,
   fxRatesOfMeta,
+  fxSeriesOfMeta,
   type SnapshotBundle,
 } from "./snapshot";
 import type { Quote, QuoteProvider } from "./types";
@@ -493,6 +494,41 @@ describe("港股进快照（日历 / 汇率）", () => {
     const snap = bundle({ lastDate: "2026-09-30" }).snapshot;
     const out = convertSnapshotToCny(snap, { USD: 7.1 });
     expect(out.stocks[1].close).toEqual([100, 200, 428.2]);
+  });
+
+  it("给了逐日汇率就按天折，不再拿一个价乘到底", () => {
+    // 这一条是「历史推演里的境外标的」的地基：实时盘只看最后一天，
+    // 看不出标量与逐日的差别；推演要从几个月前走到今天，差别就是每格的汇率。
+    const snap = bundle({ lastDate: "2026-09-30" }).snapshot;
+    const out = convertSnapshotToCny(snap, { HKD: 0.9 }, { HKD: [0.5, 0.8, 0.9] });
+    expect(out.stocks[1].close).toEqual([50, 160, 385.38]);
+    expect(out.stocks[0].close).toEqual([10, 20, 30]);
+  });
+
+  it("序列里没有报价的那天沿用上一个已知汇率（不是插值、也不是补 1）", () => {
+    const snap = bundle({ lastDate: "2026-09-30" }).snapshot;
+    const out = convertSnapshotToCny(snap, { HKD: 0.9 }, { HKD: [0.5, null, 0.9] });
+    expect(out.stocks[1].close).toEqual([50, 100, 385.38]);
+  });
+
+  it("序列长度与价格列对不上就退回标量（错位的汇率比没有更糟）", () => {
+    const snap = bundle({ lastDate: "2026-09-30" }).snapshot;
+    const out = convertSnapshotToCny(snap, { HKD: 0.9 }, { HKD: [0.5] });
+    expect(out.stocks[1].close).toEqual([90, 180, 385.38]);
+  });
+
+  it("fxSeriesOfMeta 读 meta.<市场>.fxSeries.rate，长度对不上整条丢掉", () => {
+    const meta = { hk: { fxSeries: { rate: [0.5, 0.8, 0.9] } } };
+    expect(fxSeriesOfMeta(meta, 3)).toEqual({ HKD: [0.5, 0.8, 0.9] });
+    // 长度不符 → 丢掉。错位的序列不会报错，只会把 4 月的汇率安到 9 月的价格上
+    expect(fxSeriesOfMeta(meta, 4)).toEqual({});
+    // 不传 days 表示不检查长度（调用方拿不到日历时的退路）
+    expect(fxSeriesOfMeta({ hk: { fxSeries: { rate: [0.5] } } })).toEqual({ HKD: [0.5] });
+    // 坏值变 null（折算时沿用上一个已知汇率），整条全坏才算没有
+    expect(fxSeriesOfMeta({ hk: { fxSeries: { rate: [0.5, "x", 0] } } }, 3)).toEqual({ HKD: [0.5, null, null] });
+    expect(fxSeriesOfMeta({ hk: { fxSeries: { rate: [null, 0] } } }, 2)).toEqual({});
+    expect(fxSeriesOfMeta({ hk: { fxSeries: { rate: [] } } })).toEqual({});
+    expect(fxSeriesOfMeta({})).toEqual({});
   });
 
   it("实时价按汇率折过再覆盖（431 港币 → 387.9 人民币，不是 ¥431）", () => {

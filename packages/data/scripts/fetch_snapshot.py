@@ -39,6 +39,11 @@ HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://gu.qq.com/"}
 DAYS = 130  # 默认多取 10 天以便对齐后裁剪到 120；可用 --days 覆盖
 MAX_DAYS = 650  # 腾讯日线接口实测上限 641 根，留一点余量
 
+# 汇率序列取多少**自然日**。默认日历是 120 个交易日，换算成自然日约 170 天；
+# 这里给到 260，多出来的余量用来兜住春节那种长假 —— 汇率是自然日报价，
+# 多取一段不影响正确性，只多几十行 JSON。
+FX_SERIES_DAYS = 260
+
 # 限流重试：原来 5 次、最长等 16 秒，CI 上实测 22.3% 的标的仍会耗尽重试。
 # 现在拉长到 8 次、最长等 48 秒，并且退避是全局的（见 note_throttle）。
 THROTTLE_ATTEMPTS = 8
@@ -567,12 +572,19 @@ def align(rows, calendar):
     return out
 
 
-def fetch_boc_fx(name_cn, pair, days=40):
+def fetch_boc_fx(name_cn, pair, days=FX_SERIES_DAYS):
     """
-    取最近一个交易日的中行折算价，返回 `{pair, date, rate}`；取不到返回 None。
+    取最近 `days` 天的中行折算价，返回 `{pair, code, name, dates, rate}`（按日期升序）；
+    取不到返回 None。
 
     `rate` 是「1 单位外币值多少人民币」，正是引擎要的口径
     （`@aw/game` 的 calcFee 拿它把港股最低佣金折回人民币）。
+
+    **为什么要一整条序列而不是只留最新那一个价。** 历史推演要按**当天**的汇率
+    把境外价格折成人民币：拿最新一天的价铺满一个月，等于说这一个月里汇率没动过，
+    而港币一个月动一两个点是常事。`data/fx-cache/<PAIR>.json` 里早就有长序列
+    （`fetch_overseas.py` 写的，2016 年起），但那是**关卡分片**用的，
+    快照这条流水线从来没读过它 —— 所以这里多取几天，自己留一份。
 
     两个坑（与 packages/data/scripts/fetch_overseas.py 里同源）：
     1. 接口收 `YYYYMMDD`，传带横杠的进去会被安静地切错、回一个空表，不报错。
@@ -596,7 +608,7 @@ def fetch_boc_fx(name_cn, pair, days=40):
     if rate_col is None or len(df) == 0:
         return None
 
-    best = None
+    by_date = {}
     for _, row in df.iterrows():
         try:
             f = float(row[rate_col]) / 100.0
@@ -605,11 +617,43 @@ def fetch_boc_fx(name_cn, pair, days=40):
         if f != f or f <= 0:  # NaN 或非法值
             continue
         d = str(row[df.columns[0]])[:10]
-        if best is None or d > best[0]:
-            best = (d, f)
-    if best is None:
+        # 接口偶尔对同一天回多行（早晚两次报价），留最后一行即可
+        by_date[d] = round(f, 6)
+    if not by_date:
         return None
-    return {"pair": pair, "date": best[0], "rate": best[1]}
+    dates = sorted(by_date)
+    return {
+        "pair": pair,
+        "code": pair,
+        "name": f"{name_cn}兑人民币",
+        "dates": dates,
+        "rate": [by_date[d] for d in dates],
+    }
+
+
+def fx_latest(series):
+    """序列里最新那一次报价，落成 `{pair, date, rate}`。取不到返回 None。"""
+    if not series or not series["dates"]:
+        return None
+    return {"pair": series["pair"], "date": series["dates"][-1], "rate": series["rate"][-1]}
+
+
+def align_fx(series, calendar):
+    """
+    把汇率序列对齐到快照日历，得到与 `calendar` **等长**的一列；没有报价的那天填 None。
+
+    为什么对齐而不是原样存 dates/rate：调用方（`@aw/data` 的 `fxSeriesOfMeta`）
+    要拿它和股票的价格列**按下标**一起走。让它自己去 join 日期，等于把
+    「中行哪天没报价」这条规则复制到第二个地方 —— 而折算函数里已经有一条
+    「缺的那天沿用上一个已知汇率」（见 `cnyColumn` / `convertSnapshotToCny`）。
+    """
+    if not series:
+        return None
+    by_date = dict(zip(series["dates"], series["rate"]))
+    aligned = [by_date.get(d) for d in calendar]
+    if all(v is None for v in aligned):
+        return None
+    return {"pair": series["pair"], "code": series["code"], "name": series["name"], "rate": aligned}
 
 
 def main():
@@ -921,7 +965,8 @@ def main():
         if not got:
             warn(f"{label}折算价取到空表，相关标的将无法折算成人民币")
             return None
-        print(f"    {label}折算价 {got['date']}：{got['rate']}")
+        latest = fx_latest(got)
+        print(f"    {label}折算价 {latest['date']}：{latest['rate']}（序列 {len(got['dates'])} 天）")
         return got
 
     # 中行的币种名是**「韩国元」不是「韩元」**：传「韩元」会 `KeyError: '韩元'`，
@@ -1014,7 +1059,11 @@ def main():
             # rate 是「1 港币值多少人民币」，引擎用它把港股折成人民币记账。
             # 注意这是快照生成当天的价，盘中用它折算会有一点点滞后——港股价格本身
             # 在盘中也会变，两者都是当日口径，够用。
-            "fx": hk_fx,
+            "fx": fx_latest(hk_fx),
+            # 逐日汇率，与 calendar 等长（没有报价的那天是 null）。
+            # `fx` 那个标量是「最新的一个价」，实时盘用它；历史推演必须用这一条，
+            # 否则等于假设这一百多天里汇率没动过。
+            "fxSeries": align_fx(hk_fx, calendar),
         },
         # 日韩照 hk 的形状放 meta：顶层文件是按 A 股的四层漏斗设计的，多塞字段
         # 不用改加载器（meta 本来就是自由结构）。
@@ -1024,14 +1073,16 @@ def main():
             "universeNote": f"固定 {len(JP_UNIVERSE)} 只，日经 225 里成交活跃的大盘股",
             "count": len(jp_stocks),
             # rate 是「1 日元值多少人民币」（中行折算价 ÷ 100）
-            "fx": jp_fx,
+            "fx": fx_latest(jp_fx),
+            "fxSeries": align_fx(jp_fx, calendar),
         },
         "kr": {
             "calendar": kr_calendar,
             "calendarNote": "以三星电子、SK海力士等锚点个股在 Naver 有日线的日期并集为准",
             "universeNote": f"固定 {len(KR_UNIVERSE)} 只，KOSPI 权重股",
             "count": len(kr_stocks),
-            "fx": kr_fx,
+            "fx": fx_latest(kr_fx),
+            "fxSeries": align_fx(kr_fx, calendar),
         },
     }
     for name, obj in [
